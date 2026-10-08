@@ -1,0 +1,952 @@
+/* Full-site color, depth and motion layer */
+:root {
+    --mm-ink: #12283d;
+    --mm-muted: #617587;
+    --mm-line: #dbe5ed;
+    --mm-surface: #fff;
+    --mm-canvas: #eef4f8;
+    --mm-navy: #112a41;
+    --mm-navy-deep: #0b1e30;
+    --mm-accent: #0ba995;
+    --mm-accent-dark: #087e78;
+    --mm-flare: #f28a45;
+    --mm-focus: #087fca;
+    --mm-radius: 16px;
+    --mm-shadow: 0 14px 36px rgba(20, 48, 70, .09);
+}
+
+body:not(.login-page) {
+    background:
+        radial-gradient(ellipse at 94% 2%, rgba(35, 197, 180, .13), transparent 28rem),
+        radial-gradient(ellipse at 4% 34%, rgba(242, 138, 69, .08), transparent 25rem),
+        #eef4f8;
+    color: var(--mm-ink);
+}
+body:not(.login-page) header {
+    position: relative;
+    background: linear-gradient(112deg, #0b1e30 0%, #14354b 62%, #0d514f 120%);
+    border-bottom: 3px solid #0ba995;
+    box-shadow: 0 10px 28px rgba(11, 30, 48, .2);
+}
+body:not(.login-page) header::after {
+    position: absolute;
+    right: 0;
+    bottom: -3px;
+    width: min(28vw, 310px);
+    height: 3px;
+    background: linear-gradient(90deg, #f28a45, #ffbc69);
+    content: "";
+}
+body:not(.login-page) main,
+body:not(.login-page) .container,
+body:not(.login-page) .shell,
+body:not(.login-page) .drawings-main {
+    animation: mm-page-in .55s cubic-bezier(.2,.75,.25,1) both;
+}
+@keyframes mm-page-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+body:not(.login-page) .card,
+body:not(.login-page) .panel,
+body:not(.login-page) .category-card,
+body:not(.login-page) .dr-record,
+body:not(.login-page) .ev,
+body:not(.login-page) .materials-panel,
+body:not(.login-page) .drawings-toolbar,
+body:not(.login-page) .investment-summary {
+    border-color: #dce6ec;
+    border-radius: 15px;
+    box-shadow: 0 3px 9px rgba(20,48,70,.035), 0 14px 32px rgba(20,48,70,.055);
+    transition: transform .22s cubic-bezier(.2,.75,.25,1), box-shadow .22s ease, border-color .22s ease;
+}
+body:not(.login-page) .category-card:hover,
+body:not(.login-page) .panel:hover,
+body:not(.login-page) .ev:hover {
+    transform: translateY(-2px);
+    border-color: #b9dcd8;
+    box-shadow: 0 8px 18px rgba(20,48,70,.06), 0 18px 38px rgba(20,48,70,.075);
+}
+body:not(.login-page) .card:nth-child(6n + 1) { animation-delay: .035s; }
+body:not(.login-page) .card:nth-child(6n + 2) { animation-delay: .07s; }
+body:not(.login-page) .card:nth-child(6n + 3) { animation-delay: .105s; }
+body:not(.login-page) .cards-grid > .card { animation: mm-card-in .48s cubic-bezier(.2,.75,.25,1) both; }
+@keyframes mm-card-in {
+    from { opacity: 0; transform: translateY(14px) scale(.985); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+body:not(.login-page) button,
+body:not(.login-page) .drawings-nav-button,
+body:not(.login-page) .drawings-primary,
+body:not(.login-page) .drawings-action:not(.danger),
+body:not(.login-page) .card-button,
+body:not(.login-page) .dashboard-login {
+    transition: transform .18s ease, box-shadow .18s ease, background-color .18s ease, filter .18s ease, color .18s ease;
+}
+body:not(.login-page) button:hover,
+body:not(.login-page) .drawings-nav-button:hover,
+body:not(.login-page) .drawings-primary:hover,
+body:not(.login-page) .drawings-action:not(.danger):hover {
+    filter: brightness(1.07) saturate(1.08);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 18px rgba(11, 121, 128, .2);
+}
+body:not(.login-page) button:active { transform: translateY(0) scale(.985); }
+body:not(.login-page) input,
+body:not(.login-page) select,
+body:not(.login-page) textarea {
+    border-color: #c8d7e1;
+    border-radius: 10px;
+    background-color: rgba(255,255,255,.96);
+    box-shadow: 0 1px 2px rgba(17,42,65,.025);
+}
+body:not(.login-page) input:focus,
+body:not(.login-page) select:focus,
+body:not(.login-page) textarea:focus {
+    border-color: #12a99b;
+    outline: 3px solid rgba(18,169,155,.16);
+    box-shadow: 0 0 0 1px rgba(18,169,155,.12), 0 5px 14px rgba(18,169,155,.08);
+}
+body:not(.login-page) .materials-tabs,
+body:not(.login-page) .materials-subtabs { border-color: #d7e1e7; }
+body:not(.login-page) .materials-tab.active,
+body:not(.login-page) .materials-subtab.active {
+    border-bottom-color: #0ba995;
+    color: #087e78;
+}
+body:not(.login-page) .materials-tab:hover { color: #087e78; background: rgba(11,169,149,.075); }
+body:not(.login-page) .investment-summary {
+    border-color: #c4e6e1;
+    border-left-color: #0ba995;
+    background: linear-gradient(115deg, #e9f8f5, #fff 70%);
+}
+body:not(.login-page) .investment-total strong { color: #087e78; }
+body:not(.login-page) .drawings-status,
+body:not(.login-page) .dr-selected-date { color: #547083; }
+body:not(.login-page) .dr-date-navigation,
+body:not(.login-page) .materials-toolbar,
+body:not(.login-page) .material-transaction-form {
+    border-color: #dce6ec;
+    border-radius: 14px;
+    box-shadow: 0 6px 20px rgba(20,48,70,.045);
+}
+body:not(.login-page) .nav-link:focus-visible,
+body:not(.login-page) a:focus-visible,
+body:not(.login-page) button:focus-visible {
+    outline: 3px solid rgba(12, 160, 169, .48);
+    outline-offset: 3px;
+}
+body.login-page {
+    background:
+        radial-gradient(ellipse at 18% 10%, rgba(18, 169, 155, .4), transparent 32rem),
+        radial-gradient(ellipse at 88% 84%, rgba(242, 138, 69, .2), transparent 28rem),
+        linear-gradient(135deg, #071a2b, #123951 58%, #112837);
+    background-size: 140% 140%;
+    animation: mm-bg-shift 15s ease-in-out infinite alternate;
+}
+@keyframes mm-bg-shift { to { background-position: 100% 100%; } }
+.login-shell { animation: mm-card-in .65s cubic-bezier(.2,.75,.25,1) both; }
+.login-card { backdrop-filter: blur(14px); }
+.login-page button { box-shadow: 0 8px 20px rgba(3, 148, 175, .2); transition: transform .18s ease, filter .18s ease, box-shadow .18s ease; }
+.login-page button:hover { filter: brightness(1.1); transform: translateY(-2px); box-shadow: 0 12px 24px rgba(3, 148, 175, .3); }
+
+/* Final brand layer comes after the motion effects on every module page. */
+:root {
+    --mm-ink: #24272b;
+    --mm-muted: #697078;
+    --mm-line: #e2e3e5;
+    --mm-canvas: #f7f7f7;
+    --mm-accent: #e31837;
+    --mm-accent-dark: #b8122c;
+    --mm-focus: #e31837;
+    --mm-radius: 7px;
+}
+body:not(.login-page) {
+    background: #f7f7f7;
+    color: #24272b;
+    font-family: Arial, "Segoe UI", sans-serif;
+}
+body:not(.login-page) header {
+    background: #fff;
+    color: #24272b;
+    border-bottom: 1px solid #e8e8e8;
+    box-shadow: 0 2px 8px rgba(0,0,0,.035);
+}
+body:not(.login-page) header::after {
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 3px;
+    background: #e31837;
+}
+body:not(.login-page) header h1,
+body:not(.login-page) header h2,
+body:not(.login-page) header h3,
+body:not(.login-page) header .brand { color: #24272b; }
+body:not(.login-page) header p,
+body:not(.login-page) header .sub,
+body:not(.login-page) header .subtitle { color: #73777d; }
+body:not(.login-page) header .nav-link { color: #36393d; }
+body:not(.login-page) header .nav-link:hover { color: #e31837; background: #fff1f3; }
+body:not(.login-page) .card,
+body:not(.login-page) .panel,
+body:not(.login-page) .category-card,
+body:not(.login-page) .dr-record,
+body:not(.login-page) .ev,
+body:not(.login-page) .materials-panel,
+body:not(.login-page) .drawings-toolbar,
+body:not(.login-page) .investment-summary {
+    border-color: #e1e2e4;
+    border-radius: 7px;
+    box-shadow: 0 3px 12px rgba(25,28,32,.045);
+}
+body:not(.login-page) .category-card:hover,
+body:not(.login-page) .panel:hover,
+body:not(.login-page) .ev:hover { border-color: #efb5bf; }
+body:not(.login-page) .primary,
+body:not(.login-page) .primary-button,
+body:not(.login-page) .save,
+body:not(.login-page) .card-button,
+body:not(.login-page) .drawings-primary,
+body:not(.login-page) .drawings-action:not(.danger),
+body:not(.login-page) button:not(.secondary):not(.danger):not(.delete-btn):not(.edit-btn) { background-color: #e31837; border-color: #e31837; }
+body:not(.login-page) .materials-tab.active,
+body:not(.login-page) .materials-subtab.active { border-bottom-color: #e31837; color: #bf142e; }
+body:not(.login-page) .materials-tab:hover,
+body:not(.login-page) .investment-total strong { color: #bf142e; }
+body:not(.login-page) .investment-summary { border-color: #f0c6cc; border-left-color: #e31837; background: #fff8f8; }
+body:not(.login-page) input:focus,
+body:not(.login-page) select:focus,
+body:not(.login-page) textarea:focus { border-color: #e31837; }
+body:not(.login-page) .nav-link:focus-visible,
+body:not(.login-page) a:focus-visible,
+body:not(.login-page) button:focus-visible { outline-color: rgba(227,24,55,.28); }
+body.login-page {
+    background: radial-gradient(ellipse at 85% 0%, rgba(227,24,55,.16), transparent 30rem), linear-gradient(135deg,#222428,#37393e);
+    animation: none;
+}
+.login-page button { background: #e31837; box-shadow: 0 7px 18px rgba(227,24,55,.2); }
+.login-page button:hover { box-shadow: 0 10px 22px rgba(227,24,55,.28); }
+
+/* Dark emerald glass system inspired by the supplied agency reference. */
+:root {
+    color-scheme: dark;
+    --mm-ink: #eff8f3;
+    --mm-muted: #a4b7ad;
+    --mm-line: rgba(123, 224, 182, .17);
+    --mm-surface: rgba(13, 26, 20, .86);
+    --mm-canvas: #050907;
+    --mm-navy: #050907;
+    --mm-navy-deep: #030605;
+    --mm-accent: #57d6ae;
+    --mm-accent-dark: #35b88e;
+    --mm-focus: #61e5bb;
+    --mm-radius: 12px;
+    --mm-shadow: 0 18px 50px rgba(0,0,0,.28);
+}
+html { color-scheme: dark; }
+body:not(.login-page) {
+    color: #ecf7f1;
+    background:
+        radial-gradient(ellipse at 50% 0%, rgba(25,110,73,.2), transparent 35rem),
+        radial-gradient(ellipse at 100% 65%, rgba(29,135,105,.08), transparent 24rem),
+        #050907;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+body:not(.login-page) header {
+    color: #f1fbf6;
+    background: rgba(3, 7, 5, .96);
+    border-bottom: 1px solid rgba(118,224,183,.16);
+    box-shadow: 0 8px 24px rgba(0,0,0,.25);
+}
+body:not(.login-page) header::after {
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #36c997 35%, #73e5c1 65%, transparent);
+    opacity: .8;
+}
+body:not(.login-page) header h1,
+body:not(.login-page) header h2,
+body:not(.login-page) header h3,
+body:not(.login-page) header .brand { color: #f2fbf6; }
+body:not(.login-page) header p,
+body:not(.login-page) header .sub,
+body:not(.login-page) header .subtitle { color: #9db4a8; }
+body:not(.login-page) header .nav-link { color: #d3e4da; }
+body:not(.login-page) header .nav-link:hover { color: #70e3bd; background: rgba(77,205,157,.1); }
+body:not(.login-page) h1,
+body:not(.login-page) h2,
+body:not(.login-page) h3,
+body:not(.login-page) h4 { color: #eff8f3; }
+body:not(.login-page) p,
+body:not(.login-page) small,
+body:not(.login-page) .muted { color: #a4b7ad; }
+body:not(.login-page) .card,
+body:not(.login-page) .panel,
+body:not(.login-page) .category-card,
+body:not(.login-page) .drawings-panel,
+body:not(.login-page) .materials-panel,
+body:not(.login-page) .dr-record,
+body:not(.login-page) .dr-card,
+body:not(.login-page) .ev,
+body:not(.login-page) .drawings-toolbar,
+body:not(.login-page) .materials-toolbar,
+body:not(.login-page) .dr-date-navigation,
+body:not(.login-page) .material-transaction-form,
+body:not(.login-page) .investment-summary,
+body:not(.login-page) .modalbox,
+body:not(.login-page) .confirmbox {
+    color: #eaf5ef;
+    border-color: rgba(123,224,182,.17);
+    border-radius: 11px;
+    background: linear-gradient(145deg, rgba(18,34,26,.9), rgba(8,16,12,.92));
+    box-shadow: 0 16px 38px rgba(0,0,0,.22), inset 0 1px 0 rgba(214,255,233,.035);
+    backdrop-filter: blur(14px);
+}
+body:not(.login-page) .category-card:hover,
+body:not(.login-page) .panel:hover,
+body:not(.login-page) .ev:hover {
+    border-color: rgba(99,226,179,.38);
+    box-shadow: 0 18px 44px rgba(0,0,0,.3), 0 0 22px rgba(51,190,137,.07);
+}
+body:not(.login-page) button,
+body:not(.login-page) .primary,
+body:not(.login-page) .primary-button,
+body:not(.login-page) .save,
+body:not(.login-page) .card-button,
+body:not(.login-page) .drawings-primary,
+body:not(.login-page) .drawings-action:not(.danger),
+body:not(.login-page) button:not(.secondary):not(.danger):not(.delete-btn):not(.edit-btn) {
+    border-color: #5dddb4;
+    color: #06140e;
+    background: linear-gradient(135deg, #72e5c2, #38c99b);
+    box-shadow: 0 5px 18px rgba(54,201,151,.14);
+}
+body:not(.login-page) button:hover,
+body:not(.login-page) .drawings-primary:hover,
+body:not(.login-page) .card-button:hover { filter: brightness(1.08); }
+body:not(.login-page) .secondary,
+body:not(.login-page) .edit-btn {
+    border: 1px solid rgba(150,188,167,.2);
+    color: #d9e9df;
+    background: rgba(255,255,255,.055);
+}
+body:not(.login-page) .danger,
+body:not(.login-page) .delete-btn { color: #fff; background: #a83643; }
+body:not(.login-page) input,
+body:not(.login-page) select,
+body:not(.login-page) textarea {
+    color: #eef8f2;
+    border-color: rgba(144,184,159,.23);
+    background: rgba(3,10,6,.72);
+}
+body:not(.login-page) input::placeholder,
+body:not(.login-page) textarea::placeholder { color: #7f9688; }
+body:not(.login-page) select option { color: #eef8f2; background: #101b15; }
+body:not(.login-page) input:focus,
+body:not(.login-page) select:focus,
+body:not(.login-page) textarea:focus {
+    border-color: #5dddb4;
+    outline: 3px solid rgba(93,221,180,.13);
+}
+body:not(.login-page) table { color: #e6f1ea; border-color: rgba(123,224,182,.16); }
+body:not(.login-page) th { color: #82d9b6; background: rgba(67,151,112,.11); }
+body:not(.login-page) td, body:not(.login-page) th { border-color: rgba(123,224,182,.13); }
+body:not(.login-page) tbody tr:hover { background: rgba(71,176,128,.09); }
+body:not(.login-page) .tag,
+body:not(.login-page) .badge,
+body:not(.login-page) .materials-tab.active,
+body:not(.login-page) .materials-subtab.active {
+    color: #7be6be;
+    border-color: rgba(95,218,170,.25);
+    background: rgba(75,186,135,.12);
+}
+body:not(.login-page) .materials-tab,
+body:not(.login-page) .materials-subtab { color: #aec2b5; }
+body:not(.login-page) .investment-summary { border-left-color: #50d4a8; }
+body:not(.login-page) .investment-total strong,
+body:not(.login-page) .drawings-status,
+body:not(.login-page) .dr-selected-date { color: #77e2bb; }
+body:not(.login-page) .nav-link:focus-visible,
+body:not(.login-page) a:focus-visible,
+body:not(.login-page) button:focus-visible { outline-color: rgba(93,221,180,.55); }
+body.login-page {
+    color-scheme: dark;
+    background: radial-gradient(ellipse at 50% 0%, rgba(28,114,75,.34), transparent 35rem), #040806;
+}
+.login-shell {
+    border-color: rgba(123,224,182,.2);
+    border-radius: 14px;
+    background: rgba(7,15,10,.9);
+    box-shadow: 0 28px 80px rgba(0,0,0,.5);
+}
+.login-card { border-color: rgba(123,224,182,.13); background: rgba(14,25,18,.88); }
+.login-page button { color: #06140e; background: linear-gradient(135deg,#72e5c2,#38c99b); }
+.login-page button:hover { filter: brightness(1.08); }
+body:not(.login-page) .drawings-modal-panel,
+body:not(.login-page) .dr-calendar,
+body:not(.login-page) .dr-empty-day,
+body:not(.login-page) .stats > div,
+body:not(.login-page) .workforce-total-box,
+body:not(.login-page) .workforce-card,
+body:not(.login-page) .previewBox,
+body:not(.login-page) .modalbox,
+body:not(.login-page) .confirmbox {
+    color: #eaf5ef;
+    border-color: rgba(123,224,182,.17);
+    background: linear-gradient(145deg, rgba(18,34,26,.94), rgba(8,16,12,.96));
+}
+body:not(.login-page) .drawing-row,
+body:not(.login-page) .drawing-table-head,
+body:not(.login-page) .dr-calendar-header,
+body:not(.login-page) .dr-calendar-weekdays,
+body:not(.login-page) .dr-calendar-day,
+body:not(.login-page) .dr-empty-day,
+body:not(.login-page) .ev,
+body:not(.login-page) .stats > div {
+    color: #eaf5ef;
+    border-color: rgba(123,224,182,.13);
+    background-color: rgba(255,255,255,.025);
+}
+body:not(.login-page) .drawing-meta,
+body:not(.login-page) .drawing-description,
+body:not(.login-page) .drawing-updated,
+body:not(.login-page) .drawings-search,
+body:not(.login-page) .drawings-filter,
+body:not(.login-page) .category-count,
+body:not(.login-page) .category-empty,
+body:not(.login-page) .drawings-empty,
+body:not(.login-page) .dr-date,
+body:not(.login-page) .dr-author-details,
+body:not(.login-page) .dr-selected-date,
+body:not(.login-page) .dr-calendar-control,
+body:not(.login-page) .dr-calendar-weekdays,
+body:not(.login-page) .dr-calendar-empty,
+body:not(.login-page) .dr-day-actions,
+body:not(.login-page) .workforce-total-label,
+body:not(.login-page) .workforce-card div,
+body:not(.login-page) .drawing-form label { color: #a4b7ad; }
+body:not(.login-page) .dr-calendar-day.is-selected,
+body:not(.login-page) .dr-calendar-day.is-today,
+body:not(.login-page) .dr-date-button,
+body:not(.login-page) .dr-calendar-month-button {
+    color: #072016;
+    border-color: #63dcb3;
+    background: #63dcb3;
+}
+body:not(.login-page) .drawings-icon-button,
+body:not(.login-page) .dr-secondary,
+body:not(.login-page) .dr-calendar-control {
+    color: #d8e9df;
+    background: rgba(255,255,255,.055);
+}
+body:not(.login-page) .tag,
+body:not(.login-page) .badge { color: #7be6be; background: rgba(75,186,135,.12); }
+/* More readable type and calendar layering across the shared pages. */
+body:not(.login-page) { font-size: 16px; }
+body:not(.login-page) p,
+body:not(.login-page) li,
+body:not(.login-page) td,
+body:not(.login-page) label,
+body:not(.login-page) .muted { font-size: 15px; }
+body:not(.login-page) button,
+body:not(.login-page) input,
+body:not(.login-page) select,
+body:not(.login-page) textarea { font-size: 15px; }
+body:not(.login-page) small,
+body:not(.login-page) th { font-size: 13px; }
+body:not(.login-page) header .brand { font-size: 22px; }
+body:not(.login-page) header .sub,
+body:not(.login-page) .dr-selected-date span,
+body:not(.login-page) .dr-date,
+body:not(.login-page) .dr-tag,
+body:not(.login-page) .category-count,
+body:not(.login-page) .drawing-meta,
+body:not(.login-page) .drawing-updated { font-size: 14px; }
+body:not(.login-page) .stats span { font-size: 13px; }
+body:not(.login-page) .stats b { font-size: 24px; }
+body:not(.login-page) .dr-selected-date strong { font-size: 16px; }
+.dr-date-navigation {
+    position: relative;
+    z-index: 20;
+    overflow: visible;
+}
+.dr-calendar-control { position: relative; z-index: 30; }
+.dr-calendar {
+    z-index: 50;
+    width: 330px;
+    padding: 14px;
+}
+#dr-records { position: relative; z-index: 1; }
+.dr-calendar-header strong { font-size: 17px; }
+.dr-calendar-weekdays { font-size: 13px; }
+.dr-calendar-day { font-size: 15px; }
+.dr-date-button,
+.dr-day-actions button { min-height: 46px; }
+.dr-icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
+.dr-icon { display: block; flex: 0 0 19px; width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.dr-calendar-month-button .dr-icon { width: 18px; height: 18px; }
+
+/* Prevent legacy light surfaces from washing out text in the dark theme. */
+body:not(.login-page) .trade-card,
+body:not(.login-page) .contract-section,
+body:not(.login-page) .summary-box,
+body:not(.login-page) .common-fields,
+body:not(.login-page) .lump-sum-agreement-card,
+body:not(.login-page) .payment-section,
+body:not(.login-page) .dr-ev,
+body:not(.login-page) .dr-modalbox,
+body:not(.login-page) .materials-toolbar,
+body:not(.login-page) .material-transaction-form,
+body:not(.login-page) .materials-dialog,
+body:not(.login-page) .material-association-box,
+body:not(.login-page) .investment-category-total,
+body:not(.login-page) .ledger-modal-panel,
+body:not(.login-page) .ledger-toolbar,
+body:not(.login-page) .ledger-modal-meta div,
+body:not(.login-page) .ledger-modal-financials span,
+body:not(.login-page) .preview-meta div,
+body:not(.login-page) .ledger-modal-empty,
+body:not(.login-page) .help-topic,
+body:not(.login-page) .help-warning,
+body:not(.login-page) .restore-preview,
+body:not(.login-page) .empty-state,
+body:not(.login-page) .error-state,
+body:not(.login-page) .dr-empty-day {
+    color: #edf8f2;
+    border-color: rgba(123,224,182,.17);
+    background: linear-gradient(145deg, rgba(18,34,26,.94), rgba(8,16,12,.96));
+}
+body:not(.login-page) .trade-title,
+body:not(.login-page) .contract-section h2,
+body:not(.login-page) .contract-section h3,
+body:not(.login-page) .payment-section h2,
+body:not(.login-page) .summary-value,
+body:not(.login-page) .contract-table td,
+body:not(.login-page) .contract-total td,
+body:not(.login-page) .lump-sum-agreement-card h4,
+body:not(.login-page) .lump-sum-agreement-details,
+body:not(.login-page) .summary-label,
+body:not(.login-page) .progress-header,
+body:not(.login-page) .progress-note,
+body:not(.login-page) .category-list li,
+body:not(.login-page) .transaction-row,
+body:not(.login-page) .stock-summary,
+body:not(.login-page) .material-summary,
+body:not(.login-page) .material-item-description,
+body:not(.login-page) .materials-toolbar label,
+body:not(.login-page) .material-transaction-form label,
+body:not(.login-page) .materials-dialog label,
+body:not(.login-page) .materials-dialog legend,
+body:not(.login-page) .help-topic ol,
+body:not(.login-page) .help-topic ul,
+body:not(.login-page) .preview-meta strong,
+body:not(.login-page) .drawing-row,
+body:not(.login-page) .dr-evtitle { color: #eaf6ef; }
+body:not(.login-page) .contract-subtitle,
+body:not(.login-page) .summary-label,
+body:not(.login-page) .lump-sum-agreement-card p,
+body:not(.login-page) .progress-note,
+body:not(.login-page) .investment-total span,
+body:not(.login-page) .investment-category-total span,
+body:not(.login-page) .transaction-row small,
+body:not(.login-page) .stock-summary strong,
+body:not(.login-page) .material-code,
+body:not(.login-page) .preview-meta strong,
+body:not(.login-page) .search-label,
+body:not(.login-page) .ledger-status { color: #a4b7ad; }
+body:not(.login-page) .contract-table th,
+body:not(.login-page) .ledger-modal-table th,
+body:not(.login-page) .drawing-table-head {
+    color: #83dfbb;
+    background: rgba(72,148,108,.14);
+}
+body:not(.login-page) .contract-table td,
+body:not(.login-page) .ledger-modal-table th,
+body:not(.login-page) .ledger-modal-table td { border-color: rgba(123,224,182,.14); }
+body:not(.login-page) .progress-bar { background: rgba(163,190,173,.18); }
+body:not(.login-page) #lumpSumAgreementSummary,
+body:not(.login-page) .snapshot-message:not(:empty),
+body:not(.login-page) .restore-progress:not(:empty) {
+    color: #aaf0ce;
+    border-color: rgba(93,221,180,.24);
+    background: rgba(42,129,88,.16);
+}
+body:not(.login-page) [id="financialTradeSelect"] {
+    color: #eef8f2 !important;
+    border-color: rgba(144,184,159,.3) !important;
+    background: #0b1710 !important;
+}
+body:not(.login-page) label[for="financialTradeSelect"] { color: #d8e9df !important; }
+body:not(.login-page) [style*="background:#fff"],
+body:not(.login-page) [style*="background: #fff"],
+body:not(.login-page) [style*="background:white"],
+body:not(.login-page) [style*="background: white"],
+body:not(.login-page) [style*="background:#ffffff"],
+body:not(.login-page) [style*="background: #ffffff"] {
+    color: #edf8f2 !important;
+    border-color: rgba(123,224,182,.17) !important;
+    background: linear-gradient(145deg, rgba(18,34,26,.94), rgba(8,16,12,.96)) !important;
+}
+body:not(.login-page) .dr-selected-date span,
+body:not(.login-page) .dr-selected-date strong {
+    color: #eff9f3 !important;
+    opacity: 1;
+}
+body:not(.login-page) .snapshot-section,
+body:not(.login-page) .snapshot-help-panel,
+body:not(.login-page) .snapshot-help-panel .help-topic,
+body:not(.login-page) .snapshot-section .restore-preview,
+body:not(.login-page) .snapshot-section .conflict-choice {
+    color: #edf8f2;
+    border-color: rgba(123,224,182,.17);
+    background: linear-gradient(145deg, rgba(18,34,26,.94), rgba(8,16,12,.96));
+}
+body:not(.login-page) .snapshot-section h1,
+body:not(.login-page) .snapshot-section h2,
+body:not(.login-page) .snapshot-section h3,
+body:not(.login-page) .snapshot-section p,
+body:not(.login-page) .snapshot-section label,
+body:not(.login-page) .snapshot-section th,
+body:not(.login-page) .snapshot-section td,
+body:not(.login-page) .snapshot-help-panel li,
+body:not(.login-page) .snapshot-help-panel code,
+body:not(.login-page) .snapshot-help-panel summary,
+body:not(.login-page) .snapshot-help-panel .help-note,
+body:not(.login-page) .snapshot-help-panel .conflict-note,
+body:not(.login-page) .snapshot-section .rollback-row { color: #dcebe2; }
+body:not(.login-page) .snapshot-section th {
+    color: #82dfba;
+    background: rgba(72,148,108,.14);
+}
+body:not(.login-page) .snapshot-section td,
+body:not(.login-page) .snapshot-section th,
+body:not(.login-page) .snapshot-help-panel .help-topic { border-color: rgba(123,224,182,.14); }
+body:not(.login-page) .snapshot-section .status-verified { color: #4dd49b; }
+body:not(.login-page) .snapshot-section .status-failed,
+body:not(.login-page) .snapshot-section .snapshot-message.error,
+body:not(.login-page) .snapshot-section .restore-progress.error { color: #ff9b9b; }
+body:not(.login-page) .snapshot-section .help-warning,
+body:not(.login-page) .snapshot-section .help-warning-neutral {
+    color: #f5d6a2;
+    border-color: rgba(236,191,112,.28);
+    background: rgba(134,91,29,.16);
+}
+body:not(.login-page) {
+    --cost-ink: #eff8f3;
+    --cost-muted: #a4b7ad;
+    --cost-line: rgba(123,224,182,.17);
+    --cost-paper: rgba(13,26,20,.9);
+    --cost-canvas: #050907;
+    --cost-blue: #63dcb3;
+    --cost-blue-soft: rgba(72,148,108,.14);
+    --cost-green: #4dd49b;
+    --cost-green-soft: rgba(42,129,88,.16);
+    --cost-orange: #f0b46d;
+    --cost-orange-soft: rgba(134,91,29,.16);
+}
+body:not(.login-page) .supplier-category-option,
+body:not(.login-page) .supplier-picker-option,
+body:not(.login-page) .materials-empty,
+body:not(.login-page) .material-supplier-list li,
+body:not(.login-page) .conflict-choice {
+    color: #dcebe2;
+    border-color: rgba(123,224,182,.15);
+    background: rgba(255,255,255,.035);
+}
+body:not(.login-page) .supplier-category-option.is-selected {
+    color: #8ae8c0;
+    border-color: rgba(93,221,180,.38);
+    background: rgba(42,129,88,.2);
+}
+body:not(.login-page) .material-detail strong,
+body:not(.login-page) .materials-no-suppliers { color: #a4b7ad; }
+body:not(.login-page) .material-detail { border-color: rgba(123,224,182,.14); }
+body:not(.login-page) .category-list li {
+    color: #dff7e9 !important;
+    border: 1px solid rgba(96,218,169,.2);
+    background: rgba(52,145,101,.14);
+}
+body:not(.login-page) .category-empty,
+body:not(.login-page) .drawings-empty {
+    color: #c3d8cc;
+    border-color: rgba(123,224,182,.24);
+    background: linear-gradient(145deg, rgba(18,34,26,.96), rgba(8,16,12,.98));
+}
+/* Keep legacy page-specific light cards consistent with the site-wide dark theme. */
+body:not(.login-page) .panel,
+body:not(.login-page) .staff-type-item,
+body:not(.login-page) .guide-panel,
+body:not(.login-page) .guide-toc,
+body:not(.login-page) .guide-note,
+body:not(.login-page) .drawings-toolbar,
+body:not(.login-page) .category-card,
+body:not(.login-page) .drawing-row,
+body:not(.login-page) .drawings-modal-panel,
+body:not(.login-page) .materials-toolbar,
+body:not(.login-page) .material-transaction-form,
+body:not(.login-page) .materials-dialog,
+body:not(.login-page) .material-association-box,
+body:not(.login-page) .investment-category-total,
+body:not(.login-page) .ledger-modal-panel,
+body:not(.login-page) .trade-card,
+body:not(.login-page) .empty-state,
+body:not(.login-page) .error-state,
+body:not(.login-page) .preview-meta div,
+body:not(.login-page) .workforce-total-box,
+body:not(.login-page) .workforce-card,
+body:not(.login-page) .modalbox,
+body:not(.login-page) .previewBox,
+body:not(.login-page) .restore-preview {
+    color: #dcebe2;
+    border-color: rgba(123,224,182,.18);
+    background: linear-gradient(145deg, rgba(18,34,26,.96), rgba(8,16,12,.98));
+}
+body:not(.login-page) .panel h1,
+body:not(.login-page) .panel h2,
+body:not(.login-page) .panel h3,
+body:not(.login-page) .panel p,
+body:not(.login-page) .staff-type-item,
+body:not(.login-page) .guide-panel,
+body:not(.login-page) .guide-toc,
+body:not(.login-page) .guide-note,
+body:not(.login-page) .category-card,
+body:not(.login-page) .drawing-row,
+body:not(.login-page) .material-association-box,
+body:not(.login-page) .investment-category-total,
+body:not(.login-page) .workforce-total-box,
+body:not(.login-page) .workforce-card,
+body:not(.login-page) .empty-state,
+body:not(.login-page) .error-state {
+    color: #dcebe2;
+}
+body:not(.login-page) .staff-type-item .staff-type-name,
+body:not(.login-page) .staff-type-item span { color: #dcebe2 !important; }
+body:not(.login-page) .status-pill.active { color: #06452a; background: #b9f4d1; }
+body:not(.login-page) .status-pill.inactive { color: #781f2b; background: #ffd7dc; }
+body:not(.login-page) .materials-toolbar label,
+body:not(.login-page) .material-transaction-form label,
+body:not(.login-page) .materials-dialog label,
+body:not(.login-page) .drawing-form label { color: #dcebe2 !important; }
+body:not(.login-page) .materials-toolbar input,
+body:not(.login-page) .materials-toolbar select,
+body:not(.login-page) .materials-dialog input,
+body:not(.login-page) .materials-dialog select,
+body:not(.login-page) .materials-dialog textarea,
+body:not(.login-page) .material-transaction-form input,
+body:not(.login-page) .material-transaction-form select,
+body:not(.login-page) .material-transaction-form textarea,
+body:not(.login-page) .drawings-search input,
+body:not(.login-page) .drawings-filter select,
+body:not(.login-page) .drawing-form input,
+body:not(.login-page) .drawing-form select,
+body:not(.login-page) .drawing-form textarea {
+    color: #edf8f2;
+    border-color: rgba(144,184,159,.3);
+    background: #0b1710;
+}
+body:not(.login-page) .material-transaction-form input[readonly] { color: #b4c8ba; }
+body:not(.login-page) .drawings-toolbar,
+body:not(.login-page) .materials-toolbar { box-shadow: 0 10px 30px rgba(0,0,0,.16); }
+body.user-details-page .modal-backdrop .modal {
+    color: #edf8f2;
+    border: 1px solid rgba(123,224,182,.2);
+    background: linear-gradient(145deg, #12221a, #08100c);
+    box-shadow: 0 24px 70px rgba(0,0,0,.58);
+}
+body.user-details-page .modal h3 { color: #f1faf5; }
+body.user-details-page .modal label { color: #dcebe2 !important; }
+body.user-details-page .modal button.button.secondary {
+    color: #e2eee7;
+    border: 1px solid rgba(123,224,182,.2);
+    background: rgba(255,255,255,.06);
+}
+body:not(.login-page) .ledger-status { color: #b4c8ba; }
+body:not(.login-page) .ledger-preview h3 { color: #edf8f2; }
+body:not(.login-page) .drawings-status.error,
+body:not(.login-page) .drawings-error,
+body:not(.login-page) .summary-status.error,
+body:not(.login-page) .error-state,
+body:not(.login-page) .stock-negative { color: #ff9b9b !important; }
+body:not(.login-page) label { color: #dcebe2 !important; }
+body:not(.login-page) ::selection { color: #fff; background: rgba(65,188,140,.62); }
+
+/* Trade Builder still contains several light surfaces from its original theme. */
+.trade-builder-page .worker-card,
+.trade-builder-page .payment-form,
+.trade-builder-page .modal-panel {
+    color: #edf8f2;
+    border-color: rgba(123,224,182,.2);
+    background: linear-gradient(145deg, rgba(18,34,26,.97), rgba(8,16,12,.98));
+}
+.trade-builder-page .worker-card {
+    background-color: #0b1711;
+}
+.trade-builder-page .worker-card .worker-name,
+.trade-builder-page .worker-card label,
+.trade-builder-page .worker-card .wage-history,
+.trade-builder-page .worker-card .wage-history div {
+    color: #dcebe2 !important;
+}
+.trade-builder-page .worker-card .wage-history {
+    border-color: rgba(123,224,182,.18);
+}
+.trade-builder-page .worker-card h2,
+.trade-builder-page .worker-card h3,
+.trade-builder-page .worker-card h4,
+.trade-builder-page .modal-panel h2,
+.trade-builder-page .modal-panel h3,
+.trade-builder-page .payment-form h2,
+.trade-builder-page .payment-form h3 {
+    color: #edf8f2;
+}
+.trade-builder-page .worker-card p,
+.trade-builder-page .modal-panel p,
+.trade-builder-page .payment-form p,
+.trade-builder-page .form-help {
+    color: #b4c8ba;
+}
+.trade-builder-page .history-table th {
+    color: #82dfba;
+    background: rgba(72,148,108,.14);
+}
+.trade-builder-page .history-table td {
+    color: #dcebe2;
+    border-color: rgba(123,224,182,.14);
+}
+body:not(.login-page) .dr-workforce-card,
+body:not(.login-page) .dr-workforce-total-box,
+body:not(.login-page) .dr-confirmbox,
+body:not(.login-page) .dr-toast,
+body:not(.login-page) .dr-preview-error,
+body:not(.login-page) .dr-ev-preview-loading,
+body:not(.login-page) .supplier-brand-option {
+    color: #eaf5ef;
+    border-color: rgba(123,224,182,.17);
+    background: linear-gradient(145deg, rgba(18,34,26,.94), rgba(8,16,12,.96));
+}
+body:not(.login-page) .dr-workforce-card div,
+body:not(.login-page) .dr-workforce-total-label,
+body:not(.login-page) .dr-workforce-total-value,
+body:not(.login-page) .dr-toast-message,
+body:not(.login-page) .dr-pre {
+    color: #dcebe2;
+}
+body:not(.login-page) .dr-tag {
+    color: #aaf0ce;
+    background: rgba(42,129,88,.2);
+}
+body:not(.login-page) .dr-weather {
+    color: #aaf0ce;
+    border-color: rgba(93,221,180,.25);
+    background: rgba(42,129,88,.2);
+}
+body:not(.login-page) .dr-print-btn {
+    color: #dcebe2;
+    border-color: rgba(123,224,182,.17);
+    background: rgba(255,255,255,.055);
+}
+body:not(.login-page) .dr-print-btn:hover,
+body:not(.login-page) .dr-toast-close:hover {
+    color: #eff8f3;
+    background: rgba(255,255,255,.1);
+}
+body:not(.login-page) .dr-toast-close {
+    color: #a4b7ad;
+}
+body:not(.login-page) .dr-open {
+    color: #78dffb;
+}
+body:not(.login-page) .supplier-brand-option.is-selected {
+    color: #aaf0ce;
+    border-color: rgba(93,221,180,.38);
+    background: rgba(42,129,88,.2);
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}
+
+/* Labour Payments keeps both payment surfaces within the site's dark theme. */
+.financial-module #paymentHistory { color: #dcebe2; }
+.financial-module #paymentHistory .transaction-row {
+    color: #dcebe2;
+    border-bottom-color: rgba(123,224,182,.14) !important;
+}
+.financial-module #paymentHistory .transaction-type { color: #82dfba; font-weight: 700; }
+.financial-module #paymentHistory .transaction-row > div,
+.financial-module #paymentHistory .transaction-row > strong { color: #dcebe2; opacity: 1; }
+.financial-module #paymentHistory .transaction-row > div:nth-child(4) span[style*="color:#64748b"] {
+    color: #b4c8ba !important;
+}
+.financial-module #paymentHistory .transaction-row > strong { color: #83dfbb; }
+.financial-module #paymentHistory .transaction-row small { color: #b4c8ba; }
+.financial-module #paymentHistory .transaction-row .payment-details-btn,
+.financial-module #paymentHistory .transaction-row .payment-edit-btn,
+.financial-module #paymentHistory .transaction-row .payment-delete-btn { opacity: 1; filter: none; }
+.financial-module #paymentModal .payment-history > h3 { color: #edf8f2; }
+.financial-module .lump-sum-agreement-card,
+.financial-module .lump-sum-agreement-card h4,
+.financial-module .lump-sum-agreement-card p,
+.financial-module .lump-sum-agreement-card .lump-sum-agreement-details { color: #edf8f2; }
+.financial-module .lump-sum-agreement-card p { color: #dcebe2; }
+/* The transaction editor is a dark inset surface; its controls are already dark. */
+.financial-module #paymentModal .payment-form {
+    color: #dcebe2;
+    border-color: rgba(123,224,182,.18);
+    background: linear-gradient(145deg, rgba(18,34,26,.94), rgba(8,16,12,.96));
+}
+.financial-module #paymentModal .payment-form h3 { color: #edf8f2; }
+.financial-module #paymentModal .payment-form label { color: #dcebe2 !important; }
+.financial-module #paymentModal .payment-form .form-help { color: #b4c8ba; }
+.financial-module .payment-form input,
+.financial-module .payment-form select,
+.financial-module .payment-form textarea {
+    color: #eef8f2;
+    background-color: rgba(3,10,6,.92);
+    border-color: #6d8377;
+    opacity: 1;
+    filter: none;
+}
+.financial-module .payment-form input::placeholder,
+.financial-module .payment-form textarea::placeholder { color: #b4c8ba; opacity: 1; }
+.financial-module .payment-form select option { color: #eef8f2; background: #101b15; }
+/* Keep the Labour Payments modal shell scoped to this page and payment modal. */
+.financial-module #paymentModal .modal-panel {
+    color: #edf8f2;
+    border-color: rgba(123,224,182,.2);
+    background: linear-gradient(145deg, rgba(18,34,26,.97), rgba(8,16,12,.98));
+}
+body.financial-module:has(#paymentModal.show) { overflow: hidden; }
+.financial-module #paymentModal .modal-panel h2,
+.financial-module #paymentModal .modal-panel h3 { color: #edf8f2; }
+.financial-module #paymentModal .modal-header > div > div { color: #b4c8ba !important; }
+.financial-module #paymentModal .payment-history {
+    padding: 18px;
+    border: 1px solid rgba(123,224,182,.18);
+    border-radius: 12px;
+    color: #dcebe2;
+    background: linear-gradient(145deg, rgba(18,34,26,.94), rgba(8,16,12,.96));
+}
+.financial-module #paymentModal .summary-box {
+    border: 1px solid rgba(123,224,182,.14);
+    background: rgba(255,255,255,.035);
+}
+.financial-module #paymentModal .summary-label { color: #b4c8ba; }
+.financial-module #paymentModal .summary-value { color: #edf8f2; }
+/* Labour Payments contract table: override the three inline light header fills. */
+.financial-module #tradeList .contract-section .contract-table-container th {
+    color: #83dfbb;
+    background: rgba(72,148,108,.22) !important;
+}
+.financial-module #tradeList .contract-section [style*="color:#64748b"] {
+    color: #b4c8ba !important;
+}
+@media (max-width: 840px) {
+    .financial-module .main-grid > div {
+        min-width: 0;
+    }
+}
+@media (max-width: 800px) {
+    .financial-module #tradeList .contract-section > div[style*="repeat(3"] {
+        grid-template-columns: minmax(0, 1fr) !important;
+    }
+}

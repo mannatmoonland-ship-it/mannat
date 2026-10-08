@@ -1,0 +1,2307 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Mannat Moon - Trade Builder
+    </title>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='dialogs.css') }}">
+
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+
+        body {
+
+            margin: 0;
+
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
+
+            background:
+                #f1f5f9;
+
+            color:
+                #172033;
+
+        }
+
+
+        /* =================================================
+           HEADER
+        ================================================= */
+
+        header {
+
+            background:
+                #111827;
+
+            color:
+                white;
+
+            padding:
+                18px 28px;
+
+            display:
+                flex;
+
+            justify-content:
+                space-between;
+
+            align-items:
+                center;
+
+            gap:
+                20px;
+
+        }
+
+
+        header .nav-link {
+
+            color:
+                #cbd5e1;
+
+            text-decoration:
+                none;
+
+            font-size:
+                14px;
+
+            padding:
+                8px 16px;
+
+            border-radius:
+                6px;
+
+            transition:
+                background 0.2s ease,
+                color 0.2s ease;
+
+        }
+
+
+        header .nav-link:hover {
+
+            background:
+                rgba(255, 255, 255, 0.1);
+
+            color:
+                white;
+
+        }
+
+
+        header h1 {
+
+            margin: 0;
+
+            font-size:
+                22px;
+
+        }
+
+
+        header p {
+
+            margin:
+                4px 0 0;
+
+            color:
+                #cbd5e1;
+
+            font-size:
+                13px;
+
+        }
+
+
+        /* =================================================
+           STATUS
+        ================================================= */
+
+        #status {
+
+            display:
+                none;
+
+            position:
+                fixed;
+
+            top:
+                20px;
+
+            right:
+                20px;
+
+            z-index:
+                9999;
+
+            padding:
+                12px 18px;
+
+            background:
+                #dcfce7;
+
+            color:
+                #166534;
+
+            border:
+                1px solid #86efac;
+
+            border-radius:
+                8px;
+
+            font-size:
+                13px;
+
+            box-shadow:
+                0 5px 20px rgba(0,0,0,.15);
+
+        }
+
+
+        #status.error {
+
+            background:
+                #fee2e2;
+
+            color:
+                #991b1b;
+
+            border-color:
+                #fecaca;
+
+        }
+
+
+        /* =================================================
+           MAIN
+        ================================================= */
+
+        main {
+
+            max-width:
+                1500px;
+
+            margin:
+                25px auto;
+
+            padding:
+                0 20px;
+
+        }
+
+
+        .main-grid {
+
+            display:
+                grid;
+
+            grid-template-columns:
+                430px
+                minmax(0,1fr);
+
+            gap:
+                25px;
+
+            align-items:
+                start;
+
+        }
+
+
+        /* =================================================
+           CARD
+        ================================================= */
+
+        .card {
+
+            background:
+                white;
+
+            border:
+                1px solid #e2e8f0;
+
+            border-radius:
+                14px;
+
+            padding:
+                22px;
+
+            margin-bottom:
+                20px;
+
+            box-shadow:
+                0 3px 12px rgba(15,23,42,.04);
+
+        }
+
+
+        .card h2 {
+
+            margin:
+                0 0 18px;
+
+            font-size:
+                20px;
+
+        }
+
+
+        .card h3 {
+
+            margin:
+                0 0 12px;
+
+        }
+
+
+        /* =================================================
+           FORM
+        ================================================= */
+
+        label {
+
+            display:
+                block;
+
+            margin:
+                10px 0 6px;
+
+            font-size:
+                13px;
+
+            font-weight:
+                600;
+
+            color:
+                #334155;
+
+        }
+
+
+        input,
+        select,
+        textarea {
+
+            width:
+                100%;
+
+            border:
+                1px solid #cbd5e1;
+
+            border-radius:
+                8px;
+
+            padding:
+                11px 12px;
+
+            font-size:
+                14px;
+
+            background:
+                white;
+
+            color:
+                #172033;
+
+        }
+
+
+        textarea {
+
+            min-height:
+                90px;
+
+            resize:
+                vertical;
+
+        }
+
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+
+            outline:
+                none;
+
+            border-color:
+                #2563eb;
+
+            box-shadow:
+                0 0 0 3px rgba(37,99,235,.10);
+
+        }
+
+
+        /* =================================================
+           BUTTONS
+        ================================================= */
+
+        button {
+
+            border:
+                0;
+
+            border-radius:
+                8px;
+
+            padding:
+                10px 15px;
+
+            font-size:
+                13px;
+
+            font-weight:
+                600;
+
+            cursor:
+                pointer;
+
+        }
+
+
+        .btn-primary {
+
+            background:
+                #111827;
+
+            color:
+                white;
+
+        }
+
+
+        .btn-primary:hover {
+
+            background:
+                #1f2937;
+
+        }
+
+
+        .btn-secondary {
+
+            background:
+                #e2e8f0;
+
+            color:
+                #172033;
+
+        }
+
+
+        .btn-danger {
+
+            background:
+                #fee2e2;
+
+            color:
+                #b91c1c;
+
+        }
+
+
+        .btn-small {
+
+            padding:
+                7px 11px;
+
+            font-size:
+                12px;
+
+        }
+
+
+        .form-buttons {
+
+            display:
+                flex;
+
+            gap:
+                10px;
+
+            margin-top:
+                18px;
+
+        }
+
+
+        /* =================================================
+           WORKER
+        ================================================= */
+
+        .worker-card {
+
+            border:
+                1px solid #dbe3ec;
+
+            border-radius:
+                10px;
+
+            padding:
+                14px;
+
+            margin-bottom:
+                12px;
+
+            background:
+                #f8fafc;
+
+        }
+
+
+        .worker-header {
+
+            display:
+                flex;
+
+            justify-content:
+                space-between;
+
+            align-items:
+                center;
+
+            gap:
+                10px;
+
+            margin-bottom:
+                12px;
+
+        }
+
+
+        .worker-name {
+
+            font-weight:
+                700;
+
+        }
+
+
+        .worker-grid {
+
+            display:
+                grid;
+
+            grid-template-columns:
+                1fr 1fr;
+
+            gap:
+                12px;
+
+        }
+
+        .worker-daily-fields,
+        .worker-lump-sum-fields {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 12px;
+        }
+
+        .worker-lump-sum-fields > div:last-child,
+        .worker-daily-fields .wage-history {
+            grid-column: 1 / -1;
+        }
+
+        .worker-daily-fields[hidden],
+        .worker-lump-sum-fields[hidden] {
+            display: none !important;
+        }
+
+        .lump-sum-agreements {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px;
+            margin: 10px 0 20px;
+        }
+
+        .lump-sum-agreement-card {
+            padding: 12px;
+            border: 1px solid #e2e7ec;
+            border-radius: 8px;
+            background: #f8fafc;
+        }
+
+        .lump-sum-agreement-card h4 {
+            margin: 0 0 6px;
+        }
+
+        .lump-sum-agreement-card p {
+            margin: 4px 0;
+            color: #475467;
+            font-size: 13px;
+        }
+
+        .lump-sum-agreement-details {
+            margin-top: 7px;
+            color: #667085;
+            font-size: 12px;
+        }
+
+        #lumpSumAgreementSummary {
+            padding: 10px;
+            margin: 8px 0;
+            border: 1px solid #bfdbfe;
+            border-radius: 6px;
+            background: #eff6ff;
+            color: #1e3a8a;
+        }
+
+        #lumpSumAgreementSummary[hidden],
+        #lumpSumCategoryField[hidden],
+        #lumpSumAgreementsSection[hidden] {
+            display: none !important;
+        }
+
+
+        .wage-history {
+
+            margin-top:
+                12px;
+
+            border-top:
+                1px solid #e2e8f0;
+
+            padding-top:
+                10px;
+
+        }
+
+
+        .history-row {
+
+            display:
+                flex;
+
+            justify-content:
+                space-between;
+
+            padding:
+                5px 0;
+
+            font-size:
+                11px;
+
+            border-bottom:
+                1px solid #edf2f7;
+
+        }
+
+
+        /* =================================================
+           COMMON FIELDS
+        ================================================= */
+
+        .common-fields {
+
+            background:
+                #f8fafc;
+
+            border:
+                1px solid #e2e8f0;
+
+            border-radius:
+                10px;
+
+            padding:
+                16px;
+
+            margin-top:
+                15px;
+
+        }
+
+
+        .common-fields ul {
+
+            margin:
+                10px 0 0 20px;
+
+            padding:
+                0;
+
+        }
+
+
+        .common-fields li {
+
+            margin:
+                4px 0;
+
+        }
+
+
+        /* =================================================
+           TRADE CARD
+        ================================================= */
+
+        .trade-card {
+
+            background:
+                white;
+
+            border:
+                1px solid #dbe3ec;
+
+            border-radius:
+                14px;
+
+            padding:
+                20px;
+
+            margin-bottom:
+                20px;
+
+            box-shadow:
+                0 3px 12px rgba(15,23,42,.04);
+
+        }
+
+
+        .trade-title-row {
+
+            display:
+                flex;
+
+            justify-content:
+                space-between;
+
+            align-items:
+                center;
+
+            gap:
+                15px;
+
+            margin-bottom:
+                18px;
+
+        }
+
+
+        .trade-title {
+
+            font-size:
+                22px;
+
+            font-weight:
+                700;
+
+        }
+
+
+        .trade-buttons {
+
+            display:
+                flex;
+
+            gap:
+                7px;
+
+        }
+
+
+        .worker-list {
+
+            margin-bottom:
+                18px;
+
+        }
+
+
+        .worker-list-row {
+
+            display:
+                flex;
+
+            justify-content:
+                space-between;
+
+            gap:
+                15px;
+
+            padding:
+                8px 0;
+
+            border-bottom:
+                1px solid #edf2f7;
+
+            font-size:
+                13px;
+
+        }
+
+
+        /* =================================================
+           CONTRACT SECTION
+        ================================================= */
+
+        .contract-section {
+
+            margin-top:
+                20px;
+
+            padding:
+                18px;
+
+            border:
+                1px solid #e2e8f0;
+
+            border-radius:
+                12px;
+
+            background:
+                #ffffff;
+
+        }
+
+
+        .contract-header {
+
+            display:
+                flex;
+
+            justify-content:
+                space-between;
+
+            align-items:
+                center;
+
+            gap:
+                15px;
+
+            flex-wrap:
+                wrap;
+
+        }
+
+
+        .contract-subtitle {
+
+            margin-top:
+                4px;
+
+            color:
+                #64748b;
+
+            font-size:
+                12px;
+
+        }
+
+
+        .contract-table {
+
+            width:
+                100%;
+
+            border-collapse:
+                collapse;
+
+            margin-top:
+                14px;
+
+            font-size:
+                13px;
+
+        }
+
+
+        .contract-table th {
+
+            text-align:
+                left;
+
+            padding:
+                10px;
+
+            background:
+                #f1f5f9;
+
+        }
+
+
+        .contract-table td {
+
+            padding:
+                10px;
+
+            border-bottom:
+                1px solid #e2e8f0;
+
+        }
+
+
+        .contract-table .amount {
+
+            text-align:
+                right;
+
+            font-weight:
+                600;
+
+        }
+
+
+        .contract-table .actions {
+
+            text-align:
+                center;
+
+            white-space:
+                nowrap;
+
+        }
+
+
+        .contract-total td {
+
+            font-weight:
+                700;
+
+            border-bottom:
+                0;
+
+        }
+
+
+        /* =================================================
+           SUMMARY
+        ================================================= */
+
+        .summary-grid {
+
+            display:
+                grid;
+
+            grid-template-columns:
+                repeat(3,minmax(0,1fr));
+
+            gap:
+                12px;
+
+            margin-top:
+                18px;
+
+        }
+
+
+        .summary-box {
+
+            background:
+                #f8fafc;
+
+            border-radius:
+                10px;
+
+            padding:
+                14px;
+
+        }
+
+
+        .summary-label {
+
+            font-size:
+                10px;
+
+            color:
+                #64748b;
+
+            font-weight:
+                600;
+
+            text-transform:
+                uppercase;
+
+        }
+
+
+        .summary-value {
+
+            font-size:
+                20px;
+
+            font-weight:
+                700;
+
+            margin-top:
+                6px;
+
+        }
+
+
+        /* =================================================
+           PAYMENT PROGRESS
+        ================================================= */
+
+        .payment-progress {
+
+            margin-top:
+                20px;
+
+        }
+
+
+        .progress-header {
+
+            display:
+                flex;
+
+            justify-content:
+                space-between;
+
+            align-items:
+                center;
+
+            margin-bottom:
+                8px;
+
+            font-weight:
+                700;
+
+        }
+
+
+        .progress-bar {
+
+            height:
+                16px;
+
+            background:
+                #e2e8f0;
+
+            border-radius:
+                20px;
+
+            overflow:
+                hidden;
+
+        }
+
+
+        .progress-fill {
+
+            height:
+                100%;
+
+            background:
+                #2563eb;
+
+            border-radius:
+                20px;
+
+            transition:
+                width .3s ease;
+
+        }
+
+
+        .percentage-row {
+
+            display:
+                flex;
+
+            justify-content:
+                space-between;
+
+            margin-top:
+                10px;
+
+            font-size:
+                13px;
+
+        }
+
+
+        .rupee-row {
+
+            display:
+                flex;
+
+            justify-content:
+                space-between;
+
+            margin-top:
+                6px;
+
+            color:
+                #64748b;
+
+            font-size:
+                12px;
+
+        }
+
+
+        .progress-note {
+
+            margin-top:
+                7px;
+
+            color:
+                #64748b;
+
+            font-size:
+                12px;
+
+        }
+
+
+        /* =================================================
+           LABOUR PAYMENTS
+        ================================================= */
+
+        .payment-section {
+
+            margin-top:
+                22px;
+
+            padding-top:
+                20px;
+
+            border-top:
+                1px solid #e2e8f0;
+
+        }
+
+
+        .payment-summary {
+
+            display:
+                grid;
+
+            grid-template-columns:
+                repeat(3,minmax(0,1fr));
+
+            gap:
+                12px;
+
+            margin-bottom:
+                15px;
+
+        }
+
+
+        /* =================================================
+           MODAL
+        ================================================= */
+
+        .modal {
+
+            display:
+                none;
+
+            position:
+                fixed;
+
+            inset:
+                0;
+
+            background:
+                rgba(15,23,42,.58);
+
+            z-index:
+                5000;
+
+            align-items:
+                center;
+
+            justify-content:
+                center;
+
+            padding:
+                20px;
+
+        }
+
+
+        .modal.show {
+
+            display:
+                flex;
+
+        }
+
+        body.ledger-modal-open {
+            overflow: hidden;
+        }
+
+        .ledger-view-modal .modal-panel {
+            width: 1100px;
+            max-width: calc(100vw - 40px);
+        }
+
+        .ledger-view-modal .ledger-modal-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .ledger-view-modal .ledger-modal-meta,
+        .ledger-view-modal .ledger-modal-financials {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin: 16px 0;
+        }
+
+        .ledger-view-modal .ledger-modal-meta div,
+        .ledger-view-modal .ledger-modal-financials span {
+            padding: 11px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background: #f8fafc;
+        }
+
+        .ledger-view-modal .ledger-modal-meta strong {
+            display: block;
+            margin-bottom: 4px;
+            color: #64748b;
+            font-size: 11px;
+            text-transform: uppercase;
+        }
+
+        .ledger-view-modal h3 {
+            margin: 22px 0 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .ledger-modal-table-wrap {
+            overflow-x: auto;
+        }
+
+        .ledger-modal-table {
+            width: 100%;
+            min-width: 700px;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .ledger-modal-table th,
+        .ledger-modal-table td {
+            padding: 9px;
+            border: 1px solid #e2e8f0;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .ledger-modal-table th {
+            background: #f1f5f9;
+        }
+
+        .ledger-modal-empty {
+            padding: 14px;
+            color: #64748b;
+            border: 1px dashed #cbd5e1;
+            border-radius: 8px;
+        }
+
+        @media (max-width: 700px) {
+            .ledger-view-modal .modal-header {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .ledger-view-modal .ledger-modal-actions,
+            .ledger-view-modal .ledger-modal-meta,
+            .ledger-view-modal .ledger-modal-financials {
+                grid-template-columns: 1fr;
+                width: 100%;
+            }
+        }
+
+
+        .modal-panel {
+
+            width:
+                1180px;
+
+            max-width:
+                calc(100vw - 40px);
+
+            max-height:
+                calc(100vh - 40px);
+
+            overflow:
+                auto;
+
+            background:
+                white;
+
+            border-radius:
+                14px;
+
+            padding:
+                22px;
+
+            box-shadow:
+                0 20px 70px rgba(0,0,0,.3);
+
+        }
+
+
+        .modal-header {
+
+            display:
+                flex;
+
+            justify-content:
+                space-between;
+
+            align-items:
+                center;
+
+            gap:
+                15px;
+
+            margin-bottom:
+                18px;
+
+        }
+
+
+        .modal-header h2 {
+
+            margin:
+                0;
+
+        }
+
+
+        .payment-form {
+
+            background:
+                #f8fafc;
+
+            border:
+                1px solid #e2e8f0;
+
+            border-radius:
+                12px;
+
+            padding:
+                18px;
+
+        }
+
+
+        .form-help {
+
+            color:
+                #64748b;
+
+            font-size:
+                12px;
+
+            margin-top:
+                6px;
+
+        }
+
+
+        /* =================================================
+           PAYMENT HISTORY
+        ================================================= */
+
+        .payment-history {
+
+            margin-top:
+                22px;
+
+        }
+
+
+        .history-table-wrapper {
+
+            overflow-x:
+                auto;
+
+        }
+
+
+        .history-table {
+
+            width:
+                100%;
+
+            min-width:
+                1050px;
+
+            border-collapse:
+                collapse;
+
+            margin-top:
+                10px;
+
+            font-size:
+                12px;
+
+        }
+
+
+        .history-table th {
+
+            text-align:
+                left;
+
+            padding:
+                10px;
+
+            background:
+                #f1f5f9;
+
+            white-space:
+                nowrap;
+
+        }
+
+
+        .history-table td {
+
+            padding:
+                10px;
+
+            border-bottom:
+                1px solid #e2e8f0;
+
+            vertical-align:
+                top;
+
+        }
+
+
+        .history-table .amount {
+
+            text-align:
+                right;
+
+            font-weight:
+                700;
+
+            white-space:
+                nowrap;
+
+        }
+
+
+        .history-table .actions {
+
+            white-space:
+                nowrap;
+
+            text-align:
+                right;
+
+        }
+
+
+        .transaction-type {
+
+            font-weight:
+                700;
+
+        }
+
+
+        .transaction-type.mobilization {
+
+            color:
+                #2563eb;
+
+        }
+
+
+        .transaction-type.labour-advance {
+
+            color:
+                #d97706;
+
+        }
+
+
+        .transaction-type.settlement {
+
+            color:
+                #15803d;
+
+        }
+
+
+        /* =================================================
+           EMPTY
+        ================================================= */
+
+        .empty {
+
+            text-align:
+                center;
+
+            padding:
+                40px;
+
+            color:
+                #64748b;
+
+        }
+
+
+        /* =================================================
+           RESPONSIVE
+        ================================================= */
+
+        @media(max-width:1000px) {
+
+            .main-grid {
+
+                grid-template-columns:
+                    1fr;
+
+            }
+
+        }
+
+
+        @media(max-width:700px) {
+
+            .worker-grid,
+            .summary-grid,
+            .payment-summary {
+
+                grid-template-columns:
+                    1fr;
+
+            }
+
+
+            .trade-title-row {
+
+                align-items:
+                    flex-start;
+
+                flex-direction:
+                    column;
+
+            }
+
+
+            .worker-list-row {
+
+                flex-direction:
+                    column;
+
+                gap:
+                    4px;
+
+            }
+
+        }
+
+
+        .trade-builder-page .contract-section,
+        .trade-builder-page .payment-section {
+            display: none;
+        }
+
+
+        .financial-module .main-grid {
+            grid-template-columns: 1fr;
+        }
+
+
+        .financial-module .worker-list,
+        .financial-module .common-fields,
+        .financial-module .trade-title-row .edit-btn,
+        .financial-module .trade-title-row .delete-btn,
+        .financial-module .trade-title-row .pdf-download-btn {
+            display: none;
+        }
+
+    </style>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+</head>
+
+
+<body
+    class="{% if financial_only %}financial-module{% else %}trade-builder-page{% endif %}"
+    {% if financial_only %}data-labour-payments-csrf="{{ labour_payments_csrf }}"{% endif %}
+    {% if not financial_only %}data-contract-values-csrf="{{ contract_values_csrf }}" data-trade-builder-csrf="{{ trade_builder_csrf }}"{% endif %}
+>
+
+
+<header>
+
+    <div>
+
+        <h1>
+            MANNAT MOON
+        </h1>
+
+        <p>
+            Trade Builder & Labour Payment Management
+        </p>
+
+    </div>
+
+    <a
+        href="/"
+        class="nav-link"
+    >
+        Dashboard
+    </a>
+
+</header>
+
+
+<div id="status"></div>
+
+
+<main>
+
+    <div class="main-grid">
+
+
+        <!-- =================================================
+             LEFT COLUMN
+        ================================================= -->
+
+        {% if not financial_only %}
+        <div>
+
+
+            <!-- CREATE / EDIT TRADE -->
+
+            <div class="card">
+
+                <h2 id="formTitle">
+                    Create Trade
+                </h2>
+
+
+                <label>
+                    Trade Name
+                </label>
+
+                <input
+                    id="tradeName"
+                    type="text"
+                    placeholder="Example: Masons"
+                >
+
+
+                <div
+                    style="
+                        margin-top:20px;
+                        display:flex;
+                        justify-content:space-between;
+                        align-items:center;
+                    "
+                >
+
+                    <strong>
+                        Worker Categories
+                    </strong>
+
+
+                    <button
+                        type="button"
+                        id="addWorkerBtn"
+                        class="btn-secondary btn-small"
+                    >
+                        + Add Worker Category
+                    </button>
+
+                </div>
+
+
+                <div
+                    id="workerContainer"
+                    style="margin-top:12px;"
+                ></div>
+
+
+                <div class="form-buttons">
+
+                    <button
+                        type="button"
+                        id="saveTradeBtn"
+                        class="btn-primary"
+                    >
+                        Save Trade
+                    </button>
+
+
+                    <button
+                        type="button"
+                        id="clearBtn"
+                        class="btn-secondary"
+                    >
+                        Clear
+                    </button>
+
+                </div>
+
+            </div>
+
+
+            <!-- COMMON FIELDS -->
+
+            <div class="card">
+
+                <h2>
+                    Common Fields
+                </h2>
+
+
+                <div
+                    style="
+                        color:#64748b;
+                        font-size:13px;
+                    "
+                >
+                    Every Trade automatically uses these fields.
+                    They are not customized per Trade.
+                </div>
+
+
+                <div class="common-fields">
+
+                    <ul>
+
+                        <li>
+                            Work / Activity
+                        </li>
+
+                        <li>
+                            Location / Floor
+                        </li>
+
+                        <li>
+                            Materials
+                        </li>
+
+                        <li>
+                            Notes / Issues / Decisions
+                        </li>
+
+                        <li>
+                            Remarks / Additional Items
+                        </li>
+
+                        <li>
+                            Visual Evidence
+                        </li>
+
+                    </ul>
+
+                </div>
+
+            </div>
+
+        </div>
+        {% endif %}
+
+
+        <!-- =================================================
+             RIGHT COLUMN
+        ================================================= -->
+
+        <div>
+
+            <div class="card">
+
+                <h2>
+                    {% if financial_only %}
+                    Labour Payments &amp; Contract Capping
+                    {% else %}
+                    Trades
+                    {% endif %}
+                </h2>
+
+                {% if financial_only %}
+                <label
+                    for="financialTradeSelect"
+                    style="display:block; margin:16px 0 18px; color:#475569; font-weight:700;"
+                >
+                    Select Trade
+                    <select
+                        id="financialTradeSelect"
+                        style="display:block; width:100%; margin-top:7px; padding:11px; border:1px solid #cbd5e1; border-radius:8px; font:inherit; background:#fff;"
+                    >
+                        <option value="">Loading trades...</option>
+                    </select>
+                </label>
+                {% endif %}
+
+
+                <div id="tradeList">
+
+                    <div class="empty">
+                        Loading Trades...
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</main>
+
+
+<div
+    id="tradeLedgerModal"
+    class="modal ledger-view-modal"
+>
+
+    <div class="modal-panel">
+
+        <div class="modal-header">
+
+            <h2 id="tradeLedgerModalTitle">
+                Trade Ledger
+            </h2>
+
+            <div class="ledger-modal-actions">
+
+                <button
+                    type="button"
+                    id="tradeLedgerDownloadPdf"
+                    class="btn-primary"
+                >
+                    Download PDF
+                </button>
+
+                <button
+                    type="button"
+                    id="tradeLedgerClose"
+                    class="btn-danger"
+                >
+                    Close
+                </button>
+
+            </div>
+
+        </div>
+
+        <div id="tradeLedgerModalContent"></div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     PAYMENT MODAL
+====================================================== -->
+
+<div
+    id="paymentModal"
+    class="modal"
+>
+
+    <div class="modal-panel">
+
+
+        <div class="modal-header">
+
+            <div>
+
+                <h2>
+                    Labour Payment Ledger
+                </h2>
+
+
+                <div
+                    style="
+                        color:#64748b;
+                        font-size:13px;
+                        margin-top:4px;
+                    "
+                >
+                    Trade:
+                    <strong id="paymentTradeName">
+                        -
+                    </strong>
+                </div>
+
+            </div>
+
+
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <button
+                    type="button"
+                    id="paymentLedgerDownloadPdf"
+                    class="btn-primary"
+                >
+                    Print / Download PDF
+                </button>
+
+                <button
+                    type="button"
+                    class="btn-danger"
+                    onclick="closePaymentModal()"
+                >
+                    Close
+                </button>
+            </div>
+
+        </div>
+
+
+        <input
+            type="hidden"
+            id="paymentTradeId"
+        >
+
+
+        <!-- =================================================
+             PAYMENT FORM
+        ================================================= -->
+
+        <div class="payment-form">
+
+            <h3>
+                Add / Edit Payment Transaction
+            </h3>
+
+
+            <label>
+                Transaction Type
+            </label>
+
+            <select id="paymentType">
+
+                <option value="mobilization_advance">
+                    Mobilization Advance
+                </option>
+
+                <option value="labour_advance">
+                    Labour Advance
+                </option>
+
+                <option value="labour_settlement">
+                    Labour Settlement
+                </option>
+
+                <option value="lump_sum_payment">
+                    Lump-Sum Payment
+                </option>
+
+            </select>
+
+            <div id="lumpSumCategoryField" hidden>
+                <label for="lumpSumCategorySelect">Lump-Sum Worker Category</label>
+                <select id="lumpSumCategorySelect"></select>
+                <div id="lumpSumAgreementSummary" hidden></div>
+            </div>
+
+
+            <label>
+                Date
+            </label>
+
+            <input
+                type="date"
+                id="paymentDate"
+            >
+
+
+            <!-- LABOUR EARNED -->
+
+            <div
+                id="earnedField"
+                style="display:none;"
+            >
+
+                <label>
+                    Labour Earned
+                </label>
+
+                <input
+                    type="number"
+                    id="labourEarned"
+                    min="0"
+                    step="1"
+                    placeholder="0"
+                >
+
+            </div>
+
+
+            <!-- ADVANCE DEDUCTION -->
+
+            <div
+                id="adjustmentField"
+                style="display:none;"
+            >
+
+                <label>
+                    Advance Deduction
+                </label>
+
+                <select id="advanceAdjustmentMode">
+
+                    <option value="none">
+                        No Deduction
+                    </option>
+
+                    <option value="partial">
+                        Partial Deduction
+                    </option>
+
+                    <option value="full">
+                        Full Deduction
+                    </option>
+
+                </select>
+
+            </div>
+
+
+            <!-- PARTIAL DEDUCTION -->
+
+            <div
+                id="partialAdjustmentField"
+                style="display:none;"
+            >
+
+                <label>
+                    Deduction Amount
+                </label>
+
+                <input
+                    type="number"
+                    id="adjustmentAmount"
+                    min="0"
+                    step="1"
+                    value="0"
+                >
+
+            </div>
+
+
+            <!-- PAYMENT AMOUNT -->
+
+            <label>
+                Amount Being Paid Now
+            </label>
+
+            <input
+                type="number"
+                id="paymentAmount"
+                min="0"
+                step="1"
+                placeholder="0"
+            >
+
+
+            <div
+                id="paymentAmountHelp"
+                class="form-help"
+            >
+                Mobilization payment is never added
+                to the labour advance balance.
+            </div>
+
+            <div
+                id="settlementBreakdown"
+                class="form-help"
+                style="display:none; margin-top:8px;"
+            ></div>
+
+
+            <!-- PAYMENT MODE -->
+
+            <label>
+                Payment Mode
+            </label>
+
+            <select id="paymentMode">
+
+                <option>
+                    Cash
+                </option>
+
+                <option>
+                    Bank Transfer
+                </option>
+
+                <option>
+                    UPI
+                </option>
+
+                <option>
+                    Cheque
+                </option>
+
+                <option>
+                    Other
+                </option>
+
+            </select>
+
+
+            <!-- REMARKS -->
+
+            <label>
+                Remarks
+            </label>
+
+            <textarea
+                id="paymentRemarks"
+                placeholder="Optional remarks"
+            ></textarea>
+
+
+            <div
+                style="
+                    margin-top:15px;
+                "
+            >
+
+                <button
+                    type="button"
+                    id="savePaymentBtn"
+                    class="btn-primary"
+                >
+                    Save Payment
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <!-- =================================================
+             PAYMENT SUMMARY
+        ================================================= -->
+
+        <div
+            style="
+                margin-top:22px;
+            "
+        >
+
+            <h3>
+                Payment Summary
+            </h3>
+
+
+            <div class="payment-summary">
+
+
+                <div class="summary-box">
+
+                    <div class="summary-label">
+                        {% if financial_only %}
+                        Total Payments Against Contract
+                        {% else %}
+                        Total Payments
+                        {% endif %}
+                    </div>
+
+                    <div
+                        id="totalPayments"
+                        class="summary-value"
+                    >
+                        Ã¢â€šÂ¹0
+                    </div>
+
+                </div>
+
+
+                <div class="summary-box">
+
+                    <div class="summary-label">
+                        Labour Advance Balance
+                    </div>
+
+                    <div
+                        id="advanceBalance"
+                        class="summary-value"
+                    >
+                        Ã¢â€šÂ¹0
+                    </div>
+
+                </div>
+
+
+                <div class="summary-box">
+
+                    <div class="summary-label">
+                        Outstanding Balance
+                    </div>
+
+                    <div
+                        id="outstandingBalance"
+                        class="summary-value"
+                    >
+                        Ã¢â€šÂ¹0
+                    </div>
+
+                </div>
+
+
+                <div class="summary-box">
+
+                    <div class="summary-label">
+                        Labour Settlements
+                    </div>
+
+                    <div
+                        id="settlementTotal"
+                        class="summary-value"
+                    >
+                        Ã¢â€šÂ¹0
+                    </div>
+
+                </div>
+
+                <div class="summary-box">
+                    <div class="summary-label">Daily Wage Payments</div>
+                    <div id="dailyWagePaymentsTotal" class="summary-value">Ã¢â€šÂ¹0</div>
+                </div>
+
+                <div class="summary-box">
+                    <div class="summary-label">Lump-Sum Payments</div>
+                    <div id="lumpSumPaymentsTotal" class="summary-value">Ã¢â€šÂ¹0</div>
+                </div>
+
+
+                {% if financial_only %}
+                <div class="summary-box">
+
+                    <div class="summary-label">
+                        Total Labour Earned
+                    </div>
+
+                    <div
+                        id="labourEarnedTotal"
+                        class="summary-value"
+                    >
+                        Ã¢â€šÂ¹0
+                    </div>
+
+                </div>
+
+
+                <div class="summary-box">
+
+                    <div class="summary-label">
+                        Labour Advances Received
+                    </div>
+
+                    <div
+                        id="labourAdvancesTotal"
+                        class="summary-value"
+                    >
+                        Ã¢â€šÂ¹0
+                    </div>
+
+                </div>
+
+
+                <div class="summary-box">
+
+                    <div class="summary-label">
+                        Advance Deductions
+                    </div>
+
+                    <div
+                        id="advanceDeductionsTotal"
+                        class="summary-value"
+                    >
+                        Ã¢â€šÂ¹0
+                    </div>
+
+                </div>
+                {% endif %}
+
+            </div>
+
+        </div>
+
+        <section id="lumpSumAgreementsSection" hidden>
+            <h3>Lump-Sum Agreements</h3>
+            <div id="lumpSumAgreements" class="lump-sum-agreements"></div>
+        </section>
+
+
+        <!-- =================================================
+             PAYMENT HISTORY
+        ================================================= -->
+
+        <div class="payment-history">
+
+            <h3>
+                Payment History
+            </h3>
+
+
+            <div
+                id="paymentHistory"
+                class="history-table-wrapper"
+            >
+
+                No payment transactions yet.
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- =====================================================
+     PDF LIBRARIES
+====================================================== -->
+
+<script
+    src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+></script>
+
+
+<script
+    src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"
+></script>
+
+
+<!-- =====================================================
+     APPLICATION JS
+====================================================== -->
+
+<script
+    type="module"
+    src="{{ url_for('static', filename='app.js') }}"
+></script>
+
+
+</body>
+
+</html>

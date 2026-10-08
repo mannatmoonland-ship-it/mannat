@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="owner-scope-csrf" content="{{ csrf_token }}">
+    <title>Mannat Moon - Owner Scope</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dialogs.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='owner_scope.css') }}">
+</head>
+<body class="owner-scope-page">
+<header class="owner-scope-header">
+    <div>
+        <p class="owner-scope-eyebrow">MANNAT MOON CONSTRUCTION · PROJECT FINANCE</p>
+        <h1>Owner Scope</h1>
+        <p class="owner-scope-intro">Owner-level expense items, kept separate from labour and material contracts.</p>
+    </div>
+    {% include '_navigation.html' %}
+</header>
+
+<main class="owner-scope">
+    <div id="ownerScopeStatus" class="owner-scope-status" role="status" aria-live="polite">
+        Loading Owner Scope data…
+    </div>
+
+    <section class="owner-scope-summary" aria-label="Owner Scope summary">
+        <article class="owner-scope-metric">
+            <span>Scope Items</span>
+            <strong id="ownerScopeItemCount">0</strong>
+        </article>
+        <article class="owner-scope-metric">
+            <span>Total Paid</span>
+            <strong id="ownerScopePaid">₹0</strong>
+        </article>
+    </section>
+
+    <section class="owner-scope-panel" aria-labelledby="ownerScopeItemsTitle">
+        <div class="owner-scope-section-heading">
+            <div>
+                <p class="owner-scope-kicker">NEW FINANCIAL STRUCTURE</p>
+                <h2 id="ownerScopeItemsTitle">Owner Scope Items</h2>
+            </div>
+            <div class="owner-scope-heading-actions">
+                <button id="downloadOwnerScopePdf" class="owner-scope-secondary-button" type="button">Download PDF</button>
+                <button id="addOwnerScopeItem" class="owner-scope-primary-button" type="button">+ Add Owner Scope Item</button>
+            </div>
+        </div>
+        <div class="owner-scope-table-wrap">
+            <table class="owner-scope-table owner-scope-items-table">
+                <colgroup>
+                    <col class="owner-scope-item-column">
+                    <col class="owner-scope-date-column">
+                    <col class="owner-scope-category-column">
+                    <col class="owner-scope-paid-column">
+                    <col class="owner-scope-actions-column">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th scope="col">Item</th>
+                        <th scope="col">Date</th>
+                        <th scope="col">Category</th>
+                        <th scope="col">Paid</th>
+                        <th scope="col">Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="ownerScopeItemsBody"></tbody>
+            </table>
+        </div>
+        <div id="ownerScopeEmpty" class="owner-scope-empty" hidden>
+            <strong>No Owner Scope items added yet.</strong>
+            <span>Add an item to track owner-level expenses and payments.</span>
+        </div>
+    </section>
+
+</main>
+
+<dialog id="ownerScopeItemDialog" class="owner-scope-dialog" aria-labelledby="ownerScopeDialogTitle">
+    <form id="ownerScopeItemForm" novalidate>
+        <div class="owner-scope-dialog-heading">
+            <div>
+                <p class="owner-scope-kicker">OWNER SCOPE ITEM</p>
+                <h2 id="ownerScopeDialogTitle">Add Owner Scope Item</h2>
+            </div>
+            <button id="closeOwnerScopeDialog" class="owner-scope-close-button" type="button" aria-label="Close">×</button>
+        </div>
+        <label class="owner-scope-field" for="ownerScopeItemName">
+            Item Name <span aria-hidden="true">*</span>
+            <input id="ownerScopeItemName" name="name" maxlength="200" required autocomplete="off">
+        </label>
+        <label class="owner-scope-field" for="ownerScopeItemCategory">
+            Category <span aria-hidden="true">*</span>
+            <select id="ownerScopeItemCategory" name="category" required>
+                <option value="">Select a category</option>
+                <option value="labour">Labour</option>
+                <option value="material">Material</option>
+                <option value="equipment_plant">Equipment / Plant</option>
+                <option value="professional_technical">Professional / Technical</option>
+                <option value="government_statutory">Government / Statutory</option>
+                <option value="legal_documentation">Legal / Documentation</option>
+                <option value="site_expense">Site Expense</option>
+                <option value="mixed">Mixed</option>
+                <option value="other">Other</option>
+            </select>
+        </label>
+        <div id="ownerScopePaymentFields" hidden>
+            <label class="owner-scope-field" for="ownerScopePaymentDate">
+                Payment Date <span aria-hidden="true">*</span>
+                <input id="ownerScopePaymentDate" name="paymentDate" type="date" required disabled>
+            </label>
+            <label class="owner-scope-field" for="ownerScopeAmountPaid">
+                Amount Paid <span aria-hidden="true">*</span>
+                <input id="ownerScopeAmountPaid" name="amountPaid" type="number" min="0" step="any" required disabled>
+            </label>
+            <label class="owner-scope-field" for="ownerScopePaymentMode">
+                Payment Mode
+                <select id="ownerScopePaymentMode" name="paymentMode" disabled>
+                    <option value="">Select a payment mode</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                    <option value="UPI">UPI</option>
+                    <option value="Cheque">Cheque</option>
+                    <option value="Other">Other</option>
+                </select>
+            </label>
+        </div>
+        <label class="owner-scope-field" for="ownerScopeItemRemarks">
+            Remarks
+            <textarea id="ownerScopeItemRemarks" name="remarks" rows="3" maxlength="2000"></textarea>
+        </label>
+        <p id="ownerScopeFormError" class="owner-scope-form-error" role="alert" hidden></p>
+        <div class="owner-scope-dialog-actions">
+            <button id="cancelOwnerScopeDialog" class="owner-scope-secondary-button" type="button">Cancel</button>
+            <button id="saveOwnerScopeItem" class="owner-scope-primary-button" type="submit">Save Item</button>
+        </div>
+    </form>
+</dialog>
+
+<dialog id="ownerScopePaymentHistory" class="owner-scope-dialog owner-scope-history-dialog" aria-labelledby="ownerScopeHistoryTitle">
+    <div class="owner-scope-dialog-heading">
+        <div>
+            <p class="owner-scope-kicker">OWNER SCOPE PAYMENT HISTORY</p>
+            <h2 id="ownerScopeHistoryTitle">Payment History</h2>
+        </div>
+        <button id="closeOwnerScopeHistory" class="owner-scope-close-button" type="button" aria-label="Close">×</button>
+    </div>
+    <div class="owner-scope-table-wrap">
+        <table class="owner-scope-table owner-scope-history-table">
+            <thead>
+                <tr>
+                    <th scope="col">Date</th>
+                    <th scope="col">Amount</th>
+                    <th scope="col">Payment Mode</th>
+                    <th scope="col">Remarks</th>
+                </tr>
+            </thead>
+            <tbody id="ownerScopePaymentHistoryBody"></tbody>
+        </table>
+    </div>
+    <div id="ownerScopePaymentHistoryEmpty" class="owner-scope-empty" hidden>
+        <strong>No payments recorded for this item.</strong>
+    </div>
+    <p class="owner-scope-history-total">Total Paid: <strong id="ownerScopeHistoryTotal">₹0</strong></p>
+</dialog>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script type="module" src="{{ url_for('static', filename='owner_scope.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function flaskUserPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function isActiveUserRecord(user) {
+      return user.active_sessions is list
+        && user.active_sessions.hasAny([request.auth.token.sid])
+        && (
+          !('is_active' in user)
+          || user.is_active == true
+        )
+        && (
+          !('status' in user)
+          || user.status == null
+          || user.status in [
+            'active', 'enabled', 'true', '1', 'yes', 'open'
+          ]
+        )
+        && (
+          !('must_change_password' in user)
+          || user.must_change_password != true
+        )
+        && (
+          (
+            'authorization_version' in user
+            && user.authorization_version == request.auth.token.ver
+          )
+          || (
+            (
+              !('authorization_version' in user)
+              || user.authorization_version == null
+            )
+            && request.auth.token.ver == 0
+          )
+        );
+    }
+
+    function hasActiveFlaskSession() {
+      return request.auth != null
+        && exists(flaskUserPath())
+        && isActiveUserRecord(get(flaskUserPath()).data);
+    }
+
+    function hasAnyPermission(permissions) {
+      return hasActiveFlaskSession()
+        && request.auth.token.perms is list
+        && request.auth.token.perms.hasAny(permissions);
+    }
+
+    function hasPermission(permission) {
+      return hasAnyPermission([permission]);
+    }
+
+    match /trades/{tradeId} {
+      allow get, list: if hasAnyPermission([
+        'trade_builder.read',
+        'labour_payments.read',
+        'ledger.read',
+        'building_cost_summary.read'
+      ]);
+      allow write: if false;
+    }
+
+    match /daily_records/{recordId} {
+      allow get, list: if hasPermission('daily_reports.read');
+      allow write: if false;
+    }
+
+    match /material_categories/{categoryId} {
+      allow get, list: if hasPermission('materials.read')
+        || hasPermission('building_cost_summary.read');
+      allow write: if false;
+    }
+
+    match /materials/{materialId} {
+      allow get, list: if hasPermission('materials.read');
+      allow write: if false;
+    }
+
+    match /material_brands/{brandId} {
+      allow get, list: if hasPermission('materials.read');
+      allow write: if false;
+    }
+
+    match /suppliers/{supplierId} {
+      allow get, list: if hasPermission('materials.read');
+      allow write: if false;
+    }
+
+    match /material_purchases/{purchaseId} {
+      allow get, list: if hasPermission('materials.read')
+        || hasPermission('building_cost_summary.read');
+      allow write: if false;
+    }
+
+    match /material_consumptions/{consumptionId} {
+      allow get, list: if hasPermission('materials.read');
+      allow write: if false;
+    }
+
+    match /drawings_categories/{categoryId} {
+      allow get, list: if hasPermission('drawings.read');
+      allow write: if false;
+    }
+
+    match /drawings/{drawingId} {
+      allow get, list: if hasPermission('drawings.read');
+      allow write: if false;
+    }
+
+    match /owner_scopes/{scopeId}/payments/{paymentId} {
+      allow get, list: if scopeId == 'owner-scope'
+        && hasPermission('building_cost_summary.read');
+      allow write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

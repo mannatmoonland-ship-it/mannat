@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Developer Documentation - Mannat Moon Construction</title>
+    <style>
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body { margin: 0; color: #1e293b; background: #f8fafc; font-family: Arial, Helvetica, sans-serif; }
+        header { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 22px 5%; color: #fff; background: #111827; border-bottom: 3px solid #0ea5e9; }
+        header h1 { margin: 0 0 5px; font-size: 26px; }
+        header p { margin: 0; color: #cbd5e1; font-size: 14px; }
+        main { width: min(1040px, calc(100% - 36px)); margin: 32px auto; }
+        .guide-panel { padding: 30px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 4px 12px rgba(15, 23, 42, .06); }
+        .guide-intro { padding-bottom: 22px; border-bottom: 1px solid #e2e8f0; }
+        .guide-intro h2 { margin: 0 0 10px; font-size: 21px; }
+        .guide-intro p { margin: 0; color: #475569; line-height: 1.65; }
+        .guide-toc { margin: 22px 0 8px; padding: 20px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+        .guide-toc h2 { margin: 0 0 12px; font-size: 17px; }
+        .guide-toc ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 26px; margin: 0; padding-left: 22px; }
+        .guide-toc li { padding-left: 2px; color: #0f766e; line-height: 1.5; }
+        a { color: #0369a1; }
+        .guide-toc a { text-decoration-thickness: 1px; text-underline-offset: 3px; }
+        .guide-toc a:hover { color: #0f766e; }
+        .guide-toc a:focus-visible, .guide-button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }
+        .guide-chapter { padding: 24px 0; border-bottom: 1px solid #e2e8f0; scroll-margin-top: 20px; }
+        .guide-chapter:last-of-type { border-bottom: 0; }
+        .guide-chapter h2 { margin: 0 0 12px; color: #0f172a; font-size: 20px; }
+        .guide-chapter h3 { margin: 18px 0 8px; font-size: 16px; }
+        .guide-chapter p, .guide-chapter li { color: #475569; line-height: 1.65; }
+        .guide-chapter p { margin: 8px 0 12px; }
+        .guide-chapter ol, .guide-chapter ul { margin: 8px 0 12px; padding-left: 24px; }
+        .guide-chapter li + li { margin-top: 5px; }
+        .guide-note { margin: 14px 0; padding: 12px 14px; overflow-wrap: anywhere; border-left: 4px solid #0f766e; background: #f0fdfa; color: #334155; line-height: 1.6; }
+        .guide-config { margin: 12px 0 18px; }
+        .guide-config div { display: grid; grid-template-columns: minmax(220px, .8fr) minmax(0, 1.5fr); gap: 14px; padding: 10px 0; border-bottom: 1px solid #e2e8f0; }
+        .guide-config dt { font-weight: 700; }
+        .guide-config dd { margin: 0; color: #475569; line-height: 1.55; overflow-wrap: anywhere; }
+        .guide-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 22px; padding-top: 20px; border-top: 1px solid #e2e8f0; }
+        .guide-button { display: inline-block; padding: 11px 18px; border-radius: 8px; color: #fff; background: #0ea5e9; font-weight: 700; text-decoration: none; }
+        .guide-button:hover { background: #0284c7; }
+        .guide-top-link { color: #cbd5e1; text-decoration: none; white-space: nowrap; }
+        .guide-top-link:hover { color: #fff; text-decoration: underline; }
+        @media (max-width: 640px) {
+            header { align-items: flex-start; flex-direction: column; padding: 20px 18px; }
+            main { width: min(100% - 24px, 1040px); margin: 18px auto; }
+            .guide-panel { padding: 20px 18px; }
+            .guide-toc { padding: 16px; }
+            .guide-toc ol { grid-template-columns: 1fr; gap: 7px; }
+            .guide-chapter { padding: 20px 0; }
+            .guide-actions { flex-wrap: wrap; }
+            .guide-config div { grid-template-columns: 1fr; gap: 4px; }
+        }
+    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+</head>
+<body>
+    <header>
+        <div>
+            <h1>Developer Documentation</h1>
+            <p>Mannat Moon Construction</p>
+        </div>
+        {% include '_navigation.html' %}
+        <a class="guide-top-link" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+    </header>
+
+    <main>
+        <article class="guide-panel">
+            <section class="guide-intro" aria-labelledby="guideWelcome">
+                <h2 id="guideWelcome">Application Architecture and Setup</h2>
+                <p>This guide summarizes the active Flask application, its page templates and browser modules, its storage connections, and the local development workflow. It documents source-verified behavior only. Never place credential values in source control or this guide.</p>
+            </section>
+
+            <nav class="guide-toc" aria-labelledby="tocTitle">
+                <h2 id="tocTitle">Contents</h2>
+                <ol>
+                    <li><a href="#overview">Project Overview</a></li>
+                    <li><a href="#structure">Project Folder Structure</a></li>
+                    <li><a href="#architecture">Application Architecture</a></li>
+                    <li><a href="#environment">Python Environment and Dependencies</a></li>
+                    <li><a href="#routes">Flask Application and Routes</a></li>
+                    <li><a href="#frontend">Frontend Architecture</a></li>
+                    <li><a href="#firebase">Firebase and Firestore Integration</a></li>
+                    <li><a href="#collections">Database Collections and Document Structures</a></li>
+                    <li><a href="#authentication">Authentication and Authorization</a></li>
+                    <li><a href="#daily-reports">Daily Reports Architecture</a></li>
+                    <li><a href="#materials">Materials Module</a></li>
+                    <li><a href="#trades-labour">Trades and Labour Modules</a></li>
+                    <li><a href="#drawings">Drawings Library</a></li>
+                    <li><a href="#drive-media">Google Drive Integration</a></li>
+                    <li><a href="#pdf-printing">PDF Generation and Printing</a></li>
+                    <li><a href="#configuration">Environment Variables and Configuration</a></li>
+                    <li><a href="#local-development">Local Development Setup</a></li>
+                    <li><a href="#railway">Railway Deployment</a></li>
+                    <li><a href="#security">Security Considerations</a></li>
+                    <li><a href="#troubleshooting">Troubleshooting and Debugging</a></li>
+                    <li><a href="#future-development">Guidelines for Future Development</a></li>
+                </ol>
+            </nav>
+
+            <section class="guide-chapter" id="overview" aria-labelledby="overviewTitle">
+                <h2 id="overviewTitle">1. Project Overview</h2>
+                <p>Mannat Moon Construction is a Flask-based construction management application. Its active modules support trade and worker-category setup, date-based site reports, material and supplier records, labour payments, ledgers, construction drawings, and building cost summaries. Super Admins also have user-management and local backup/restore tools.</p>
+                <p>The stack is Python with Flask and Jinja templates, browser JavaScript ES modules with HTML and CSS, and Firebase/Firestore for application data. Playwright is used by the Google Photos link helper; Requests is used for HTTP fetching. jsPDF and its AutoTable plugin are loaded by pages that create ledger PDFs.</p>
+                <div class="guide-note"><strong>Google Drive boundary:</strong> The Drawings Library saves a user-provided Drive PDF URL and opens that URL in a new browser tab. The current code does not use a Google Drive API client.</div>
+            </section>
+
+            <section class="guide-chapter" id="structure" aria-labelledby="structureTitle">
+                <h2 id="structureTitle">2. Project Folder Structure</h2>
+                <ul>
+                    <li><code>app.py</code> - Flask application entry point, configuration loading, session authentication, application routes, Firestore user-store classes, and Google Photos helper routes.</li>
+                    <li><code>snapshot_routes.py</code> and <code>snapshot_service.py</code> - Super Admin backup, verification, restore, and project-switch routes, plus snapshot data operations.</li>
+                    <li><code>requirements.txt</code> - Python package requirements.</li>
+                    <li><code>templates/</code> - Jinja-rendered pages: <code>dashboard.html</code>, <code>index.html</code> (Trade Builder), <code>labour_payments.html</code>, <code>daily_reports.html</code>, <code>materials.html</code>, <code>drawings.html</code>, <code>ledger_prints.html</code>, <code>building_cost_summary.html</code>, <code>snapshots.html</code>, login/account pages, and the two guide pages.</li>
+                    <li><code>static/</code> - Page JavaScript modules, shared dialog and connection-monitor assets, stylesheets, and calculation/PDF helper modules.</li>
+                    <li><code>tests/</code> - Python and JavaScript regression tests for routes, business logic, and UI behavior. Root-level <code>test_settlement_logic.js</code> and <code>test_settlement_logic.mjs</code> are settlement logic checks.</li>
+                    <li><code>instance/</code> and <code>backups/</code> - Local runtime configuration and backup data. Treat their contents as environment-specific data, not source material for documentation.</li>
+                    <li><code>README.txt</code> - Existing setup notes, including the Playwright Chromium installation step.</li>
+                </ul>
+                <div class="guide-note"><strong>Credentials:</strong> Local environment files and service-account JSON files may contain secrets. Do not copy their contents into documentation, logs, source control, or support messages.</div>
+            </section>
+
+            <section class="guide-chapter" id="architecture" aria-labelledby="architectureTitle">
+                <h2 id="architectureTitle">3. Application Architecture</h2>
+                <h3>Flask backend</h3>
+                <p><code>app.py</code> creates the Flask app, loads environment configuration, provides session and role checks, renders pages, and serves JSON routes. It defines <code>FirebaseFirestoreStore</code> and an in-memory store used only when explicitly configured for development/testing. <code>snapshot_routes.py</code> registers a Flask Blueprint for administrator backup workflows.</p>
+                <h3>Templates and browser modules</h3>
+                <p>Files in <code>templates/</code> are rendered with Flask/Jinja. Most operational pages load a page-specific ES module from <code>static/</code>. JavaScript uses DOM events and page-specific state; there is no single-page-app framework.</p>
+                <h3>Firebase and Firestore</h3>
+                <p>The browser-facing modules request the active public web configuration from <code>/api/firebase-web-config</code>, await the Firebase Auth custom-token bridge for the current Flask session, and then use Firestore for permission-scoped reads. Firestore Rules validate the token's Flask session ID and authorization version against the server-owned user record. Flask/Admin SDK APIs handle mutations; Admin SDK access bypasses Firestore Rules and must retain its own permission checks.</p>
+                <p>Active browser modules refer to collections including <code>trades</code>, <code>daily_records</code>, <code>drawings_categories</code>, <code>drawings</code>, and the material categories, suppliers, purchases, and consumption collections. Field shapes are owned by the respective module code; review those modules before changing data behavior.</p>
+                <h3>Google Photos and Drive</h3>
+                <p>The <code>/google-photos</code> helper tries Requests first and then a pooled headless Playwright browser to find a shared image URL; results are cached in process memory. Daily Reports can store photo/video evidence links. Drawing PDFs are linked by URL and opened by the browser; no Drive API integration is present.</p>
+                <h3>PDF output</h3>
+                <p>Trade and labour ledger output uses <code>static/ledger_pdf.js</code> and the page-loaded jsPDF/AutoTable browser libraries. Daily Reports use the browser print dialog for print and Save as PDF.</p>
+            </section>
+
+            <section class="guide-chapter" id="environment" aria-labelledby="environmentTitle">
+                <h2 id="environmentTitle">4. Python Environment and Dependencies</h2>
+                <p>The repository does not declare a pinned Python version in a packaging manifest. Use a currently supported CPython version compatible with the listed packages. The project has been exercised in a Python 3.9 environment, but its installed Google libraries warn that Python 3.9 is end-of-life; use a supported newer runtime for maintained deployments.</p>
+                <h3>Windows development setup</h3>
+                <ol>
+                    <li>Open PowerShell in the repository root.</li>
+                    <li>Create and activate a virtual environment:</li>
+                </ol>
+                <pre><code>py -m venv .venv
+.\.venv\Scripts\Activate.ps1</code></pre>
+                <ol start="3">
+                    <li>Install the declared packages and the Chromium browser used by Playwright:</li>
+                </ol>
+                <pre><code>python -m pip install -r requirements.txt
+python -m playwright install chromium</code></pre>
+                <ol start="4">
+                    <li>Configure the required local environment and Firebase credentials without adding secrets to source control.</li>
+                    <li>Start the app:</li>
+                </ol>
+                <pre><code>python app.py</code></pre>
+                <p>The development entry point prints a local address at <code>http://127.0.0.1:5020</code>. It also binds to <code>0.0.0.0:5020</code> for network access; expose that only on a trusted network and with appropriate production controls.</p>
+                <h3>Declared dependencies</h3>
+                <p><code>requirements.txt</code> declares Flask 3.x, Flask-Mail, python-dotenv, Playwright, Requests, and firebase-admin 6.5 through versions below 8.0. Package versions are bounded as shown in that file; no separate Python version pin is provided.</p>
+                <h3>Configuration names</h3>
+                <p><code>app.py</code> loads local environment values with python-dotenv. Configure values in the deployment environment or a private local environment file; never paste secret values into this page or commit them.</p>
+                <dl class="guide-config">
+                    <div><dt><code>SECRET_KEY</code></dt><dd>Flask session signing key. Set a unique strong value for each deployment; do not rely on the source's development fallback.</dd></div>
+                    <div><dt><code>FLASK_ENV</code></dt><dd>The app enables secure session cookies when this is set to <code>production</code>.</dd></div>
+                    <div><dt><code>FIREBASE_PROJECT_ID</code></dt><dd>Project ID for the active Firebase project.</dd></div>
+                    <div><dt><code>FIREBASE_SERVICE_ACCOUNT</code></dt><dd>Optional path to the Admin SDK service-account JSON. If not provided, the app also checks for Application Default Credentials and its local service-account discovery.</dd></div>
+                    <div><dt><code>FIREBASE_WEB_CONFIG</code></dt><dd>Optional JSON object for the browser Firebase app. Its project ID must match <code>FIREBASE_PROJECT_ID</code>.</dd></div>
+                    <div><dt><code>FIRESTORE_MODE</code> and <code>ALLOW_IN_MEMORY_FIRESTORE</code></dt><dd>Control the configured store mode and explicit in-memory development/test fallback. Do not use in-memory mode when persistent production data is required.</dd></div>
+                    <div><dt><code>MAIL_SERVER</code>, <code>MAIL_PORT</code>, <code>MAIL_USE_TLS</code>, <code>MAIL_USERNAME</code>, <code>MAIL_PASSWORD</code>, <code>MAIL_DEFAULT_SENDER</code></dt><dd>Configure Flask-Mail for password reset and test email workflows. Keep mail credentials private.</dd></div>
+                </dl>
+                <p>Snapshot project switching writes active project details under <code>instance/</code>. Treat runtime files in that folder as deployment state; do not copy credential values into source control.</p>
+            </section>
+
+            <section class="guide-chapter" id="routes" aria-labelledby="routesTitle">
+                <h2 id="routesTitle">5. Flask Application and Routes</h2>
+                <p><code>app.py</code> is the entry point and registers <code>snapshot_blueprint</code> from <code>snapshot_routes.py</code>. <code>@require_login</code> protects signed-in pages; <code>@require_role("super_admin")</code> protects administration pages. Snapshot API routes also validate a session CSRF token.</p>
+                <h3>Page routes</h3>
+                <ul>
+                    <li><code>GET /</code> - Dashboard.</li>
+                    <li><code>GET /login</code>, <code>POST /login</code>, <code>POST /logout</code>, and <code>GET/POST /change-password</code> - Session and password flows.</li>
+                    <li><code>GET/POST /password-reset-request</code>, <code>GET/POST /reset-password/&lt;user_id&gt;</code>, and <code>POST /reset-password/&lt;user_id&gt;/validate</code> - Password reset request and link validation/completion. <code>/super-admin-recovery</code> handles the separate Super Admin recovery flow.</li>
+                    <li><code>GET /trade-builder</code> - Renders <code>index.html</code> in Trade Builder mode.</li>
+                    <li><code>GET /labour-payments</code> - Renders <code>labour_payments.html</code>, which includes <code>index.html</code> in financial-only mode.</li>
+                    <li><code>GET /daily-reports</code>, <code>/materials</code>, <code>/drawings</code>, <code>/ledger-prints</code>, and <code>/building-cost-summary</code> - Render their respective module templates.</li>
+                    <li><code>GET /user-guide</code> - Signed-in user guide. <code>GET /developer-guide</code> - Super Admin-only developer guide.</li>
+                    <li><code>GET /user-management</code> and related user-management routes - Super Admin account and staff-type management.</li>
+                    <li><code>GET /snapshots</code> - Super Admin backup and restore page.</li>
+                    <li><code>GET/POST /google-photos</code>, <code>GET /extract-google-photos-url</code>, and <code>GET /image</code> - Shared-photo image helper routes.</li>
+                </ul>
+                <h3>JSON and support routes</h3>
+                <ul>
+                    <li><code>GET /api/firebase-web-config</code> - Returns the active public web configuration to signed-in browser modules.</li>
+                    <li><code>GET /api/daily-records/dates</code>, <code>POST /api/daily-records</code>, and <code>PATCH /api/daily-records/&lt;record_id&gt;</code> - Daily Reports calendar and record operations.</li>
+                    <li><code>/api/snapshots/...</code> - Snapshot history, create, verify, delete, restore preview/restore, folder, and project-switch operations in <code>snapshot_routes.py</code>.</li>
+                    <li><code>GET /health</code> - Basic health response. <code>GET /favicon.ico</code> - Static favicon.</li>
+                </ul>
+            </section>
+
+            <section class="guide-chapter" id="frontend" aria-labelledby="frontendTitle">
+                <h2 id="frontendTitle">6. Frontend Architecture</h2>
+                <h3>Templates and page entry points</h3>
+                <ul>
+                    <li><code>templates/dashboard.html</code> - Dashboard card grid and signed-in user controls.</li>
+                    <li><code>templates/index.html</code> with <code>static/app.js</code> - Trade Builder; also supplies the Labour Payments view through <code>templates/labour_payments.html</code>.</li>
+                    <li><code>templates/daily_reports.html</code> with <code>static/daily_reports.js</code> - Date-based site records and evidence.</li>
+                    <li><code>templates/materials.html</code> with <code>static/materials.js</code> - Categories, suppliers, stock, purchases, and consumption.</li>
+                    <li><code>templates/drawings.html</code> with <code>static/drawings.js</code> - Drawing categories and PDF links.</li>
+                    <li><code>templates/ledger_prints.html</code> with <code>static/ledger_prints.js</code>, and <code>templates/building_cost_summary.html</code> with <code>static/building_cost_summary.js</code> - Ledger and cost summary views.</li>
+                    <li><code>templates/snapshots.html</code> with <code>static/snapshots.js</code> - Super Admin snapshot workflow.</li>
+                </ul>
+                <h3>Shared and supporting modules</h3>
+                <ul>
+                    <li><code>static/dialogs.js</code> and <code>static/dialogs.css</code> provide shared alerts, prompts, confirmation, and success/error dialogs.</li>
+                    <li><code>static/settlement_logic.mjs</code>, <code>static/contract_payment_summary.mjs</code>, and <code>static/payment_sort.mjs</code> support payment calculations and ordering.</li>
+                    <li><code>static/materials_logic.mjs</code> and <code>static/building_cost_summary_logic.mjs</code> contain material and cost calculations.</li>
+                    <li><code>static/ledger_pdf.js</code> creates ledger PDFs. Page-specific CSS files provide styles; <code>office_connection.js</code> and <code>office_connection.css</code> are injected into successful HTML responses by an <code>app.py</code> response hook.</li>
+                </ul>
+                <h3>Communication paths</h3>
+                <p>Jinja renders page markup and route links. The page's ES module attaches event handlers to that markup. Operational modules read permission-scoped Firestore data through the authenticated Firebase Web SDK and send mutations to permission-checked Flask JSON endpoints. Snapshot actions use authenticated JSON requests with the page's CSRF header. Google Photos helper routes use ordinary form or fetch requests. There is no shared frontend framework or common REST layer for every module.</p>
+            </section>
+
+            <section class="guide-chapter" id="firebase" aria-labelledby="firebaseTitle">
+                <h2 id="firebaseTitle">7. Firebase and Firestore Integration</h2>
+                <h3>Server-side connection</h3>
+                <p><code>app.py</code> uses the Firebase Admin SDK through <code>FirebaseFirestoreStore</code>. <code>get_user_store()</code> supplies the account store and caches the Admin client for the active project. Credentials are resolved from the configured service-account path or Application Default Credentials; the app also supports an explicitly selected in-memory store for development and tests.</p>
+                <p>The active project configuration is assembled by <code>get_active_firebase_config()</code>. It reads the project ID and optional web configuration from the environment, or the active project file managed under <code>instance/</code>. The Admin and browser project IDs must match.</p>
+                <h3>Browser-side connection</h3>
+                <p>Active Firestore-reading page modules import <code>static/firebase_auth.js</code> and await <code>firebaseAuthReady</code> before using the Firebase Web SDK. The bridge requests a custom token from Flask, whose identity and permission claims are compiled from the current authenticated account. The configuration endpoint returns only the public web-app configuration; never put Admin credentials in browser code.</p>
+                <h3>Flask and browser data paths</h3>
+                <ul>
+                    <li>Active browser modules use the Web SDK for the reads listed in <code>firestore.rules</code>. Direct browser writes are denied; trade, payment, contract, Materials, Drawings, Owner Scope, and Daily Reports mutations use permission-checked Flask APIs.</li>
+                    <li>Daily Reports use Flask JSON endpoints for record dates, authors, safe trade/category-name options, creation, editing, and deletion. Daily records remain permission-scoped Web SDK reads. The trade-options endpoint omits embedded wage, contract, and payment fields.</li>
+                    <li>Snapshot operations use authenticated Flask JSON routes in <code>snapshot_routes.py</code>; the page includes a session CSRF value with its requests.</li>
+                    <li>Rules deny access by default, require an active Flask-backed Firebase session and permission claim for browser reads, and deny direct client writes. Emulator tests are in <code>tests/firestore.rules.test.mjs</code>; deploy the rules to every Firebase project the application can select.</li>
+                    <li>Owner Scope data has no per-owner or per-user field. Its active read/write APIs are server-mediated; Building Cost Summary has permission-scoped read access only to the fixed <code>owner-scope</code> payments path. This is not per-owner isolation.</li>
+                </ul>
+            </section>
+
+            <section class="guide-chapter" id="collections" aria-labelledby="collectionsTitle">
+                <h2 id="collectionsTitle">8. Database Collections and Document Structures</h2>
+                <p>The names below are the collections directly referenced by the current source. Fields listed are important fields seen in the active reads and writes; optional and older records may contain additional fields.</p>
+                <h3>Accounts and administration</h3>
+                <dl class="guide-config">
+                    <div><dt><code>users</code></dt><dd>Username, names, email addresses, role, custom staff type, and password hash are strings; <code>status</code> is a string, <code>is_active</code> and <code>must_change_password</code> are booleans, and <code>active_sessions</code> and <code>permissions</code> are string arrays. Reset/recovery hashes and expiry/status fields support recovery; plaintext passwords and reset tokens are not stored.</dd></div>
+                    <div><dt><code>custom_staff_types</code></dt><dd>Custom role-name documents with string fields <code>id</code>, <code>name</code>, and <code>created_by</code>, plus ISO date-time strings <code>created_at</code> and, after edits, <code>updated_at</code>.</dd></div>
+                    <div><dt><code>audit_log</code></dt><dd>Audit entries with string fields <code>actor_id</code>, <code>target_user_id</code>, <code>action</code>, <code>details</code>, and <code>timestamp</code>. The document ID is generated separately from the entry payload.</dd></div>
+                </dl>
+                <h3>Trades, reports, and payments</h3>
+                <dl class="guide-config">
+                    <div><dt><code>trades</code></dt><dd>One document per trade. <code>name</code> is a string; <code>workerCategories</code>, <code>commonFields</code>, <code>contractItems</code>, and <code>paymentTransactions</code> are arrays. Trade timestamps are ISO date-time strings. A worker category is an object with string <code>id</code>/<code>name</code>/<code>payment_type</code> and date strings; daily-wage categories have numeric <code>currentWage</code> and a <code>wageHistory</code> array of objects with numeric <code>dailyWage</code> and date/time strings. Lump-sum categories have numeric <code>lump_sum_amount</code> and optional string <code>work_description</code>.</dd></div>
+                    <div><dt><code>trades.contractItems[]</code></dt><dd>Nested under a trade, not a separate collection. Each object has string <code>id</code>/<code>name</code>, numeric <code>amount</code>, and ISO date-time strings <code>createdAt</code>/<code>updatedAt</code>.</dd></div>
+                    <div><dt><code>trades.paymentTransactions[]</code></dt><dd>Also nested under the trade document, not a separate collection. Entries use string <code>id</code>, <code>type</code>, <code>date</code>, <code>paymentMode</code>, and <code>remarks</code>; numeric <code>amount</code>, <code>labourEarned</code>, <code>advanceAdjustment</code>, and <code>outstandingBalance</code>; and ISO date-time strings <code>createdAt</code>/<code>updatedAt</code>. Lump-sum entries may include string <code>workerCategoryId</code> and <code>workerCategoryName</code>.</dd></div>
+                    <div><dt><code>daily_records</code></dt><dd>One site record per document. Dates, location/activity, trade ID/name, weather descriptions, materials, and notes are strings. <code>workerCounts</code> is an object mapping category names to numeric counts; totals and legacy worker-count fields are numbers. <code>evidence</code> is an array of objects with string <code>type</code>, <code>title</code>, and <code>url</code>. The server adds creator identity, ISO date-time strings, and edit attribution fields.</dd></div>
+                </dl>
+                <h3>Materials and drawings</h3>
+                <dl class="guide-config">
+                    <div><dt><code>material_categories</code></dt><dd>Category <code>name</code>, <code>unit</code>, and <code>description</code> are strings; <code>brands</code> is an array of objects with string <code>id</code>/<code>name</code>. Create/update times use Firestore server timestamps.</dd></div>
+                    <div><dt><code>suppliers</code></dt><dd>Supplier names, contact/address data, and phone/email fields are strings. <code>categoryIds</code> is a string array; <code>categoryBrandAssignments</code> is an array of objects containing a string <code>categoryId</code> and string-array <code>brandIds</code>.</dd></div>
+                    <div><dt><code>material_purchases</code></dt><dd><code>date</code>, category/brand/supplier IDs and display names, <code>unit</code>, and <code>billLink</code> are strings. <code>quantity</code>, <code>rate</code>, and <code>totalAmount</code> are numeric when applicable; non-Cement purchase quantity/rate may be null. Create/update times use Firestore server timestamps.</dd></div>
+                    <div><dt><code>material_consumptions</code></dt><dd><code>date</code>, category ID/name, <code>unit</code>, <code>workLocation</code>, and <code>remarks</code> are strings; <code>quantity</code> is numeric. Timestamps use Firestore server timestamps. The current UI records consumption only for Cement categories.</dd></div>
+                    <div><dt><code>drawings_categories</code></dt><dd>String <code>name</code>, numeric <code>sortOrder</code>, and Firestore server timestamps.</dd></div>
+                    <div><dt><code>drawings</code></dt><dd>Category IDs/names, drawing name, number, revision, Drive URL, and description are strings; <code>sortOrder</code> is numeric. Create/update times use Firestore server timestamps.</dd></div>
+                </dl>
+                <h3>Relationships and shared collections</h3>
+                <ul>
+                    <li><code>trades</code> is shared by Trade Builder, Daily Reports (trade selection and worker categories), Labour Payments, Ledger Prints, and Building Cost Summary. Payment and contract records stay nested within each trade.</li>
+                    <li><code>daily_records.tradeId</code> identifies the selected trade; <code>tradeName</code> is also stored with the record. <code>workerCounts</code> records counts by category; there is no separate worker attendance collection in the active modules.</li>
+                    <li>Material purchase and consumption documents refer to categories with <code>categoryId</code> and retain <code>categoryName</code> for display. Supplier assignments refer to category and brand IDs; purchases may also refer to a supplier by ID.</li>
+                    <li>Current Material Builder code writes brand entries inside <code>material_categories.brands</code>. It also reads <code>materials</code> and <code>material_brands</code> when loading legacy data; this UI does not write those two collections.</li>
+                    <li>Drawing documents refer to their category through <code>categoryId</code>; the category name is also copied to <code>categoryName</code>. Category sorting updates <code>drawings_categories.sortOrder</code>; drawing sorting updates <code>drawings.sortOrder</code> within a category.</li>
+                    <li>Building Cost Summary reads <code>material_categories</code>, <code>material_purchases</code>, and <code>trades</code>; it shares the source collections rather than maintaining its own copy.</li>
+                </ul>
+                <div class="guide-note">The IDs above are application-level document IDs or fields used to connect related records. Firestore does not enforce relational foreign keys for these values.</div>
+            </section>
+
+            <section class="guide-chapter" id="authentication" aria-labelledby="authenticationTitle">
+                <h2 id="authenticationTitle">9. Authentication and Authorization</h2>
+                <h3>Login and session lifecycle</h3>
+                <ul>
+                    <li><code>POST /login</code> loads a user by normalized username and checks the submitted password with Werkzeug's <code>check_password_hash</code>. New and changed passwords are stored with <code>generate_password_hash</code>; plaintext passwords are not saved.</li>
+                    <li><code>set_session_for_user()</code> clears any old session, creates a new random session ID, and stores the user ID, role, and session ID in Flask's signed session. It also adds that session ID to the account's <code>active_sessions</code> list.</li>
+                    <li><code>get_current_user()</code> reloads the account and accepts the session only if its ID is still active. The session lifetime is eight hours; cookie settings are HttpOnly and SameSite=Lax, and Secure is enabled when <code>FLASK_ENV</code> is <code>production</code>.</li>
+                    <li><code>POST /logout</code> removes the current ID from <code>active_sessions</code> and clears the Flask session.</li>
+                </ul>
+                <h3>Roles and route checks</h3>
+                <p>Built-in roles are <code>super_admin</code>, <code>office_staff</code>, and <code>supervisor</code>. Additional staff-type names can be configured. <code>@require_login</code> checks for a valid signed-in session; <code>@require_role(...)</code> checks a role. User Management, Snapshot, and Developer Guide routes are restricted to Super Admins. The <code>ROLE_PERMISSIONS</code> constants describe role capability labels, but individual Flask decorators remain the route-level checks.</p>
+                <p>The permissions list contains a <code>labour_muster</code> label, but there is no distinct attendance page or route in the active route/template set. Do not treat that label as an implemented muster workflow.</p>
+                <h3>Password change and recovery</h3>
+                <ul>
+                    <li><code>POST /change-password</code> verifies the current password, checks that confirmation matches, enforces the configured minimum length and character classes, then saves a new Werkzeug password hash. On a password change, other active sessions are invalidated.</li>
+                    <li><code>/password-reset-request</code> issues a one-time reset link by email for an eligible active account with a saved email address. The stored token is hashed, expires after 30 minutes, and reset requests are rate-limited by account and IP.</li>
+                    <li>Super Admins can reset regular staff accounts and set <code>must_change_password</code> so the user is asked to change their password at the next login. The Super Admin account uses the separate recovery flow. Reset tokens, recovery codes, passwords, and credentials must never be logged or included in documentation.</li>
+                </ul>
+                <div class="guide-note">Flask route protection and the browser UI do not replace Firestore Security Rules. Because several modules access Firestore directly from the browser, configure the Firebase project's rules to restrict data access appropriately.</div>
+            </section>
+
+            <section class="guide-chapter" id="daily-reports" aria-labelledby="dailyReportsTitle">
+                <h2 id="dailyReportsTitle">10. Daily Reports Architecture</h2>
+                <h3>Data model and trade relationship</h3>
+                <p>The supported editable payload is defined by <code>DAILY_RECORD_EDITABLE_FIELDS</code> in <code>app.py</code>. It includes the date, floor/location, activity, trade ID/name, worker counts and totals, weather, materials, notes, and evidence. The server adds creator identity and timestamps; edits add last-editor attribution. The corresponding Firestore collection is <code>daily_records</code>.</p>
+                <p><code>static/daily_reports.js</code> reads <code>trades</code> to populate the trade selector and load that trade's worker categories. It saves category counts in <code>workerCounts</code> and keeps legacy count fields such as <code>masonCount</code>, <code>manMazdoorCount</code>, and <code>womanMazdoorCount</code> in the payload. Reports refer to the trade by <code>tradeId</code> and also store <code>tradeName</code>.</p>
+                <h3>Read and write paths</h3>
+                <ul>
+                    <li>Records for the selected date are queried from <code>daily_records</code> in the browser module. Calendar date availability is fetched from <code>GET /api/daily-records/dates?start=...&amp;end=...</code>.</li>
+                    <li>New records use <code>POST /api/daily-records</code>; edits use <code>PATCH /api/daily-records/&lt;record_id&gt;</code>. Both require a signed-in user and accept only fields in the server allow-list.</li>
+                    <li>Deletion uses <code>DELETE /api/daily-records/&lt;record_id&gt;</code> after the in-page confirmation dialog. Flask requires an authenticated session, CSRF token, and the compiled <code>daily_reports.delete</code> permission, then deletes only that document from <code>daily_records</code>.</li>
+                </ul>
+                <h3>Visual evidence and output</h3>
+                <p><code>evidence</code> is an array on each daily record. The editor builds entries with <code>type</code>, <code>title</code>, and <code>url</code>; available types in the form are Photo, Video, Document, and Drawing. Links may point to YouTube, Google Drive, or Google Photos. Photo previews use direct image links or the Google Photos helper when possible; the saved evidence remains the link information.</p>
+                <p>Daily Reports print and export use the browser print dialog. <strong>Export PDF</strong> does not call a server PDF API: the user selects Save as PDF from the browser's print options.</p>
+            </section>
+
+            <section class="guide-chapter" id="materials" aria-labelledby="materialsTitle">
+                <h2 id="materialsTitle">11. Materials Module</h2>
+                <p><code>static/materials.js</code> defines the collection constants and reads these six collections when loading the module:</p>
+                <ul>
+                    <li><code>material_categories</code> - Current category fields include <code>name</code>, <code>unit</code>, embedded <code>brands</code> (<code>id</code> and <code>name</code>), <code>description</code>, and timestamps.</li>
+                    <li><code>suppliers</code> - Contact fields, <code>categoryIds</code>, and <code>categoryBrandAssignments</code> connect suppliers to categories and brand IDs.</li>
+                    <li><code>material_purchases</code> - Purchase date, category ID/name, optional brand and supplier IDs/names, quantity, unit, rate, total amount, bill link, and timestamps.</li>
+                    <li><code>material_consumptions</code> - Date, category ID/name, quantity, unit, work location, remarks, and timestamps.</li>
+                    <li><code>materials</code> and <code>material_brands</code> - Read during module loading to include older catalog/brand data. Current Material Builder writes category brands inside <code>material_categories.brands</code>, rather than writing these two collections.</li>
+                </ul>
+                <p>Material categories, materials, brands, and suppliers remain managed by the browser Web SDK. Operational purchase and consumption mutations use authenticated Flask endpoints under <code>/api/material-transactions/</code>, with session CSRF checks and compiled <code>materials.transactions.write</code> or <code>materials.transactions.delete</code> permissions. The Admin SDK writes only the intended record; consumption writes also validate available Cement stock transactionally. For Cement purchases, the server verifies quantity, rate, and calculated total. Other purchase categories use the entered amount. Building Cost Summary continues to read <code>material_categories</code> and <code>material_purchases</code>; it does not create parallel copies.</p>
+            </section>
+
+            <section class="guide-chapter" id="trades-labour" aria-labelledby="tradesLabourTitle">
+                <h2 id="tradesLabourTitle">12. Trades and Labour Modules</h2>
+                <h3>Trade Builder</h3>
+                <p><code>static/app.js</code> stores Trade Builder data in <code>trades</code>. A trade document has a name, nested <code>workerCategories</code>, a <code>commonFields</code> list, nested <code>contractItems</code>, nested <code>paymentTransactions</code>, and timestamps. Saving a trade preserves its existing contracts and transactions while updating trade and worker data.</p>
+                <p>Worker category entries have an ID, name, payment type, and effective date. Daily-wage entries use <code>currentWage</code> and a <code>wageHistory</code> array; a history item contains <code>dailyWage</code>, <code>effectiveFrom</code>, and <code>recordedAt</code>. Lump-sum entries use <code>lump_sum_amount</code>, an effective date, and optional <code>work_description</code>.</p>
+                <h3>Labour Payments and contracts</h3>
+                <p><code>templates/labour_payments.html</code> sets <code>financial_only</code> and includes <code>templates/index.html</code>. It is another view over <code>trades</code>, not another database collection. Contract items are stored at <code>trades.contractItems[]</code> with <code>id</code>, <code>name</code>, <code>amount</code>, and timestamps.</p>
+                <p>Payment entries are stored at <code>trades.paymentTransactions[]</code>. Current transaction types include mobilization advance, labour advance, labour settlement, and lump-sum payment. Shared fields include <code>type</code>, <code>date</code>, <code>amount</code>, <code>labourEarned</code>, <code>advanceAdjustment</code>, <code>outstandingBalance</code>, <code>paymentMode</code>, <code>remarks</code>, and timestamps. Lump-sum payments also record <code>workerCategoryId</code> and <code>workerCategoryName</code>. Labour Payment create, edit, and delete mutations use authenticated Flask APIs at <code>/api/labour-payments/&lt;trade_id&gt;/transactions</code>; the server validates permissions and updates the embedded array transactionally without changing the trade schema. Contract item create, edit, delete, and ledger-editor replacement use authenticated APIs under <code>/api/trades/&lt;trade_id&gt;/contract-items</code> and update only that field. Browser Firestore reads remain in place. The settlement and contract summary helpers are <code>settlement_logic.mjs</code> and <code>contract_payment_summary.mjs</code>.</p>
+                <p>Daily Reports also read the same <code>trades</code> documents for trade selection and worker categories. Ledger Prints and Building Cost Summary also read trade/payment data. There is no separate payment or contract collection in the active code.</p>
+                <div class="guide-note">A dedicated named-worker attendance/muster register is not implemented in the active pages, even though a <code>labour_muster</code> permission label exists.</div>
+            </section>
+
+            <section class="guide-chapter" id="drawings" aria-labelledby="drawingsTitle">
+                <h2 id="drawingsTitle">13. Drawings Library</h2>
+                <p><code>static/drawings.js</code> uses two collections: <code>drawings_categories</code> and <code>drawings</code>. Category documents contain <code>name</code>, <code>sortOrder</code>, and timestamps. Drawing documents contain <code>categoryId</code>, copied <code>categoryName</code>, <code>drawingName</code>, optional <code>drawingNumber</code>, <code>revision</code>, <code>description</code>, required <code>googleDriveUrl</code>, <code>sortOrder</code>, and timestamps.</p>
+                <ul>
+                    <li><strong>Create:</strong> category creation adds one category document. Adding a drawing adds one drawing document with its category ID/name and next order.</li>
+                    <li><strong>Edit:</strong> category rename updates the category and its drawings' copied category name in a batch. Drawing edit updates its fields; moving it to another category assigns the next order in that category.</li>
+                    <li><strong>Delete:</strong> the UI blocks category deletion while drawings reference it. Drawing deletion removes its drawing document but leaves the PDF file untouched.</li>
+                    <li><strong>Open PDF:</strong> the UI validates Drive/Docs hostnames and opens the stored URL in a new tab. It does not upload files or call Drive APIs.</li>
+                    <li><strong>Sort:</strong> moving a category batches <code>sortOrder</code> updates for category documents only. Moving a drawing batches order values for drawings in its current category only. The UI disables concurrent moves and restores the displayed order if a save fails.</li>
+                </ul>
+                <p>The category relationship is the drawing's <code>categoryId</code>; <code>categoryName</code> is a display copy updated on category rename. There are no separate collections for drawing sorting history.</p>
+            </section>
+
+            <section class="guide-chapter" id="drive-media" aria-labelledby="driveMediaTitle">
+                <h2 id="driveMediaTitle">14. Google Drive Integration</h2>
+                <h3>Drive PDF links</h3>
+                <p>The Drawings Library stores the user-entered <code>googleDriveUrl</code> string with each drawing. <code>static/drawings.js</code> accepts HTTP(S) URLs on <code>drive.google.com</code> or <code>docs.google.com</code>, then renders an <strong>Open PDF</strong> link targeting a new browser tab. The app does not upload PDFs, call a Drive API, or authenticate users to Google Drive. Access is governed by Google Drive's sharing settings and the viewer's Google session.</p>
+                <h3>Daily Report evidence and previews</h3>
+                <p>Daily Report evidence stores a type, title, and URL. Photo evidence can be a direct image URL, a supported Drive file link, or a Google Photos share link. The page builds direct image/Drive previews where possible. Video evidence can embed a YouTube thumbnail and use a <code>youtube-nocookie.com</code> player after play; other video links are offered as external links rather than being transcoded or hosted by this app.</p>
+                <p>The separate <code>/google-photos</code> helper and <code>/extract-google-photos-url</code> route try Requests and then a pooled headless Playwright browser to find an image URL from a shared Photos page. The helper caches extracted URLs in process memory. It does not use Google OAuth or bypass Google sign-in or sharing restrictions. <code>/image</code> fetches an image URL for display; this is image fetching, not an authenticated Drive integration.</p>
+            </section>
+
+            <section class="guide-chapter" id="pdf-printing" aria-labelledby="pdfPrintingTitle">
+                <h2 id="pdfPrintingTitle">15. PDF Generation and Printing</h2>
+                <h3>Daily Reports</h3>
+                <p><strong>Print Daily Page</strong> and <strong>Export PDF</strong> use the browser print workflow. <code>static/daily_reports.css</code> contains an <code>@media print</code> layout that hides controls and formats the selected report for paper. Export opens the print dialog; the user chooses the browser's <strong>Save as PDF</strong> destination. No server-side PDF rendering service is used for this workflow.</p>
+                <h3>Trade and payment ledgers</h3>
+                <p>The Trade Builder/Labour Payments page loads jsPDF and jsPDF-AutoTable from CDN script tags in <code>templates/index.html</code>. <code>static/app.js</code> builds trade and payment ledger PDFs in the browser. <code>static/ledger_pdf.js</code> also exports ledger content with jsPDF-AutoTable; <code>templates/ledger_prints.html</code> loads the same browser libraries for <code>static/ledger_prints.js</code>.</p>
+                <p>Generated ledger files use client-side <code>doc.save()</code>. If the PDF libraries are blocked or fail to load, check the browser Network panel and the configured network policy for the CDN hosts. The app does not provide a server-side PDF fallback.</p>
+            </section>
+
+            <section class="guide-chapter" id="configuration" aria-labelledby="configurationTitle">
+                <h2 id="configurationTitle">16. Environment Variables and Configuration</h2>
+                <p><code>app.py</code> loads local environment values with python-dotenv. The names below are read by the source; set values through a private local environment file or deployment secret settings. This guide intentionally does not contain any values.</p>
+                <dl class="guide-config">
+                    <div><dt><code>SECRET_KEY</code></dt><dd>Signs Flask sessions. Set a strong, unique value for each environment; the source fallback is for development only.</dd></div>
+                    <div><dt><code>INITIAL_SUPER_ADMIN_PASSWORD</code></dt><dd>Optional one-time bootstrap secret used only when the user store is empty and the initial Super Admin helper is explicitly invoked. It must satisfy the application password policy; the created user must change it at first sign-in. No default bootstrap password is used.</dd></div>
+                    <div><dt><code>FLASK_ENV</code></dt><dd>When equal to <code>production</code>, <code>SESSION_COOKIE_SECURE</code> is enabled.</dd></div>
+                    <div><dt><code>FIREBASE_PROJECT_ID</code></dt><dd>Firebase project ID used by the Admin SDK and default browser configuration.</dd></div>
+                    <div><dt><code>FIREBASE_SERVICE_ACCOUNT</code></dt><dd>Optional path to the Admin SDK service-account JSON. Without it, the app can discover a matching local service-account file or use Application Default Credentials.</dd></div>
+                    <div><dt><code>FIREBASE_WEB_CONFIG</code></dt><dd>Optional JSON object for the Firebase Web SDK. Its <code>projectId</code> must match <code>FIREBASE_PROJECT_ID</code>.</dd></div>
+                    <div><dt><code>FIRESTORE_MODE</code></dt><dd>Selects the store mode; the source recognizes <code>firestore</code> and <code>memory</code>.</dd></div>
+                    <div><dt><code>ALLOW_IN_MEMORY_FIRESTORE</code></dt><dd>Explicit opt-in to the in-memory fallback when enabled with a true-like value. In-memory data is not durable and is not appropriate where persistent production records are required.</dd></div>
+                    <div><dt><code>MAIL_SERVER</code>, <code>MAIL_PORT</code>, <code>MAIL_USE_TLS</code>, <code>MAIL_USERNAME</code>, <code>MAIL_PASSWORD</code>, <code>MAIL_DEFAULT_SENDER</code></dt><dd>Configure Flask-Mail for password reset and the Super Admin test-email page. Keep mail credentials private.</dd></div>
+                </dl>
+                <p>Snapshot project switching can write active project data to <code>instance/firebase_active_project.json</code>. This runtime file and credential files are excluded by the repository's <code>.gitignore</code>; preserve that separation and never commit secret values.</p>
+            </section>
+
+            <section class="guide-chapter" id="local-development" aria-labelledby="localDevelopmentTitle">
+                <h2 id="localDevelopmentTitle">17. Local Development Setup</h2>
+                <p>No Python version is pinned in a project packaging manifest. Use a supported CPython release compatible with <code>requirements.txt</code>; the Python 3.9 environment used for prior checks reports that the runtime is end-of-life.</p>
+                <ol>
+                    <li>Open PowerShell in the repository root and create a virtual environment:</li>
+                </ol>
+                <pre><code>py -m venv .venv
+.\.venv\Scripts\Activate.ps1</code></pre>
+                <ol start="2">
+                    <li>Install Python dependencies and Playwright's Chromium browser:</li>
+                </ol>
+                <pre><code>python -m pip install -r requirements.txt
+python -m playwright install chromium</code></pre>
+                <ol start="3">
+                    <li>Set the required local configuration securely. The Firebase Admin and Web project IDs must match. Do not put service-account contents or other secrets in source files.</li>
+                    <li>Start the local application:</li>
+                </ol>
+                <pre><code>python app.py</code></pre>
+                <p>The entry point prints <code>http://127.0.0.1:5020</code> and a LAN address when available. The <code>app.py</code> development entry point binds to <code>0.0.0.0:5020</code> with Flask debug disabled. It is a local run path, not a production server configuration.</p>
+            </section>
+
+            <section class="guide-chapter" id="railway" aria-labelledby="railwayTitle">
+                <h2 id="railwayTitle">18. Railway Deployment</h2>
+                <div class="guide-note"><strong>Not Yet Configured:</strong> No Railway manifest, <code>Procfile</code>, Dockerfile, or production WSGI server configuration is present in this repository. A Railway startup command has not been verified.</div>
+                <p><code>python app.py</code> is the development entry point and starts Flask's built-in server on port 5020. Do not assume it is a production-ready Railway start command. Before deployment, choose and test a production WSGI serving arrangement and platform port binding; do not copy an unverified command into Railway settings.</p>
+                <h3>Configuration and Firebase</h3>
+                <ul>
+                    <li>Configure the environment names listed in section 16 through the deployment's protected variable/secret settings. Never commit service-account JSON or environment secret values.</li>
+                    <li>Provide network access and valid Admin credentials for the selected Firebase project. Ensure <code>FIREBASE_PROJECT_ID</code> and the Web configuration's <code>projectId</code> match.</li>
+                    <li>Review Firestore Security Rules for browser-side Web SDK operations; there are no Firestore rules in this repository.</li>
+                </ul>
+                <h3>Persistent storage</h3>
+                <p>Snapshot ZIP files and audit/history JSONL files are written under <code>&lt;app root&gt;/backups/</code>. Active project state and restored-project descriptors are under Flask's <code>instance/</code> directory; temporary restore credentials are under the operating system's local application-data directory. The repository contains no Railway volume or mount configuration, so durability of these files on a hosted instance is not established. Configure and test persistent storage for the required paths or use an external backup process before relying on hosted snapshots.</p>
+                <p>Because no Railway service is configured here, deployment logs, health checks, restart behavior, outbound networking, persistent-volume mounts, and scaling have not been verified. Run a staging deployment and test sign-in, Firestore reads/writes, reset email, snapshots, and Playwright-dependent photo extraction before production use.</p>
+            </section>
+
+            <section class="guide-chapter" id="security" aria-labelledby="securityTitle">
+                <h2 id="securityTitle">19. Security Considerations</h2>
+                <ul>
+                    <li><strong>Authentication:</strong> Passwords are hashed with Werkzeug helpers. Flask sessions use HttpOnly and SameSite=Lax cookies, an eight-hour lifetime, and the Secure flag when the source sees <code>FLASK_ENV=production</code>. Set a unique production <code>SECRET_KEY</code>.</li>
+                    <li><strong>Authorization:</strong> Page routes use <code>@require_login</code>; administration pages and snapshot operations require Super Admin access. Review decorators when adding routes. Client-side visibility is not authorization.</li>
+                    <li><strong>Firebase credentials:</strong> Keep Admin service-account files and mail credentials outside source control. The Admin credential is server-side only; the Web config endpoint returns the browser configuration, not the service account.</li>
+                    <li><strong>Firestore access:</strong> Browser modules perform direct Web SDK operations. Configure restrictive Firestore Security Rules in Firebase and test them independently of Flask role checks.</li>
+                    <li><strong>Sessions and recovery:</strong> Reset tokens are stored hashed, expire after 30 minutes, and reset requests have account/IP rate limits. Do not log or share reset fragments, recovery codes, cookies, or credential values.</li>
+                    <li><strong>Drive links:</strong> The app does not mediate Drive permissions. Share each PDF only with the intended audience; possession of a link does not replace Google Drive's access controls.</li>
+                    <li><strong>Snapshots:</strong> Snapshot routes require Super Admin access and CSRF validation. Local backup files may contain sensitive business data; protect filesystem access, retain backups intentionally, and test recovery before destructive restores.</li>
+                    <li><strong>User data:</strong> Use least-privilege access, avoid copying real user or project data into test environments, and remove test exports and temporary credentials when no longer needed.</li>
+                </ul>
+            </section>
+
+            <section class="guide-chapter" id="troubleshooting" aria-labelledby="troubleshootingTitle">
+                <h2 id="troubleshootingTitle">20. Troubleshooting and Debugging</h2>
+                <dl class="guide-config">
+                    <div><dt>Flask does not start</dt><dd>Check that the virtual environment is active and <code>requirements.txt</code> is installed. Install Playwright Chromium if initialization or Google Photos extraction reports a missing browser. If port 5020 is occupied, identify the process before choosing a different local port; the printed URL and deployment configuration must agree.</dd></div>
+                    <div><dt>Firebase connection or permission failure</dt><dd>Check the active project ID, Admin credential source, matching Web config project ID, and network access. For browser reads/writes, inspect the Firebase project's Firestore Rules. The UI's role checks do not grant Firestore access by themselves.</dd></div>
+                    <div><dt>Login or page access problem</dt><dd>Confirm the account is active and that the requested route is allowed for its role. Admin and Developer Guide pages require Super Admin. Verify the stable <code>SECRET_KEY</code> and that an active user session remains valid; changing passwords intentionally invalidates other active sessions.</dd></div>
+                    <div><dt>Photo or video preview problem</dt><dd>Check the source URL and its sharing permissions. The Google Photos helper supports accessible shared pages only and may need Playwright Chromium. YouTube embeds and remote images also depend on browser network policy and third-party availability; use the original link when a preview cannot load.</dd></div>
+                    <div><dt>PDF or print problem</dt><dd>For Daily Reports, use the browser print dialog and choose Save as PDF. For ledger PDFs, check the browser Console and Network panel for blocked jsPDF or AutoTable CDN scripts, then retry with the ledger page loaded successfully.</dd></div>
+                    <div><dt>JavaScript error</dt><dd>Open browser developer tools and inspect Console and Network requests for the failing page module. Check the Flask terminal for request errors. The front end also writes diagnostic messages with <code>console.error</code>; do not copy secrets or sensitive record contents into shared reports.</dd></div>
+                    <div><dt>Where to inspect server logs</dt><dd>During local development, inspect the terminal running <code>python app.py</code>; Python uses <code>app.logger</code> and the Google Photos helper also emits standard output messages. A future hosted service's log location depends on its deployment configuration, which is not included or verified here.</dd></div>
+                </dl>
+            </section>
+
+            <section class="guide-chapter" id="future-development" aria-labelledby="futureDevelopmentTitle">
+                <h2 id="futureDevelopmentTitle">21. Guidelines for Future Development</h2>
+                <ol>
+                    <li>Inspect the route, template, JavaScript module, shared helpers, and tests that own the behavior before changing it.</li>
+                    <li>Preserve existing module behavior and collection relationships. In particular, payments and contracts are arrays in shared <code>trades</code> documents, not independent collections.</li>
+                    <li>Follow the current Flask/Jinja page architecture and page-specific JavaScript modules. Reuse shared dialogs and calculation helpers where appropriate; avoid introducing an unneeded frontend framework.</li>
+                    <li>Keep credentials and real user/project data out of source, tests, screenshots, logs, and documentation. Review Firebase Security Rules whenever a browser-side collection read or write is added.</li>
+                    <li>Add or update focused regression tests for changed behavior, then run the relevant Python and JavaScript checks before deployment.</li>
+                    <li>Verify role access, mobile layout, printing, and external-service dependencies affected by a change.</li>
+                    <li>Update this guide and the User Help Guide when verified routes, fields, setup steps, or user-visible workflows change. Label planned features clearly until implemented.</li>
+                </ol>
+            </section>
+
+            <div class="guide-actions">
+                <a class="guide-button" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+                <a href="#tocTitle">Back to Contents</a>
+            </div>
+        </article>
+    </main>
+</body>
+</html>

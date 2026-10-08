@@ -1,0 +1,438 @@
+.owner-scope-page {
+    min-height: 100vh;
+    background: #0b1210;
+    color: #e7f1eb;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+.owner-scope-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 22px clamp(18px, 4vw, 56px);
+    background: #111b17;
+    border-bottom: 1px solid #253b30;
+}
+
+.owner-scope-header h1 {
+    margin: 4px 0;
+    color: #f0fff5;
+    font-size: clamp(25px, 3vw, 34px);
+}
+
+.owner-scope-eyebrow,
+.owner-scope-kicker {
+    margin: 0;
+    color: #91c4a4;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .12em;
+}
+
+.owner-scope-intro,
+.owner-scope-legacy-note {
+    margin: 6px 0 0;
+    color: #b9c9bf;
+    line-height: 1.5;
+}
+
+.owner-scope {
+    width: min(1440px, 100%);
+    margin: 0 auto;
+    padding: 26px clamp(16px, 3vw, 40px) 48px;
+}
+
+.owner-scope-status {
+    margin: 0 0 18px;
+    padding: 12px 15px;
+    border: 1px solid #355745;
+    border-radius: 9px;
+    background: #14251c;
+    color: #cbe8d4;
+}
+
+.owner-scope-status:empty {
+    display: none;
+}
+
+.owner-scope-status[data-kind="error"] {
+    border-color: #814747;
+    background: #2b1919;
+    color: #ffd4d4;
+}
+
+.owner-scope-summary {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 13px;
+    margin-bottom: 20px;
+}
+
+.owner-scope-metric,
+.owner-scope-panel {
+    min-width: 0;
+    border: 1px solid #263c31;
+    border-radius: 12px;
+    background: #111b17;
+    box-shadow: 0 10px 28px rgb(0 0 0 / 14%);
+}
+
+.owner-scope-metric {
+    display: flex;
+    min-height: 103px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 9px;
+    padding: 17px;
+}
+
+.owner-scope-metric span {
+    color: #b1c3b8;
+    font-size: 13px;
+}
+
+.owner-scope-metric strong {
+    overflow-wrap: anywhere;
+    color: #f1fff5;
+    font-size: clamp(18px, 2vw, 24px);
+    font-variant-numeric: tabular-nums;
+}
+
+.owner-scope-panel {
+    margin-top: 18px;
+    padding: clamp(16px, 2.2vw, 25px);
+}
+
+.owner-scope-section-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 18px;
+}
+
+.owner-scope-section-heading h2 {
+    margin: 6px 0 0;
+    color: #f1fff5;
+    font-size: 21px;
+}
+
+.owner-scope-heading-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    gap: 9px;
+}
+
+.owner-scope-primary-button,
+.owner-scope-secondary-button,
+.owner-scope-row-button {
+    display: inline-flex;
+    min-height: 39px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 8px 13px;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.owner-scope-primary-button {
+    flex: 0 0 auto;
+    background: #a9e4bc;
+    color: #102018;
+}
+
+.owner-scope-primary-button:hover {
+    background: #c1f0cf;
+}
+
+.owner-scope-secondary-button,
+.owner-scope-row-button {
+    border-color: #496253;
+    background: #1c2b23;
+    color: #e6f2e9;
+}
+
+.owner-scope-row-button {
+    min-height: 32px;
+    padding: 5px 9px;
+    font-size: 12px;
+}
+
+.owner-scope-row-button[data-action="delete"] {
+    border-color: #724747;
+    color: #ffd3d3;
+}
+
+.owner-scope-table-wrap {
+    overflow-x: auto;
+    border: 1px solid #293d32;
+    border-radius: 8px;
+}
+
+.owner-scope-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: #e4eee7;
+    font-size: 14px;
+}
+
+.owner-scope-items-table {
+    table-layout: fixed;
+}
+
+.owner-scope-item-column {
+    width: 34%;
+}
+
+.owner-scope-date-column {
+    width: 17%;
+}
+
+.owner-scope-category-column {
+    width: 17%;
+}
+
+.owner-scope-paid-column {
+    width: 13%;
+}
+
+.owner-scope-actions-column {
+    width: 19%;
+}
+
+.owner-scope-table th {
+    background: #183b2a;
+    color: #d7f3df;
+    font-size: 12px;
+    font-weight: 700;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.owner-scope-table th,
+.owner-scope-table td {
+    padding: 12px 13px;
+    border-bottom: 1px solid #293d32;
+    vertical-align: top;
+}
+
+.owner-scope-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.owner-scope-table td {
+    overflow-wrap: anywhere;
+}
+
+.owner-scope-money {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.owner-scope-date {
+    white-space: pre-line;
+}
+
+.owner-scope-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.owner-scope-status-pill {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 4px 9px;
+    background: #243c2e;
+    color: #c8edd3;
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.owner-scope-empty {
+    display: flex;
+    min-height: 112px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: #dce8df;
+    text-align: center;
+}
+
+.owner-scope-empty[hidden] {
+    display: none;
+}
+
+.owner-scope-empty span {
+    color: #aebfb4;
+    font-size: 13px;
+}
+
+.owner-scope-dialog {
+    width: min(540px, calc(100vw - 28px));
+    max-height: min(90vh, 780px);
+    overflow-y: auto;
+    border: 1px solid #3c5847;
+    border-radius: 13px;
+    padding: 0;
+    background: #111b17;
+    color: #e7f1eb;
+    box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+}
+
+.owner-scope-history-dialog {
+    width: min(960px, calc(100vw - 28px));
+    padding: 22px;
+}
+
+.owner-scope-history-total {
+    margin: 16px 0 0;
+    color: #d6e5da;
+    font-weight: 700;
+    text-align: right;
+}
+
+.owner-scope-history-total strong {
+    color: #f1fff5;
+    font-size: 18px;
+    font-variant-numeric: tabular-nums;
+}
+
+.owner-scope-dialog::backdrop {
+    background: rgb(0 0 0 / 72%);
+}
+
+.owner-scope-dialog form {
+    padding: 24px;
+}
+
+.owner-scope-dialog-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.owner-scope-dialog-heading h2 {
+    margin: 6px 0 0;
+    color: #f1fff5;
+    font-size: 22px;
+}
+
+.owner-scope-close-button {
+    width: 36px;
+    height: 36px;
+    border: 1px solid #496253;
+    border-radius: 7px;
+    background: #1c2b23;
+    color: #e6f2e9;
+    font-size: 24px;
+    cursor: pointer;
+}
+
+.owner-scope-field {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin: 14px 0;
+    color: #d6e5da;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.owner-scope-field > span:first-child {
+    color: #ffc1a8;
+}
+
+.owner-scope-field input,
+.owner-scope-field select,
+.owner-scope-field textarea {
+    width: 100%;
+    min-height: 42px;
+    border: 1px solid #8b9e90;
+    border-radius: 6px;
+    padding: 9px 11px;
+    background: #f8faf8;
+    color: #17221b;
+    font: inherit;
+    font-weight: 400;
+}
+
+.owner-scope-field textarea {
+    min-height: 82px;
+    resize: vertical;
+}
+
+.owner-scope-optional {
+    display: inline;
+    color: #afc0b5 !important;
+    font-weight: 400;
+}
+
+.owner-scope-form-error {
+    color: #ffbaba;
+    font-size: 13px;
+}
+
+.owner-scope-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 9px;
+    margin-top: 20px;
+}
+
+@media (max-width: 900px) {
+    .owner-scope-summary {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 620px) {
+    .owner-scope-header {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 12px;
+        padding: 18px 16px;
+    }
+
+    .owner-scope-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 9px;
+    }
+
+    .owner-scope-metric {
+        min-height: 88px;
+        padding: 13px;
+    }
+
+    .owner-scope-section-heading {
+        flex-direction: column;
+    }
+
+    .owner-scope-heading-actions {
+        width: 100%;
+    }
+
+    .owner-scope-heading-actions > button {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+
+    .owner-scope-table {
+        min-width: 760px;
+    }
+
+    .owner-scope-history-table {
+        min-width: 650px;
+    }
+
+    .owner-scope-dialog form {
+        padding: 19px;
+    }
+}

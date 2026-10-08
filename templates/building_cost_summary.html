@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mannat Moon - Building Cost Summary</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='building_cost_summary.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+</head>
+<body>
+<header class="cost-header">
+    <div>
+        <p class="cost-eyebrow">MANNAT MOON CONSTRUCTION</p>
+        <h1>Building Cost Summary</h1>
+    </div>
+    {% include '_navigation.html' %}
+</header>
+
+<main class="cost-main">
+    <div class="cost-filter-row">
+        <label for="dateFilterMode">Date range</label>
+        <select id="dateFilterMode">
+            <option value="all">All Time</option>
+            <option value="custom">Custom Range</option>
+        </select>
+        <label class="owner-scope-inclusion" for="includeOwnerScope">
+            <input id="includeOwnerScope" type="checkbox" checked>
+            Include Owner Scope in Total Building Cost
+        </label>
+        <div id="customDateRange" class="custom-date-range" hidden>
+            <label>From<input id="fromDate" type="date"></label>
+            <label>To<input id="toDate" type="date"></label>
+        </div>
+    </div>
+
+    <div id="summaryStatus" class="summary-status" role="status" aria-live="polite">Loading recorded costs...</div>
+
+    <section class="building-total" aria-labelledby="buildingTotalTitle">
+        <p id="buildingTotalTitle">TOTAL BUILDING COST TILL DATE</p>
+        <strong id="buildingTotal">₹0</strong>
+        <span id="selectedDateLabel">All Time</span>
+    </section>
+
+    <section class="cost-metrics" aria-label="Cost totals">
+        <article class="cost-metric material-metric">
+            <h2>TOTAL MATERIAL COST</h2>
+            <strong id="materialTotal">₹0</strong>
+        </article>
+        <article class="cost-metric trade-metric">
+            <h2>TOTAL LABOUR COST</h2>
+            <strong id="tradeTotal">₹0</strong>
+        </article>
+        <article class="cost-metric">
+            <h2>OWNER SCOPE COST</h2>
+            <strong id="ownerScopeTotal">₹0</strong>
+        </article>
+    </section>
+
+    <section class="cost-breakdown" aria-labelledby="materialBreakdownTitle">
+        <div class="section-heading">
+            <h2 id="materialBreakdownTitle">Material Cost Breakdown</h2>
+            <span>Purchases by category</span>
+        </div>
+        <div id="materialBreakdown" class="cost-grid"></div>
+    </section>
+
+    <section class="cost-breakdown" aria-labelledby="labourBreakdownTitle">
+        <div class="section-heading">
+            <h2 id="labourBreakdownTitle">Labour Cost Breakdown</h2>
+            <span>Recorded payments by trade</span>
+        </div>
+        <div id="tradeBreakdown" class="cost-grid"></div>
+    </section>
+</main>
+
+<script type="module" src="{{ url_for('static', filename='building_cost_summary.js') }}"></script>
+</body>
+</html>

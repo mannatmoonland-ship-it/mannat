@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mannat Moon - Material Builder</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='drawings.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dialogs.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='materials.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+</head>
+<body data-material-transactions-csrf="{{ material_transactions_csrf }}">
+<header class="drawings-header materials-header">
+    <div>
+        <h1>MATERIAL BUILDER</h1>
+        <p>Materials, categories, and supplier directory</p>
+    </div>
+    {% include '_navigation.html' %}
+</header>
+
+<main class="drawings-main materials-main">
+    <div class="materials-tabs" role="tablist" aria-label="Material Builder sections">
+        <button type="button" class="materials-tab active" role="tab" aria-selected="true" aria-controls="categoriesPanel" data-panel="categoriesPanel">Categories</button>
+        <button type="button" class="materials-tab" role="tab" aria-selected="false" aria-controls="suppliersPanel" data-panel="suppliersPanel">Suppliers</button>
+        <button type="button" class="materials-tab" role="tab" aria-selected="false" aria-controls="materialsPanel" data-panel="materialsPanel">Stock &amp; Transactions</button>
+    </div>
+
+    <div id="materialsStatus" class="drawings-status" role="status" aria-live="polite">Loading Material Builder...</div>
+
+    <section id="categoriesPanel" class="materials-panel" role="tabpanel">
+        <div class="materials-toolbar">
+            <label>Search categories<input id="categorySearch" type="search" placeholder="Category name or description" autocomplete="off"></label>
+            <button id="createCategoryButton" class="drawings-primary" type="button">+ Create Category</button>
+        </div>
+        <div id="categoryList" class="materials-list" aria-live="polite"></div>
+    </section>
+
+    <section id="materialsPanel" class="materials-panel" role="tabpanel" hidden>
+        <section id="investmentSummary" class="investment-summary" aria-live="polite" aria-label="Material purchase investment"></section>
+        <div class="materials-subtabs" role="tablist" aria-label="Materials sections">
+            <button type="button" class="materials-subtab active" role="tab" aria-selected="true" aria-controls="stockPanel" data-panel="stockPanel">Stock</button>
+            <button type="button" class="materials-subtab" role="tab" aria-selected="false" aria-controls="purchasesPanel" data-panel="purchasesPanel">Purchases</button>
+            <button type="button" class="materials-subtab" role="tab" aria-selected="false" aria-controls="consumptionPanel" data-panel="consumptionPanel">Consumption</button>
+        </div>
+
+        <section id="stockPanel" class="materials-subpanel" role="tabpanel">
+            <div id="stockList" class="materials-list" aria-live="polite"></div>
+        </section>
+
+        <section id="purchasesPanel" class="materials-subpanel" role="tabpanel" hidden>
+            <form id="purchaseForm" class="material-transaction-form">
+                <input type="hidden" name="id">
+                <label>Date *<input name="date" type="date" required></label>
+                <label>Category *<select name="categoryId" required><option value="">Select category</option></select></label>
+                <label id="purchaseBrandField">Brand / Quarry<select name="brandId"><option value="">Select category first</option></select></label>
+                <label>Supplier<select name="supplierId"><option value="">Select category and brand first</option></select></label>
+                <label id="purchaseQuantityField">Quantity<input name="quantity" type="number" min="0.000001" step="any"></label>
+                <label id="purchaseUnitField">Unit<input name="unit" readonly aria-readonly="true" placeholder="Select category"></label>
+                <label id="purchaseRateField">Rate<input name="rate" type="number" min="0" step="any"></label>
+                <label id="purchaseAmountField" hidden>Amount (â‚¹)<input name="amount" type="number" min="0" step="any"></label>
+                <label id="purchaseTotalAmountField">Total Amount<input name="totalAmount" type="number" readonly aria-readonly="true" placeholder="Calculated"></label>
+                <label class="transaction-wide">Bill Photo / Link<input name="billLink" type="url" maxlength="2000" placeholder="https://..."></label>
+                <div class="transaction-wide transaction-actions"><button type="button" class="drawings-secondary" data-reset-transaction="purchaseForm">Clear</button><button type="submit" class="drawings-primary">Save Purchase</button></div>
+            </form>
+            <div id="purchaseList" class="materials-list" aria-live="polite"></div>
+        </section>
+
+        <section id="consumptionPanel" class="materials-subpanel" role="tabpanel" hidden>
+            <div id="consumptionUnavailable" class="materials-empty" hidden>Create a Cement category to record consumption.</div>
+            <form id="consumptionForm" class="material-transaction-form">
+                <input type="hidden" name="id">
+                <label>Date *<input name="date" type="date" required></label>
+                <label>Category *<select name="categoryId" required><option value="">Select category</option></select></label>
+                <label>Quantity *<input name="quantity" type="number" min="0.000001" step="any" required></label>
+                <label>Location / Floor *<input name="workLocation" maxlength="240" required></label>
+                <label class="transaction-wide">Remarks<textarea name="remarks" rows="2" maxlength="1000"></textarea></label>
+                <div class="transaction-wide transaction-actions"><button type="button" class="drawings-secondary" data-reset-transaction="consumptionForm">Clear</button><button type="submit" class="drawings-primary">Save Consumption</button></div>
+            </form>
+            <div id="consumptionList" class="materials-list" aria-live="polite"></div>
+        </section>
+    </section>
+
+    <section id="suppliersPanel" class="materials-panel" role="tabpanel" hidden>
+        <div class="materials-toolbar">
+            <label>Search suppliers<input id="supplierSearch" type="search" placeholder="Name, phone, city, state, or PIN code" autocomplete="off"></label>
+            <button id="createSupplierButton" class="drawings-primary" type="button">+ Create Supplier</button>
+        </div>
+        <div id="supplierList" class="materials-list" aria-live="polite"></div>
+    </section>
+</main>
+
+<dialog id="materialEntityDialog" class="materials-dialog">
+    <div class="drawings-modal-header">
+        <h2 id="entityDialogTitle">Material Builder</h2>
+        <button id="closeEntityDialog" class="drawings-icon-button" type="button" aria-label="Close form">&times;</button>
+    </div>
+    <form id="entityForm" class="drawing-form"></form>
+</dialog>
+
+<dialog id="materialDetailsDialog" class="materials-dialog">
+    <div class="drawings-modal-header">
+        <h2 id="materialDetailsTitle">Material Details</h2>
+        <button id="closeMaterialDetails" class="drawings-icon-button" type="button" aria-label="Close details">&times;</button>
+    </div>
+    <div id="materialDetailsBody" class="material-details-body"></div>
+</dialog>
+
+<script type="module" src="{{ url_for('static', filename='materials.js') }}"></script>
+</body>
+</html>

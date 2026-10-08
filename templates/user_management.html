@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mannat Moon - User Management</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='dialogs.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <style>
+        * { box-sizing: border-box; }
+        body { margin:0; font-family: Arial, Helvetica, sans-serif; background:#f8fafc; color:#1e293b; }
+        header { background:#111827; color:white; padding:20px 32px; display:flex; justify-content:space-between; align-items:center; gap:16px; }
+        header h1 { margin:0; font-size:24px; }
+        .nav a { color:#cbd5e1; text-decoration:none; margin-left:12px; }
+        .shell { max-width:1180px; margin:36px auto; padding:0 20px; }
+        .panel { background:white; border-radius:16px; box-shadow:0 8px 30px rgba(15,23,42,0.08); padding:24px; margin-bottom:26px; }
+        h2 { margin-top:0; }
+        .grid { display:grid; grid-template-columns: 1.2fr 1fr; gap:22px; }
+        .flash { margin-bottom:16px; padding:12px 14px; border-radius:10px; }
+        .flash.error { background:#fee2e2; color:#991b1b; }
+        .flash.success { background:#dcfce7; color:#166534; }
+        .flash.warning { background:#fef3c7; color:#92400e; }
+        form { display:grid; gap:14px; }
+        .field-row { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; }
+        label { display:block; font-size:13px; color:#475569; font-weight:600; margin-bottom:6px; }
+        input, select { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #cbd5e1; background:white; }
+        button { background:#0ea5e9; color:white; border:none; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer; }
+        .secondary { background:#334155; }
+        .danger { background:#dc2626; }
+        table { width:100%; border-collapse:collapse; margin-top:18px; }
+        th, td { border-bottom:1px solid #e2e8f0; padding:10px 8px; text-align:left; }
+        th { color:#475569; font-size:12px; text-transform: uppercase; }
+        .actions { display:flex; gap:8px; flex-wrap:wrap; }
+        .actions form { display:inline; }
+        .staff-type-list { list-style:none; padding:0; margin:16px 0 0; display:grid; gap:10px; }
+        .staff-type-item { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#f8fafc; }
+        .staff-type-actions { display:flex; gap:8px; }
+        .staff-type-action { padding:8px 10px; border:none; border-radius:8px; font-weight:600; cursor:pointer; }
+        .staff-type-action.secondary { background:#334155; color:white; }
+        .staff-type-action.danger { background:#dc2626; color:white; }
+        .status-pill { display:inline-block; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:600; }
+        .active { background:#dcfce7; color:#166534; }
+        .inactive { background:#fee2e2; color:#991b1b; }
+        .user-full-name { display:inline-flex; align-items:center; gap:8px; }
+        .user-animal-avatar { display:inline-flex; width:28px; height:28px; flex:0 0 28px; overflow:hidden; border-radius:50%; vertical-align:middle; }
+        .user-animal-avatar .animal-avatar-svg { display:block; width:100%; height:100%; }
+        @media (max-width: 760px) {
+            .grid, .field-row { grid-template-columns: 1fr; }
+            .staff-type-item { flex-direction:column; align-items:flex-start; }
+        }
+    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+</head>
+<body data-csrf-token="{{ authenticated_form_csrf_token() }}">
+    <header>
+        <h1>MANNAT MOON</h1>
+        {% include '_navigation.html' %}
+        <div class="nav">
+            <a href="{{ url_for('forgot_password') }}">Reset User Password</a>
+            <form style="display:inline" method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}"><button type="submit" style="padding:8px 12px; background:#0f172a; color:#fff; border:none; border-radius:8px; cursor:pointer;">Logout</button></form>
+        </div>
+    </header>
+
+    <main class="shell">
+        <section class="panel">
+            <h2>User Management</h2>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <div class="grid">
+                <div>
+                    <h3>Create User</h3>
+                    <form method="post" action="{{ url_for('user_management_create') }}">
+                        <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
+                        <div class="field-row">
+                            <div>
+                                <label for="username">Username</label>
+                                <input id="username" name="username" type="text" required>
+                            </div>
+                            <div>
+                                <label for="full_name">Full Name</label>
+                                <input id="full_name" name="full_name" type="text" required>
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div>
+                                <label for="email">Email</label>
+                                <input id="email" name="email" type="email" required>
+                            </div>
+                            <div>
+                                <label for="recovery_email">Recovery Email</label>
+                                <input id="recovery_email" name="recovery_email" type="email">
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div>
+                                <label for="role">Role</label>
+                                <select id="role" name="role" required>
+                                    <option value="super_admin">Super Admin</option>
+                                    <option value="office_staff">Office Staff</option>
+                                    <option value="supervisor">Supervisor</option>
+                                    {% for type in custom_types %}
+                                        <option value="{{ type.name }}">{{ type.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label for="custom_staff_type">Custom Staff Type</label>
+                                <input id="custom_staff_type" name="custom_staff_type" type="text" placeholder="Optional custom type">
+                            </div>
+                        </div>
+                        <button type="submit">Create User</button>
+                    </form>
+                </div>
+
+                <div>
+                    <h3>Create Staff Type</h3>
+                    <form method="post" action="{{ url_for('custom_staff_type_create') }}">
+                        <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
+                        <div>
+                            <label for="type_name">Staff Type Name</label>
+                            <input id="type_name" name="type_name" type="text" required>
+                        </div>
+                        <button class="secondary" type="submit">Add Staff Type</button>
+                    </form>
+
+                    <h3 style="margin-top:28px;">Custom Staff Types</h3>
+                    {% if custom_types %}
+                        <div class="staff-type-list">
+                            {% for item in custom_types %}
+                                <div class="staff-type-item">
+                                    <span>{{ item.name }}</span>
+                                    <div class="staff-type-actions">
+                                        <button type="button" class="staff-type-action secondary staff-type-edit" data-staff-type-id="{{ item.id }}" data-staff-type-name="{{ item.name }}">Edit</button>
+                                        <button type="button" class="staff-type-action danger staff-type-delete" data-staff-type-id="{{ item.id }}" data-staff-type-name="{{ item.name }}">Delete</button>
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <p style="color:#64748b; margin-top:12px;">No custom staff types created yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h3>Existing Users</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Full Name</th>
+                        <th>Role</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                        <tr>
+                            <td>{{ user.username }}</td>
+                            <td>
+                                <span class="user-full-name">
+                                    <span class="user-animal-avatar" data-animal-avatar="{{ user.avatarId or '' }}" title="{{ user.full_name or user.username }}" aria-hidden="true"></span>
+                                    <span>{{ user.full_name }}</span>
+                                </span>
+                            </td>
+                            <td>{{ user.role }}</td>
+                            <td>{{ user.custom_staff_type or '–' }}</td>
+                            <td>
+                                <span class="status-pill {{ 'active' if user.is_active else 'inactive' }}">
+                                    {{ 'Active' if user.is_active else 'Inactive' }}
+                                </span>
+                            </td>
+                            <td class="actions">
+                                <a href="{{ url_for('user_management_details', user_id=user.id) }}"><button type="button">View</button></a>
+                                <form method="post" action="{{ url_for('user_management_toggle_status', user_id=user.id) }}" data-confirm="Toggle this user account status?">
+                                    <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
+                                    <button type="submit" class="secondary">{{ 'Deactivate' if user.is_active else 'Activate' }}</button>
+                                </form>
+                                <form method="post" action="{{ url_for('user_management_reset_password', user_id=user.id) }}" data-confirm="Reset this user's password?">
+                                    <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
+                                    <button type="submit" class="danger">Reset Password</button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <script type="module">
+        import { showConfirm, showConfirmDialog, showError, showPrompt, showSuccess } from "{{ url_for('static', filename='dialogs.js') }}";
+        import { getAnimalAvatar, renderAnimalAvatar } from "{{ url_for('static', filename='animal_avatars.js') }}";
+
+        document.querySelectorAll(".user-animal-avatar").forEach(avatar => {
+            const selectedAvatar = getAnimalAvatar(avatar.dataset.animalAvatar);
+            avatar.innerHTML = renderAnimalAvatar(selectedAvatar.id);
+        });
+
+        document.querySelectorAll("form[data-confirm]").forEach(form => {
+            form.addEventListener("submit", async event => {
+                event.preventDefault();
+                const confirmed = await showConfirm(form.dataset.confirm, "Confirm Action");
+                if (confirmed) {
+                    form.submit();
+                }
+            });
+        });
+
+        async function handleCustomStaffTypeEdit(staffTypeId, currentName) {
+            const nextName = await showPrompt("Enter the updated staff type name.", currentName, "Edit Staff Type", "Save", "Cancel");
+            const normalizedName = String(nextName ?? "").replace(/\s+/g, " ").trim();
+
+            if (!normalizedName) {
+                await showError("Staff type name is required.", "Staff Type");
+                return;
+            }
+            if (normalizedName === currentName) {
+                return;
+            }
+
+            let response;
+            try {
+                response = await fetch(`/user-management/custom-type/${staffTypeId}/edit`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "X-Requested-With": "XMLHttpRequest"
+                    },
+                    body: new URLSearchParams({
+                        type_name: normalizedName,
+                        csrf_token: document.body.dataset.csrfToken
+                    }).toString()
+                });
+            } catch (error) {
+                console.error("Unable to update staff type:", error);
+                await showError("Unable to update staff type. Please check your connection and try again.", "Staff Type");
+                return;
+            }
+
+            const result = await response.json().catch(() => ({ success: false, message: "Unable to update staff type." }));
+            if (!response.ok || result.success === false) {
+                await showError(result.message || "Unable to update staff type.", "Staff Type");
+                return;
+            }
+
+            await showSuccess(result.message || "Custom staff type updated.", "Staff Type");
+            window.location.reload();
+        }
+
+        async function handleCustomStaffTypeDelete(staffTypeId, currentName) {
+            const confirmed = await showConfirmDialog({
+                title: "Delete Staff Type",
+                message: `Delete "${currentName}"?`,
+                details: `This staff type will only be removed if it is not assigned to any existing user records.`,
+                confirmText: "Delete",
+                cancelText: "Cancel",
+                type: "danger",
+            });
+
+            if (!confirmed) {
+                return;
+            }
+
+            let response;
+            try {
+                response = await fetch(`/user-management/custom-type/${staffTypeId}/delete`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "X-Requested-With": "XMLHttpRequest"
+                    },
+                    body: new URLSearchParams({
+                        csrf_token: document.body.dataset.csrfToken
+                    }).toString()
+                });
+            } catch (error) {
+                console.error("Unable to delete staff type:", error);
+                await showError("Unable to delete staff type. Please check your connection and try again.", "Staff Type");
+                return;
+            }
+
+            const result = await response.json().catch(() => ({ success: false, message: "Unable to delete staff type." }));
+            if (!response.ok || result.success === false) {
+                await showError(result.message || "Unable to delete staff type.", "Staff Type");
+                return;
+            }
+
+            await showSuccess(result.message || "Custom staff type deleted.", "Staff Type");
+            window.location.reload();
+        }
+
+        document.querySelectorAll(".staff-type-edit").forEach(button => {
+            button.addEventListener("click", () => handleCustomStaffTypeEdit(button.dataset.staffTypeId, button.dataset.staffTypeName));
+        });
+
+        document.querySelectorAll(".staff-type-delete").forEach(button => {
+            button.addEventListener("click", () => handleCustomStaffTypeDelete(button.dataset.staffTypeId, button.dataset.staffTypeName));
+        });
+    </script>
+</body>
+</html>

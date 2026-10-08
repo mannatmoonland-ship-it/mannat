@@ -1,0 +1,236 @@
+/* Shared visual system: crisp surfaces, strong blue actions, and lively accents. */
+:root {
+    color-scheme: light;
+    --mm-ink: #12233f;
+    --mm-muted: #60718b;
+    --mm-line: #d9e3f0;
+    --mm-surface: #fff;
+    --mm-canvas: #f3f7fc;
+    --mm-navy: #10244a;
+    --mm-navy-deep: #0a1834;
+    --mm-accent: #ff8a24;
+    --mm-accent-dark: #df6710;
+    --mm-focus: #2563eb;
+    --mm-radius: 11px;
+    --mm-shadow: 0 10px 28px rgba(18, 45, 88, .075);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { min-width: 320px; scroll-behavior: smooth; }
+body:not(.login-page) {
+    background: radial-gradient(ellipse at 8% 0%, rgba(37,99,235,.07), transparent 30rem), var(--mm-canvas);
+    color: var(--mm-ink);
+    font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+body:not(.login-page) header {
+    position: relative;
+    background: linear-gradient(105deg, #0b1a38 0%, #143469 68%, #155e75 125%);
+    color: #fff;
+    box-shadow: 0 8px 22px rgba(14, 35, 73, .16);
+}
+body:not(.login-page) header::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: min(28vw, 300px);
+    height: 3px;
+    background: linear-gradient(90deg, #ff8a24, #ffd166);
+    content: "";
+}
+body:not(.login-page) header h1,
+body:not(.login-page) header h2,
+body:not(.login-page) header h3,
+body:not(.login-page) header .brand { color: #fff; letter-spacing: -.025em; }
+body:not(.login-page) header p,
+body:not(.login-page) header .sub,
+body:not(.login-page) header .subtitle { color: #c5d4ec; }
+body:not(.login-page) header .nav-link { color: #e1ebfa; }
+body:not(.login-page) header .nav-link:hover { color: #fff; background: rgba(255,255,255,.12); }
+body:not(.login-page) main,
+body:not(.login-page) .container,
+body:not(.login-page) .shell,
+body:not(.login-page) .drawings-main {
+    width: min(100% - 40px, 1320px);
+    margin: 30px auto;
+}
+body:not(.login-page) .card,
+body:not(.login-page) .panel,
+body:not(.login-page) .category-card,
+body:not(.login-page) .drawings-panel,
+body:not(.login-page) .materials-panel,
+body:not(.login-page) .dr-record,
+body:not(.login-page) .dr-card,
+body:not(.login-page) .ev,
+body:not(.login-page) .investment-summary {
+    border-color: var(--mm-line);
+    border-radius: var(--mm-radius);
+    box-shadow: var(--mm-shadow);
+}
+body:not(.login-page) h1,
+body:not(.login-page) h2,
+body:not(.login-page) h3 { color: var(--mm-ink); line-height: 1.2; }
+body:not(.login-page) p { line-height: 1.6; }
+body:not(.login-page) button,
+body:not(.login-page) input,
+body:not(.login-page) select,
+body:not(.login-page) textarea { font: inherit; }
+body:not(.login-page) button {
+    transition: transform .16s ease, box-shadow .16s ease, background-color .16s ease, border-color .16s ease;
+}
+body:not(.login-page) button:hover { transform: translateY(-1px); box-shadow: 0 6px 14px rgba(37, 99, 235, .18); }
+body:not(.login-page) button:active { transform: translateY(0); }
+body:not(.login-page) a { text-underline-offset: 3px; }
+body:not(.login-page) input,
+body:not(.login-page) select,
+body:not(.login-page) textarea {
+    color: var(--mm-ink);
+    border-color: #c7d4e6;
+    border-radius: 8px;
+    background-color: #fff;
+    transition: border-color .15s ease, box-shadow .15s ease;
+}
+body:not(.login-page) input:focus,
+body:not(.login-page) select:focus,
+body:not(.login-page) textarea:focus { border-color: var(--mm-focus); }
+body:not(.login-page) input:focus,
+body:not(.login-page) select:focus,
+body:not(.login-page) textarea:focus,
+body:not(.login-page) button:focus-visible,
+body:not(.login-page) a:focus-visible {
+    outline: 3px solid rgba(37, 99, 235, .22);
+    outline-offset: 2px;
+}
+body:not(.login-page) input::placeholder,
+body:not(.login-page) textarea::placeholder { color: #8796aa; }
+body:not(.login-page) table { border-color: var(--mm-line); }
+body:not(.login-page) th { color: #4d6383; letter-spacing: .045em; }
+body:not(.login-page) td,
+body:not(.login-page) th { vertical-align: middle; }
+body:not(.login-page) tbody tr:hover { background: #f4f8ff; }
+body:not(.login-page) ::selection { color: #fff; background: #2563eb; }
+
+/* Clear hierarchy and bright functional color across module controls. */
+body:not(.login-page) .primary,
+body:not(.login-page) .primary-button,
+body:not(.login-page) .save,
+body:not(.login-page) .card-button,
+body:not(.login-page) .drawings-primary {
+    background: linear-gradient(135deg, #2563eb, #0e7490);
+    color: #fff;
+}
+body:not(.login-page) .secondary { background: #eaf1fb; color: #173967; }
+body:not(.login-page) .danger,
+body:not(.login-page) .delete-btn { background: #e5484d; color: #fff; }
+body:not(.login-page) .tag,
+body:not(.login-page) .badge { border-radius: 6px; }
+body.login-page {
+    background: radial-gradient(ellipse at 18% 12%, rgba(37,99,235,.5), transparent 32rem),
+                radial-gradient(ellipse at 88% 85%, rgba(255,138,36,.27), transparent 27rem),
+                linear-gradient(135deg, #081630, #12366f 62%, #07566b);
+}
+.login-shell { border-radius: 16px; }
+.login-page button { background: linear-gradient(120deg, #2563eb, #0891b2); }
+
+@media (max-width: 700px) {
+    body:not(.login-page) main,
+    body:not(.login-page) .container,
+    body:not(.login-page) .shell,
+    body:not(.login-page) .drawings-main { width: min(100% - 28px, 1320px); margin: 22px auto; }
+    body:not(.login-page) header { padding: 16px 20px; flex-wrap: wrap; gap: 12px; }
+    body:not(.login-page) header .nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+/* Editorial construction-guide direction: white surfaces, charcoal type, vivid red. */
+:root {
+    --mm-ink: #24272b;
+    --mm-muted: #697078;
+    --mm-line: #e2e3e5;
+    --mm-surface: #fff;
+    --mm-canvas: #f6f6f6;
+    --mm-navy: #27292d;
+    --mm-navy-deep: #1c1e21;
+    --mm-accent: #e31837;
+    --mm-accent-dark: #b8122c;
+    --mm-focus: #e31837;
+    --mm-radius: 7px;
+    --mm-shadow: 0 5px 18px rgba(25, 28, 32, .055);
+}
+body:not(.login-page) {
+    background: #f7f7f7;
+    color: #24272b;
+    font-family: Arial, "Segoe UI", sans-serif;
+}
+body:not(.login-page) header {
+    background: #fff;
+    color: #24272b;
+    border-bottom: 1px solid #e8e8e8;
+    box-shadow: 0 2px 8px rgba(0,0,0,.035);
+}
+body:not(.login-page) header::after {
+    left: 0;
+    right: auto;
+    width: 100%;
+    height: 3px;
+    background: #e31837;
+}
+body:not(.login-page) header h1,
+body:not(.login-page) header h2,
+body:not(.login-page) header h3,
+body:not(.login-page) header .brand { color: #24272b; }
+body:not(.login-page) header p,
+body:not(.login-page) header .sub,
+body:not(.login-page) header .subtitle { color: #73777d; }
+body:not(.login-page) header .nav-link { color: #36393d; }
+body:not(.login-page) header .nav-link:hover { color: #e31837; background: #fff1f3; }
+body:not(.login-page) main,
+body:not(.login-page) .container,
+body:not(.login-page) .shell,
+body:not(.login-page) .drawings-main { margin-top: 26px; }
+body:not(.login-page) h1,
+body:not(.login-page) h2,
+body:not(.login-page) h3 { color: #24272b; }
+body:not(.login-page) .card,
+body:not(.login-page) .panel,
+body:not(.login-page) .category-card,
+body:not(.login-page) .drawings-panel,
+body:not(.login-page) .materials-panel,
+body:not(.login-page) .dr-record,
+body:not(.login-page) .dr-card,
+body:not(.login-page) .ev,
+body:not(.login-page) .investment-summary {
+    border-color: #e1e2e4;
+    border-radius: 7px;
+    box-shadow: 0 3px 12px rgba(25,28,32,.045);
+}
+body:not(.login-page) button,
+body:not(.login-page) .primary,
+body:not(.login-page) .primary-button,
+body:not(.login-page) .save,
+body:not(.login-page) .card-button,
+body:not(.login-page) .drawings-primary {
+    background: #e31837;
+    color: #fff;
+}
+body:not(.login-page) button:hover { background-color: #c91530; }
+body:not(.login-page) .secondary { background: #f0f0f0; color: #35383c; }
+body:not(.login-page) .danger,
+body:not(.login-page) .delete-btn { background: #b42332; color: #fff; }
+body:not(.login-page) input:focus,
+body:not(.login-page) select:focus,
+body:not(.login-page) textarea:focus { border-color: #e31837; }
+body:not(.login-page) input:focus,
+body:not(.login-page) select:focus,
+body:not(.login-page) textarea:focus,
+body:not(.login-page) button:focus-visible,
+body:not(.login-page) a:focus-visible { outline-color: rgba(227,24,55,.25); }
+body:not(.login-page) ::selection { background: #e31837; }
+body.login-page {
+    background: radial-gradient(ellipse at 85% 0%, rgba(227,24,55,.16), transparent 30rem),
+                linear-gradient(135deg, #222428, #37393e);
+}
+.login-page button { background: #e31837; }

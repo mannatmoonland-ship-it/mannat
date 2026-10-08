@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Help Guide - Mannat Moon Construction</title>
+    <style>
+        * { box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body { margin: 0; color: #1e293b; background: #f8fafc; font-family: Arial, Helvetica, sans-serif; }
+        header { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 22px 5%; color: #fff; background: #111827; border-bottom: 3px solid #0ea5e9; }
+        header h1 { margin: 0 0 5px; font-size: 26px; }
+        header p { margin: 0; color: #cbd5e1; font-size: 14px; }
+        main { width: min(1040px, calc(100% - 36px)); margin: 32px auto; }
+        .guide-panel { padding: 30px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; box-shadow: 0 4px 12px rgba(15, 23, 42, .06); }
+        .guide-intro { padding-bottom: 22px; border-bottom: 1px solid #e2e8f0; }
+        .guide-intro h2 { margin: 0 0 10px; font-size: 21px; }
+        .guide-intro p { margin: 0; color: #475569; line-height: 1.65; }
+        .guide-toc { margin: 22px 0 8px; padding: 20px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
+        .guide-toc h2 { margin: 0 0 12px; font-size: 17px; }
+        .guide-toc ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 26px; margin: 0; padding-left: 22px; }
+        .guide-toc li { padding-left: 2px; color: #0f766e; line-height: 1.5; }
+        a { color: #0369a1; }
+        .guide-toc a { text-decoration-thickness: 1px; text-underline-offset: 3px; }
+        .guide-toc a:hover { color: #0f766e; }
+        .guide-toc a:focus-visible, .guide-button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }
+        .guide-chapter { padding: 24px 0; border-bottom: 1px solid #e2e8f0; scroll-margin-top: 20px; }
+        .guide-chapter:last-of-type { border-bottom: 0; }
+        .guide-chapter h2 { margin: 0 0 12px; color: #0f172a; font-size: 20px; }
+        .guide-chapter h3 { margin: 18px 0 8px; font-size: 16px; }
+        .guide-chapter p, .guide-chapter li { color: #475569; line-height: 1.65; }
+        .guide-chapter p { margin: 8px 0 12px; }
+        .guide-chapter ol, .guide-chapter ul { margin: 8px 0 12px; padding-left: 24px; }
+        .guide-chapter li + li { margin-top: 5px; }
+        .guide-note { margin: 14px 0; padding: 12px 14px; border-left: 4px solid #0f766e; background: #f0fdfa; color: #334155; line-height: 1.6; }
+        .guide-unavailable { border-left-color: #d97706; background: #fffbeb; }
+        .guide-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 22px; padding-top: 20px; border-top: 1px solid #e2e8f0; }
+        .guide-button { display: inline-block; padding: 11px 18px; border-radius: 8px; color: #fff; background: #0ea5e9; font-weight: 700; text-decoration: none; }
+        .guide-button:hover { background: #0284c7; }
+        .guide-top-link { color: #cbd5e1; text-decoration: none; white-space: nowrap; }
+        .guide-top-link:hover { color: #fff; text-decoration: underline; }
+        @media (max-width: 640px) {
+            header { align-items: flex-start; flex-direction: column; padding: 20px 18px; }
+            main { width: min(100% - 24px, 1040px); margin: 18px auto; }
+            .guide-panel { padding: 20px 18px; }
+            .guide-toc { padding: 16px; }
+            .guide-toc ol { grid-template-columns: 1fr; gap: 7px; }
+            .guide-chapter { padding: 20px 0; }
+            .guide-actions { flex-wrap: wrap; }
+        }
+    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+</head>
+<body>
+    <header>
+        <div>
+            <h1>User Help Guide</h1>
+            <p>Mannat Moon Construction</p>
+        </div>
+        {% include '_navigation.html' %}
+        <a class="guide-top-link" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+    </header>
+
+    <main>
+        <article class="guide-panel">
+            <section class="guide-intro" aria-labelledby="guideWelcome">
+                <h2 id="guideWelcome">Welcome</h2>
+                <p>This guide explains how to use the construction records, workforce, materials, payment, and drawing tools available in Mannat Moon Construction. Follow the steps for the module you need; options may vary by your account role.</p>
+            </section>
+
+            <nav class="guide-toc" aria-labelledby="tocTitle">
+                <h2 id="tocTitle">Contents</h2>
+                <ol>
+                    <li><a href="#introduction">Introduction</a></li>
+                    <li><a href="#login">Login and Account Management</a></li>
+                    <li><a href="#dashboard">Dashboard Navigation</a></li>
+                    <li><a href="#daily-reports">Daily Reports</a></li>
+                    <li><a href="#trade-builder">Trade Builder</a></li>
+                    <li><a href="#materials">Materials</a></li>
+                    <li><a href="#labour-muster">Labour Muster</a></li>
+                    <li><a href="#labour-payments">Labour Payments</a></li>
+                    <li><a href="#drawings">Drawings Library</a></li>
+                    <li><a href="#troubleshooting">Troubleshooting</a></li>
+                </ol>
+            </nav>
+
+            <section class="guide-chapter" id="introduction" aria-labelledby="introductionTitle">
+                <h2 id="introductionTitle">1. Introduction</h2>
+                <p>Mannat Moon Construction helps staff keep project information together: daily site reports, trade and worker details, material activity, labour payments, and construction drawings.</p>
+                <p>Site supervisors and office staff can use the operational modules available to their account. Super Admins also manage users and access administration tools. If a module is missing from your Dashboard, ask your administrator which access is appropriate.</p>
+            </section>
+
+            <section class="guide-chapter" id="login" aria-labelledby="loginTitle">
+                <h2 id="loginTitle">2. Login and Account Management</h2>
+                <h3>Log in</h3>
+                <ol>
+                    <li>Open the Mannat Moon Construction sign-in page.</li>
+                    <li>Enter the username and password provided by your administrator, then select <strong>Sign In</strong>.</li>
+                    <li>If asked to change your password before continuing, complete that step first.</li>
+                </ol>
+                <h3>Change your password</h3>
+                <ol>
+                    <li>Open the <a href="{{ url_for('change_password') }}">Change Password</a> page.</li>
+                    <li>Enter your current password, then enter and confirm your new password.</li>
+                    <li>Use at least 8 characters, including an uppercase letter, a lowercase letter, a number, and a special character. Select <strong>Update Password</strong>.</li>
+                </ol>
+                <p>If you cannot sign in, use <strong>Forgot Password?</strong> on the sign-in page if it is available, or contact your administrator.</p>
+                <h3>Log out</h3>
+                <p>Select <strong>Logout</strong> in the Dashboard header when you have finished. Do not share your sign-in details with another person.</p>
+            </section>
+
+            <section class="guide-chapter" id="dashboard" aria-labelledby="dashboardTitle">
+                <h2 id="dashboardTitle">3. Dashboard Navigation</h2>
+                <ol>
+                    <li>After signing in, use the Dashboard cards to open a module.</li>
+                    <li>Choose <strong>Daily Reports</strong> for site records, <strong>Material Builder</strong> for material activity, <strong>Labour Payments</strong> for payment records, or <strong>Drawings Library</strong> for plans.</li>
+                    <li>Use <strong>Trade Builder</strong> to maintain trades and worker categories when that card is available to your role.</li>
+                    <li>Select <strong>Dashboard</strong> from a module page to return. Use <strong>Logout</strong> when finished.</li>
+                </ol>
+                <p>Some Dashboard cards, including Trade Builder, User Management, Snapshot, and Developer Documentation, are shown only to Super Admins.</p>
+            </section>
+
+            <section class="guide-chapter" id="daily-reports" aria-labelledby="dailyReportsTitle">
+                <h2 id="dailyReportsTitle">4. Daily Reports</h2>
+                <p>Daily Reports show construction activity for one selected date. A report can include a trade, worker counts, weather, materials, notes, and links to visual evidence.</p>
+                <h3>Choose a date and view reports</h3>
+                <ol>
+                    <li>Open <strong>Daily Reports</strong> from the Dashboard.</li>
+                    <li>Use <strong>Previous Day</strong> or <strong>Next Day</strong> to move one day, or select <strong>Today</strong>.</li>
+                    <li>Select <strong>Go to Date</strong> to open the calendar, then choose a date. Reports for that date appear below.</li>
+                </ol>
+                <h3>Add or edit a daily record</h3>
+                <ol>
+                    <li>Select <strong>+ Daily Record</strong>.</li>
+                    <li>Enter the date, work or activity, and trade. Add location, weather, worker counts, materials, and work notes as needed.</li>
+                    <li>Under <strong>Visual Evidence</strong>, add a Photo or Video item and enter its title and share link. Use the preview when available.</li>
+                    <li>Select <strong>Save Daily Record</strong>. To change a saved record, select <strong>Edit</strong> on that record, make changes, and save again.</li>
+                </ol>
+                <p>Use <strong>Delete</strong> on a record only when it should be removed; confirm the prompt to proceed. Daily Reports record worker counts by category, not a named attendance list.</p>
+                <h3>Print or export</h3>
+                <ol>
+                    <li>Select <strong>Print Daily Page</strong> to print the selected date.</li>
+                    <li>Select <strong>Export PDF</strong> to open the print dialog. Choose <strong>Save as PDF</strong> in the browser to save a PDF file.</li>
+                </ol>
+            </section>
+
+            <section class="guide-chapter" id="trade-builder" aria-labelledby="tradeBuilderTitle">
+                <h2 id="tradeBuilderTitle">5. Trade Builder</h2>
+                <p>Trade Builder is available to Super Admins. It maintains trade names and the worker categories used by the workforce and payment screens.</p>
+                <ol>
+                    <li>Open <strong>Trade Builder</strong> from the Dashboard.</li>
+                    <li>Enter a trade name, such as Masons, and select <strong>+ Add Worker Category</strong>.</li>
+                    <li>For each category, enter its name and choose <strong>Daily Wage</strong> or <strong>Lump Sum</strong>.</li>
+                    <li>For a daily-wage category, enter the wage and effective date. For a lump-sum category, enter the agreed amount and effective date; a work description is optional.</li>
+                    <li>Add any other worker categories and select <strong>Save Trade</strong>. Existing trades can be selected and edited from the Trades list.</li>
+                </ol>
+                <p>When changing a daily wage, enter the new effective date so the wage history remains useful.</p>
+            </section>
+
+            <section class="guide-chapter" id="materials" aria-labelledby="materialsTitle">
+                <h2 id="materialsTitle">6. Materials</h2>
+                <p>Material Builder includes categories, suppliers, stock, purchases, and consumption. Stock is calculated from the saved purchase and consumption records.</p>
+                <h3>Set up categories and suppliers</h3>
+                <ol>
+                    <li>Open <strong>Material Builder</strong>. In <strong>Categories</strong>, select <strong>+ Create Category</strong> and enter a category name and unit.</li>
+                    <li>Add brands or quarries to a category when needed, then save it.</li>
+                    <li>Open <strong>Suppliers</strong>, select <strong>+ Create Supplier</strong>, enter the required contact details, and assign the categories and brands or quarries they supply. Save the supplier.</li>
+                </ol>
+                <h3>Record a purchase or consumption</h3>
+                <ol>
+                    <li>Open <strong>Stock &amp; Transactions</strong>, then choose <strong>Purchases</strong> to record received materials.</li>
+                    <li>Enter the date and category. For Cement, also select a brand or quarry and enter quantity and rate; the total is calculated. For other categories, enter the purchase amount.</li>
+                    <li>Select a supplier if applicable. A bill photo or link is optional. Select <strong>Save Purchase</strong>.</li>
+                    <li>For Cement use <strong>Consumption</strong>, enter the date, category, quantity, and location or floor, then save. Consumption entry is available only when a Cement category exists.</li>
+                    <li>Open <strong>Stock</strong> to review the calculated available quantity.</li>
+                </ol>
+            </section>
+
+            <section class="guide-chapter" id="labour-muster" aria-labelledby="labourMusterTitle">
+                <h2 id="labourMusterTitle">7. Labour Muster</h2>
+                <div class="guide-note guide-unavailable"><strong>Not Yet Available:</strong> The application does not currently provide a separate worker attendance or Labour Muster register.</div>
+                <p>You can enter total worker counts by trade category in a Daily Report. These counts are not individual attendance records and do not replace a named muster sheet.</p>
+            </section>
+
+            <section class="guide-chapter" id="labour-payments" aria-labelledby="labourPaymentsTitle">
+                <h2 id="labourPaymentsTitle">8. Labour Payments</h2>
+                <p>Labour Payments shows a selected trade's contract and payment information, including payment totals and balances.</p>
+                <ol>
+                    <li>Open <strong>Labour Payments &amp; Contract Capping</strong> from the Dashboard and select a trade.</li>
+                    <li>Review the trade's contract items and payment summary. Use the payment controls for the selected trade to add or edit a transaction.</li>
+                    <li>Choose the transaction type: Mobilization Advance, Labour Advance, Labour Settlement, or Lump-Sum Payment.</li>
+                    <li>Enter the date and amount being paid, choose a payment mode, and add remarks if useful. Settlement entries can also record labour earned and advance deductions; lump-sum payments are associated with a worker category.</li>
+                    <li>Select <strong>Save Payment</strong>. Review the updated totals and payment history.</li>
+                </ol>
+                <p>Mobilization payments are tracked separately from the labour advance balance. Check the displayed balance before recording a settlement.</p>
+            </section>
+
+            <section class="guide-chapter" id="drawings" aria-labelledby="drawingsTitle">
+                <h2 id="drawingsTitle">9. Drawings Library</h2>
+                <h3>Manage categories and drawings</h3>
+                <ol>
+                    <li>Open <strong>Drawings Library</strong>. Use the search field or Category filter to find drawings.</li>
+                    <li>Select <strong>+ Create Category</strong> to add a category. Use <strong>Edit Category</strong> to rename it; a category must be empty before it can be deleted.</li>
+                    <li>Select <strong>Add Drawing</strong> on a category. Enter the drawing name and a Google Drive PDF link; number, revision, and description are optional.</li>
+                    <li>Select <strong>Save Drawing</strong>. Use <strong>Edit</strong> or <strong>Delete</strong> beside a drawing to manage it.</li>
+                    <li>Select <strong>Open PDF</strong> to open the linked drawing. The PDF remains in Google Drive if its library entry is deleted.</li>
+                </ol>
+                <h3>Change the order</h3>
+                <p>Use the up and down arrow buttons beside a category to move it. Use the arrows beside a drawing to reorder it within its own category. The first and last items cannot move farther in that direction. The saved order remains after refresh.</p>
+            </section>
+
+            <section class="guide-chapter" id="troubleshooting" aria-labelledby="troubleshootingTitle">
+                <h2 id="troubleshootingTitle">10. Troubleshooting</h2>
+                <h3>Sign-in problems</h3>
+                <ul>
+                    <li>Check that the username and password are entered correctly. Passwords are case-sensitive.</li>
+                    <li>Use <strong>Forgot Password?</strong> if available. If the account is inactive or you still cannot sign in, contact your administrator.</li>
+                </ul>
+                <h3>Missing records</h3>
+                <ul>
+                    <li>In Daily Reports, check the selected date. Records are shown for one date at a time.</li>
+                    <li>In Drawings Library, clear the search text and choose <strong>All categories</strong> to broaden the results.</li>
+                    <li>In Material Builder, check the selected tab and category. Refresh the page if recent changes do not appear.</li>
+                </ul>
+                <h3>PDF, photo, or video will not open</h3>
+                <ul>
+                    <li>Check that the link is correct and that you have permission to open it. Google Drive drawings need a valid Drive PDF link.</li>
+                    <li>If a preview is unavailable, use the original link provided with the evidence. Some video links open separately instead of playing in the report.</li>
+                    <li>For PDF export, use the browser print dialog and choose <strong>Save as PDF</strong>. If a new tab is blocked, allow pop-ups for this application and try again.</li>
+                </ul>
+                <p>If a problem continues, note the module and the action you were taking, then contact your administrator.</p>
+            </section>
+
+            <div class="guide-actions">
+                <a class="guide-button" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+                <a href="#tocTitle">Back to Contents</a>
+            </div>
+        </article>
+    </main>
+</body>
+</html>

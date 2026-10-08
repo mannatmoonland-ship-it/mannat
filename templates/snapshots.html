@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mannat Moon - Snapshot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='snapshots.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+</head>
+<body>
+<header class="snapshot-header">
+    <div>
+        <div class="snapshot-brand">MANNAT MOON</div>
+        <div class="snapshot-subtitle">Firestore Backup &amp; Restore</div>
+    </div>
+    {% include '_navigation.html' %}
+    <nav>
+        <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}"><button type="submit">Logout</button></form>
+    </nav>
+</header>
+
+<main id="snapshotApp" data-csrf-token="{{ csrf_token }}">
+    <div class="snapshot-title-row">
+        <div>
+            <h1>Snapshot</h1>
+            <p>Active Firebase project: <strong id="activeProject">{{ active_project_id }}</strong></p>
+        </div>
+        <button type="button" id="openBackupFolder" class="button secondary">Open Backup Folder</button>
+    </div>
+
+    <details class="snapshot-help">
+        <summary class="button secondary">
+            <span>Help &amp; Instructions</span>
+            <span class="help-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="snapshot-help-panel">
+            <div class="snapshot-help-grid">
+                <section class="help-topic" aria-labelledby="helpBackupTitle">
+                    <h2 id="helpBackupTitle">How to Create a Backup</h2>
+                    <ol>
+                        <li>Click <strong>Create Snapshot</strong>.</li>
+                        <li>The application collects Firestore data from the active Firebase project.</li>
+                        <li>The data is packaged into a ZIP file and saved in the local <code>backups/</code> folder.</li>
+                        <li>The backup appears in <strong>Snapshot History</strong>.</li>
+                        <li>Verification status indicates whether the ZIP and its contents passed integrity checks.</li>
+                        <li>Use <strong>Open Folder</strong> in the history row or <strong>Open Backup Folder</strong> to locate it on this computer.</li>
+                    </ol>
+                    <p class="help-note">A Firestore backup does not include Firebase Authentication accounts, Storage files, security rules, or Cloud Functions.</p>
+                </section>
+
+                <section class="help-topic" aria-labelledby="helpRestoreTitle">
+                    <h2 id="helpRestoreTitle">How to Restore a Backup</h2>
+                    <ol>
+                        <li>Select a verified ZIP from <strong>Snapshot History</strong> or <strong>Restore Snapshot</strong>.</li>
+                        <li>Choose <strong>Existing Firebase project</strong> or <strong>New Firebase project</strong>.</li>
+                        <li>Enter the destination Firebase Project ID.</li>
+                        <li>Select the destination project's service-account JSON file.</li>
+                        <li>Provide that destination's public Firebase Web App config, then click <strong>Validate Destination &amp; Preview</strong>.</li>
+                        <li>Review the source and destination IDs, collections, document counts, existing data, and conflicts.</li>
+                        <li>For conflicts, choose <strong>Skip existing documents</strong>, <strong>Replace existing documents</strong>, or <strong>Cancel Restore</strong>.</li>
+                        <li>Type the destination Project ID to confirm only after carefully reviewing the destination.</li>
+                        <li>Wait for the batched restore and document verification to finish.</li>
+                        <li>Review the final status and any failed, overwritten, or skipped documents.</li>
+                    </ol>
+                    <aside class="help-warning" role="note">
+                        <strong>WARNING</strong>
+                        <p>Restoring into an existing Firebase project can modify its data. Always verify the destination project before confirming a restore. Create a backup of the destination before overwriting existing data.</p>
+                    </aside>
+                    <div class="help-checklist">
+                        <h3>Before You Restore</h3>
+                        <ul>
+                            <li>Verify the ZIP backup.</li>
+                            <li>Confirm the destination Project ID.</li>
+                            <li>Keep service-account credentials private.</li>
+                            <li>Avoid restoring into the production project during testing.</li>
+                            <li>Do not switch the production application until the restored project has been checked.</li>
+                        </ul>
+                    </div>
+                </section>
+
+                <section class="help-topic" aria-labelledby="helpSwitchTitle">
+                    <h2 id="helpSwitchTitle">How to Switch the Application to the Restored Project</h2>
+                    <ol>
+                        <li>Restore the backup to the intended Firebase project.</li>
+                        <li>Verify that the restored collections and documents are present.</li>
+                        <li>Return to this Snapshot page.</li>
+                        <li>Use <strong>Switch Application to Restored Project</strong>.</li>
+                        <li>Review the current and destination Firebase Project IDs.</li>
+                        <li>Confirm the switch only when the destination is correct.</li>
+                        <li>The application updates its Firebase configuration to use the restored project.</li>
+                        <li>The browser reloads to use the updated configuration; restart the server only if your deployment requires it.</li>
+                        <li>Sign in if prompted and verify that expected modules and data are available.</li>
+                    </ol>
+                    <aside class="help-warning help-warning-neutral" role="note">
+                        <strong>IMPORTANT</strong>
+                        <p>Switching the application changes which Firebase project the app uses. It does not merge the two projects. The original Firebase project remains separate.</p>
+                    </aside>
+                </section>
+            </div>
+        </div>
+    </details>
+
+    <div id="snapshotMessage" class="snapshot-message" role="status" aria-live="polite"></div>
+
+    <section class="snapshot-section" aria-labelledby="createSnapshotTitle">
+        <div class="section-heading">
+            <div>
+                <h2 id="createSnapshotTitle">Create Snapshot</h2>
+                <p>A verified ZIP backup of the configured Firestore database is saved on this computer.</p>
+            </div>
+            <button type="button" id="createSnapshot" class="button primary">Create Snapshot</button>
+        </div>
+    </section>
+
+    <section class="snapshot-section" aria-labelledby="snapshotHistoryTitle">
+        <div class="section-heading">
+            <div>
+                <h2 id="snapshotHistoryTitle">Snapshot History</h2>
+                <p>Local ZIP files and their verification status.</p>
+            </div>
+            <button type="button" id="refreshHistory" class="button secondary">Refresh</button>
+        </div>
+        <div class="table-scroll">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Snapshot</th><th>Source Project</th><th>Created</th><th>Size</th>
+                        <th>Collections</th><th>Documents</th><th>Verification</th><th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="snapshotRows"><tr><td colspan="8">Loading snapshots...</td></tr></tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="snapshot-section" aria-labelledby="restoreSnapshotTitle">
+        <h2 id="restoreSnapshotTitle">Restore Snapshot</h2>
+        <p class="section-intro">Destination service-account files are stored on the server and are never returned to the browser.</p>
+        <div class="restore-grid">
+            <label>Snapshot
+                <select id="restoreSnapshotSelect"><option value="">Select a verified snapshot</option></select>
+            </label>
+            <label>Destination
+                <select id="destinationType">
+                    <option value="new">New Firebase project</option>
+                    <option value="existing">Existing Firebase project</option>
+                </select>
+            </label>
+            <label>Destination Firebase Project ID
+                <input id="destinationProjectId" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <label>Destination service-account JSON
+                <input id="serviceAccountFile" type="file" accept="application/json,.json">
+            </label>
+            <label class="web-config-field">Destination Firebase Web App config (JSON)
+                <textarea id="webConfig" rows="5" spellcheck="false" placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","appId":"..."}'></textarea>
+            </label>
+        </div>
+        <button type="button" id="previewRestore" class="button primary">Validate Destination &amp; Preview</button>
+        <div id="restorePreview" class="restore-preview" hidden></div>
+        <div id="restoreProgress" class="restore-progress" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="snapshot-section" aria-labelledby="switchProjectTitle">
+        <h2 id="switchProjectTitle">Switch Active Firebase Project</h2>
+        <p>Switching is available only after a complete, conflict-free restore has been verified.</p>
+        <div class="switch-grid">
+            <label>Verified restored project
+                <select id="restoredProjectSelect"><option value="">No eligible restored project</option></select>
+            </label>
+            <label>Type the selected project ID to confirm
+                <input id="switchConfirmProjectId" type="text" autocomplete="off" spellcheck="false">
+            </label>
+        </div>
+        <button type="button" id="switchProject" class="button primary" disabled>Switch Application to Restored Project</button>
+        <div class="rollback-row">
+            <span>Previous project: <strong id="previousProject">{{ previous_project_id or 'Not available' }}</strong></span>
+            <label>Type the active project ID to roll back
+                <input id="rollbackConfirmProjectId" type="text" autocomplete="off" spellcheck="false">
+            </label>
+            <button type="button" id="switchBack" class="button secondary" {% if not previous_project_id %}disabled{% endif %}>Switch Back</button>
+        </div>
+    </section>
+</main>
+
+<script type="module" src="{{ url_for('static', filename='snapshots.js') }}"></script>
+</body>
+</html>

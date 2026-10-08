@@ -1,0 +1,79 @@
+.office-connection-banner {
+  position: sticky;
+  top: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px max(16px, calc((100vw - 1100px) / 2));
+  color: #7a271a;
+  background: #fef0c7;
+  border-bottom: 1px solid #fdb022;
+  box-shadow: 0 2px 8px rgb(16 24 40 / 12%);
+}
+
+.office-connection-banner[hidden] {
+  display: none;
+}
+
+.office-connection-banner[data-state="restored"] {
+  color: #05603a;
+  background: #dcfae6;
+  border-bottom-color: #75e0a7;
+}
+
+.office-connection-icon {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.office-connection-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.office-connection-title {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.office-connection-message,
+.office-connection-unsaved {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.office-connection-unsaved {
+  margin-top: 3px;
+  font-weight: 700;
+}
+
+.office-connection-unsaved[hidden] {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .office-connection-banner {
+    gap: 9px;
+    padding: 10px 12px;
+  }
+
+  .office-connection-title {
+    font-size: 13px;
+  }
+
+  .office-connection-message,
+  .office-connection-unsaved {
+    font-size: 12px;
+  }
+}

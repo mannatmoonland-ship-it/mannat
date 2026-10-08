@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Mannat Moon - Daily Reports
+    </title>
+
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='daily_reports.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dialogs.css') }}">
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+</head>
+
+<body data-daily-reports-csrf="{{ daily_reports_csrf }}">
+
+<div id="dr-toastContainer" class="dr-toast-container" aria-live="polite" aria-atomic="false"></div>
+
+<header>
+
+    <div>
+
+        <div class="brand">MANNAT MOON</div>
+
+        <div class="sub">Construction Documentation</div>
+
+        <div class="dr-print-report-title">DAILY REPORT</div>
+
+    </div>
+
+    {% include '_navigation.html' %}
+
+    <button id="dr-addBtn" class="dr-icon-button">
+        <svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Daily Record</span>
+    </button>
+
+</header>
+
+<main>
+
+    <section class="hero">
+
+        <div>
+
+            <h1>Daily Reports</h1>
+
+            <p>Daily work, numbers, notes and visual evidence for one selected date.</p>
+
+        </div>
+
+        <div class="stats">
+
+            <div><b id="dr-recordCount">0</b><span>Records</span></div>
+
+            <div><b id="dr-evidenceCount">0</b><span>Evidence</span></div>
+
+        </div>
+
+    </section>
+
+    <p id="dr-dataStatus" class="dr-data-status" role="status" aria-live="polite">Loading Daily Reports...</p>
+
+    <section class="dr-date-navigation" aria-label="Daily report date controls">
+
+        <button type="button" id="dr-prevDay" class="dr-date-button dr-icon-button"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg><span>Previous Day</span></button>
+
+        <div class="dr-selected-date">
+            <span>Selected Date</span>
+            <strong id="dr-selectedDateLabel"></strong>
+        </div>
+
+        <div class="dr-calendar-control">
+            <button type="button" id="dr-calendarToggle" class="dr-date-button dr-icon-button" aria-expanded="false" aria-controls="dr-calendar"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 10h16"/></svg><span>Go to Date</span></button>
+            <section id="dr-calendar" class="dr-calendar" aria-label="Daily Reports calendar" hidden>
+                <div class="dr-calendar-header">
+                    <button type="button" id="dr-prevMonth" class="dr-calendar-month-button" aria-label="Previous month"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+                    <strong id="dr-calendarMonthLabel" aria-live="polite"></strong>
+                    <button type="button" id="dr-nextMonth" class="dr-calendar-month-button" aria-label="Next month"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+                </div>
+                <div class="dr-calendar-weekdays" aria-hidden="true">
+                    <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+                </div>
+                <div id="dr-calendarDays" class="dr-calendar-days" aria-label="Calendar dates"></div>
+            </section>
+        </div>
+
+        <button type="button" id="dr-todayBtn" class="dr-date-button dr-icon-button"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg><span>Today</span></button>
+
+        <button type="button" id="dr-nextDay" class="dr-date-button dr-icon-button"><span>Next Day</span><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+
+        <div class="dr-day-actions">
+            <div class="dr-share-actions" aria-label="Daily report sharing actions">
+                <button type="button" id="shareDailyReportBtn" class="dr-secondary dr-icon-button"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.7 10.7 6.6-4.4M8.7 13.3l6.6 4.4"/></svg><span>Share Daily Report</span></button>
+                <button type="button" id="downloadDailyReportImageBtn" class="dr-secondary dr-icon-button"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 19h16"/></svg><span>Download Image</span></button>
+                <span id="shareStatus" class="dr-share-status" role="status" aria-live="polite"></span>
+            </div>
+            <button type="button" id="dr-printDayBtn" class="dr-secondary dr-icon-button"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V3h10v5M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M7 14h10v7H7zM17 11h.01"/></svg><span>Print Daily Page</span></button>
+            <button type="button" id="dr-exportPdfBtn" class="dr-secondary dr-icon-button" title="Opens the print dialog; choose Save as PDF"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8z"/><path d="M13 3v8h7M8 16h8M8 19h5"/></svg><span>Export PDF</span></button>
+        </div>
+
+    </section>
+
+    <div id="dr-records"></div>
+
+</main>
+
+<script src="{{ url_for('static', filename='daily_report_sharing.js') }}" defer></script>
+
+<div id="dr-modal" class="dr-modal dr-hidden">
+
+    <div class="dr-modalbox">
+
+        <div class="dr-modalhead">
+
+            <h2>New Daily Record</h2>
+
+            <button id="dr-closeBtn" class="dr-x" type="button" aria-label="Close daily record form">&times;</button>
+
+        </div>
+
+        <form id="dr-recordForm">
+
+            <div class="dr-twocol">
+
+                <label>Date<input id="dr-date" type="date" required></label>
+
+                <label>Floor / Location<input id="dr-floor" placeholder="Ground Floor / Grid C-D"></label>
+
+            </div>
+
+            <label>Work / Activity<input id="dr-activity" placeholder="Slab reinforcement" required></label>
+
+            <label>Trade
+                <select id="dr-tradeSelect" required>
+                    <option value="">Select a trade</option>
+                </select>
+                <div id="dr-tradeStatus" class="dr-trade-status" aria-live="polite"></div>
+            </label>
+
+            <label>Weather Condition
+                <select id="dr-weatherCondition">
+                    <option value="">Select weather condition</option>
+                    <option value="Sunny">☀️ Sunny</option>
+                    <option value="Partly Cloudy">🌤️ Partly Cloudy</option>
+                    <option value="Cloudy">☁️ Cloudy</option>
+                    <option value="Rainy">🌧️ Rainy</option>
+                    <option value="Thunderstorm">⛈️ Thunderstorm</option>
+                    <option value="Foggy">🌫️ Foggy</option>
+                    <option value="Windy">💨 Windy</option>
+                    <option value="Other">🌡️ Other</option>
+                </select>
+            </label>
+
+            <div id="dr-weatherCustomWrapper" class="dr-weather-custom" style="display: none;">
+                <label>Weather Details
+                    <input id="dr-weatherDescription" type="text" maxlength="120" placeholder="Describe the weather condition">
+                </label>
+            </div>
+
+            <div class="dr-twocol dr-workforce-wrap">
+
+                <div class="dr-workforce-box">
+
+                    <div id="dr-workerCategories"></div>
+
+                </div>
+
+                <div class="dr-workforce-total-box">
+
+                    <div class="dr-workforce-total-label">Total Workers</div>
+
+                    <div id="dr-totalWorkersValue" class="dr-workforce-total-value">0</div>
+
+                </div>
+
+            </div>
+
+            <label>Materials<textarea id="dr-materials" placeholder="Cement - 65 bags&#10;Steel - 2.4 tonnes"></textarea></label>
+
+            <label>Work Done Today<textarea id="dr-notes" placeholder="Describe the construction work completed today."></textarea></label>
+
+            <div class="dr-evidenceHead">
+
+                <h3>Visual Evidence</h3>
+
+                <button type="button" id="dr-addEvidence" class="dr-secondary">+ Add Evidence</button>
+
+            </div>
+
+            <div id="dr-evidenceRows"></div>
+
+            <div class="dr-previewBox">
+
+                <h3>Preview</h3>
+
+                <div id="dr-livePreview" class="dr-muted">Paste a YouTube, Google Drive, or Google Photos link above.</div>
+
+            </div>
+
+            <button class="dr-save" type="submit">Save Daily Record</button>
+
+        </form>
+
+    </div>
+
+</div>
+
+<div id="dr-deleteModal" class="dr-modal dr-hidden">
+
+    <div class="dr-modalbox dr-confirmbox">
+
+        <div id="dr-deleteMeta"></div>
+
+        <div class="dr-confirm-actions">
+
+            <button type="button" id="dr-cancelDeleteBtn" class="dr-secondary">Cancel</button>
+
+            <button type="button" id="dr-confirmDeleteBtn" class="dr-danger">Delete</button>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script type="module" src="{{ url_for('static', filename='daily_reports.js') }}"></script>
+
+</body>
+
+</html>

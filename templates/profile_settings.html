@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>Mannat Moon - Profile Settings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='profile_settings.css') }}">
+</head>
+<body class="dashboard-page profile-page">
+    <header class="dashboard-header">
+        <a class="dashboard-brand" href="{{ url_for('dashboard') }}" aria-label="Mannat Moon home">
+            <span class="dashboard-brand-mark" aria-hidden="true">MM</span>
+            <span class="dashboard-brand-copy">
+                <strong>Mannat Moon</strong>
+                <small>Construction workspace</small>
+            </span>
+        </a>
+        {% include '_navigation.html' %}
+        <div class="dashboard-account">
+            <a class="dashboard-user" href="{{ url_for('profile_settings') }}" aria-current="page" aria-label="Profile Settings">
+                <span class="dashboard-avatar" data-animal-avatar="{{ profile.avatar_id }}" aria-hidden="true">{{ profile.full_name[:1]|upper }}</span>
+                <span class="dashboard-user-copy">
+                    <strong>{{ profile.full_name }}</strong>
+                    <small>{{ profile.role }}</small>
+                </span>
+            </a>
+            <form method="post" action="{{ url_for('logout') }}" class="dashboard-logout">
+                <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
+                <button type="submit">Sign out</button>
+            </form>
+        </div>
+    </header>
+
+    <main class="container profile-settings-main" data-profile-settings data-avatar-id="{{ profile.avatar_id }}" data-csrf-token="{{ csrf_token }}">
+        <section class="profile-settings-heading" aria-labelledby="profile-settings-title">
+            <p class="dashboard-eyebrow"><span></span> YOUR ACCOUNT</p>
+            <h1 id="profile-settings-title">Profile Settings</h1>
+            <p>Manage your profile details and choose an avatar for your workspace.</p>
+        </section>
+
+        <div class="profile-settings-grid">
+            <section class="profile-card" aria-labelledby="profile-information-title">
+                <h2 id="profile-information-title">Profile information</h2>
+                <div class="profile-identity">
+                    <div id="profile-current-avatar" class="profile-current-avatar" aria-label="Current profile avatar"></div>
+                    <div class="profile-identity-copy">
+                        <h2 id="profile-display-name">{{ profile.full_name }}</h2>
+                        <p>@{{ profile.username }}</p>
+                    </div>
+                </div>
+                <form id="profile-edit-form" class="profile-edit-form" novalidate>
+                    <dl class="profile-details">
+                        <div>
+                            <dt><label for="profile-full-name">Full name</label></dt>
+                            <dd><input id="profile-full-name" name="full_name" type="text" maxlength="120" autocomplete="name" required value="{{ profile.full_name }}"></dd>
+                        </div>
+                        <div>
+                            <dt>Username</dt>
+                            <dd>{{ profile.username }}</dd>
+                        </div>
+                        <div>
+                            <dt><label for="profile-email">Primary / Account Email</label></dt>
+                            <dd><input id="profile-email" name="email" type="email" maxlength="254" autocomplete="email" value="{{ profile.email }}"></dd>
+                        </div>
+                        <div>
+                            <dt><label for="profile-recovery-email">Recovery Email</label></dt>
+                            <dd><input id="profile-recovery-email" name="recovery_email" type="email" maxlength="254" autocomplete="email" value="{{ profile.recovery_email }}"></dd>
+                        </div>
+                        <div>
+                            <dt>Role</dt>
+                            <dd>{{ profile.role }}</dd>
+                        </div>
+                        <div>
+                            <dt>Account status</dt>
+                            <dd><span class="profile-status">{{ profile.status }}</span></dd>
+                        </div>
+                        {% if profile.created_at %}
+                        <div>
+                            <dt>Member since</dt>
+                            <dd><time class="profile-timestamp" data-profile-timestamp datetime="{{ profile.created_at }}">{{ profile.created_at }}</time></dd>
+                        </div>
+                        {% endif %}
+                        {% if profile.last_login_at %}
+                        <div>
+                            <dt>Last sign in</dt>
+                            <dd><time class="profile-timestamp" data-profile-timestamp datetime="{{ profile.last_login_at }}">{{ profile.last_login_at }}</time></dd>
+                        </div>
+                        {% endif %}
+                    </dl>
+                    <div class="profile-edit-actions">
+                        <button id="profile-save-changes" type="submit">Save Changes</button>
+                        <p id="profile-edit-status" class="profile-edit-status" role="status" aria-live="polite"></p>
+                    </div>
+                </form>
+            </section>
+
+            <section class="profile-card profile-avatar-card" aria-labelledby="profile-avatar-title">
+                <h2 id="profile-avatar-title">Cute animal avatar</h2>
+                <div class="profile-avatar-preview">
+                    <div id="profile-preview-avatar" class="profile-preview-art" aria-label="Avatar preview"></div>
+                    <div class="profile-avatar-selection">
+                        <span id="profile-preview-name" class="profile-preview-name"></span>
+                        <div class="profile-avatar-actions" aria-label="Avatar actions">
+                            <button id="profile-open-avatar-library" type="button" aria-label="Choose an animal" title="Choose an animal">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"></rect><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"></rect><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"></rect><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"></rect></svg>
+                            </button>
+                            <button id="profile-surprise-avatar" type="button" aria-label="Surprise me with a random animal" title="Surprise me">
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l10 10h3"></path><path d="M17 14l3 3-3 3"></path><path d="M4 17h3L17 7h3"></path><path d="M17 4l3 3-3 3"></path></svg>
+                            </button>
+                            <button id="profile-save-avatar" type="button" aria-label="Save selected avatar" title="Save avatar" disabled>
+                                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3.5h12l3.5 3.5v13.5H3.5V3.5z"></path><path d="M7.5 3.5v6h9v-6"></path><path d="M7.5 20.5v-7h9v7"></path></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <p id="profile-avatar-status" class="profile-avatar-status" role="status" aria-live="polite"></p>
+            </section>
+        </div>
+    </main>
+
+    <dialog id="avatar-library" class="avatar-library-dialog" aria-labelledby="avatar-library-title">
+        <div class="avatar-library-header">
+            <div>
+                <h2 id="avatar-library-title">Choose your animal</h2>
+                <p>Select an illustration to preview it on your profile.</p>
+            </div>
+            <button id="avatar-library-close" class="avatar-library-close" type="button" aria-label="Close avatar library">&times;</button>
+        </div>
+        <div id="avatar-library-list" class="avatar-library-list"></div>
+    </dialog>
+
+    <footer>Mannat Moon Construction</footer>
+    <script type="module" src="{{ url_for('static', filename='profile_settings.js') }}"></script>
+</body>
+</html>

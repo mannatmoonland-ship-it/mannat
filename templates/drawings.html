@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mannat Moon - Drawings Library</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='drawings.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='dialogs.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+</head>
+<body data-drawings-csrf="{{ drawings_csrf }}">
+  <header class="drawings-header">
+    <div>
+      <h1>DRAWINGS LIBRARY</h1>
+      <p>Architectural, structural, and MEP documentation</p>
+    </div>
+    {% include '_navigation.html' %}
+  </header>
+
+  <main class="drawings-main">
+    <div class="drawings-toolbar">
+      <label class="drawings-search" for="drawingSearch">Search drawings
+        <input id="drawingSearch" type="search" placeholder="Name, number, category, or description" autocomplete="off">
+      </label>
+      <label class="drawings-filter" for="categoryFilter">Category
+        <select id="categoryFilter">
+          <option value="">All categories</option>
+        </select>
+      </label>
+      <button id="createCategoryButton" class="drawings-primary" type="button">+ Create Category</button>
+    </div>
+
+    <div id="drawingsStatus" class="drawings-status" role="status">Loading drawings...</div>
+    <section id="categoryList" class="category-list" aria-live="polite"></section>
+  </main>
+
+  <div id="drawingModal" class="drawings-modal" hidden>
+    <div class="drawings-modal-panel" role="dialog" aria-modal="true" aria-labelledby="drawingModalTitle">
+      <div class="drawings-modal-header">
+        <h2 id="drawingModalTitle">Add Drawing</h2>
+        <button id="closeDrawingModal" class="drawings-icon-button" type="button" aria-label="Close drawing form">&times;</button>
+      </div>
+      <form id="drawingForm" class="drawing-form">
+        <input id="drawingId" type="hidden">
+        <label>Category *<select id="drawingCategoryId" required></select></label>
+        <label>Drawing Name *<input id="drawingName" required maxlength="160"></label>
+        <div class="drawing-form-grid">
+          <label>Drawing Number<input id="drawingNumber" maxlength="80"></label>
+          <label>Revision<input id="drawingRevision" maxlength="80"></label>
+        </div>
+        <label>Google Drive PDF URL *<input id="googleDriveUrl" type="url" required placeholder="https://drive.google.com/..." inputmode="url"></label>
+        <label>Description<textarea id="drawingDescription" rows="4" maxlength="1000"></textarea></label>
+        <div class="drawing-form-actions">
+          <button id="cancelDrawing" class="drawings-secondary" type="button">Cancel</button>
+          <button class="drawings-primary" type="submit">Save Drawing</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="{{ url_for('static', filename='drawings.js') }}"></script>
+</body>
+</html>

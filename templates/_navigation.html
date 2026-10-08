@@ -1,0 +1,116 @@
+{% set nav_user = current_user if current_user is defined else (profile if profile is defined else None) %}
+{% set nav_role = (nav_user.role|lower) if nav_user and nav_user.role is defined else '' %}
+
+<nav class="mm-top-nav" aria-label="Main navigation">
+    <ul class="mm-nav-list">
+        <li class="mm-nav-item">
+            <a class="mm-nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
+        </li>
+
+        <li class="mm-nav-item mm-nav-parent">
+            <button class="mm-nav-button" type="button" aria-expanded="false" aria-controls="mm-nav-construction">
+                Construction <span aria-hidden="true">▾</span>
+            </button>
+            <div class="mm-nav-submenu" id="mm-nav-construction">
+                <a href="{{ url_for('daily_reports') }}">Daily Reports</a>
+                {% if nav_user and nav_role == 'super_admin' %}
+                <a href="{{ url_for('trade_builder') }}">Trade Builder</a>
+                {% endif %}
+                <a href="{{ url_for('material_builder') }}">Materials</a>
+                <a href="{{ url_for('drawings') }}">Drawings</a>
+            </div>
+        </li>
+
+        <li class="mm-nav-item mm-nav-parent">
+            <button class="mm-nav-button" type="button" aria-expanded="false" aria-controls="mm-nav-finance">
+                Finance <span aria-hidden="true">▾</span>
+            </button>
+            <div class="mm-nav-submenu" id="mm-nav-finance">
+                <a href="{{ url_for('labour_payments') }}">Labour Payments &amp; Contract Capping</a>
+                <a href="{{ url_for('owner_scope_page') }}">Owner Scope</a>
+                <a href="{{ url_for('building_cost_summary') }}">Building Cost Summary</a>
+                <a href="{{ url_for('ledger_prints') }}">Ledger / Payment Reports</a>
+            </div>
+        </li>
+
+        {% if nav_user and nav_role == 'super_admin' %}
+        <li class="mm-nav-item mm-nav-parent">
+            <button class="mm-nav-button" type="button" aria-expanded="false" aria-controls="mm-nav-management">
+                Management <span aria-hidden="true">▾</span>
+            </button>
+            <div class="mm-nav-submenu" id="mm-nav-management">
+                <a href="{{ url_for('user_management_page') }}">User Management</a>
+                <a href="{{ url_for('snapshots.snapshot_page') }}">Snapshots / Backup &amp; Restore</a>
+            </div>
+        </li>
+        {% endif %}
+
+        <li class="mm-nav-item mm-nav-parent">
+            <button class="mm-nav-button" type="button" aria-expanded="false" aria-controls="mm-nav-tools">
+                Tools <span aria-hidden="true">▾</span>
+            </button>
+            <div class="mm-nav-submenu" id="mm-nav-tools">
+                <a href="{{ url_for('google_photos') }}">Google Photos</a>
+            </div>
+        </li>
+
+        <li class="mm-nav-item mm-nav-parent">
+            <button class="mm-nav-button" type="button" aria-expanded="false" aria-controls="mm-nav-settings">
+                Settings <span aria-hidden="true">▾</span>
+            </button>
+            <div class="mm-nav-submenu" id="mm-nav-settings">
+                <a href="{{ url_for('profile_settings') }}">Profile Settings</a>
+                <a href="{{ url_for('change_password') }}">Change Password</a>
+            </div>
+        </li>
+
+        <li class="mm-nav-item mm-nav-parent">
+            <button class="mm-nav-button" type="button" aria-expanded="false" aria-controls="mm-nav-help">
+                Help <span aria-hidden="true">▾</span>
+            </button>
+            <div class="mm-nav-submenu" id="mm-nav-help">
+                <a href="{{ url_for('user_guide') }}">User Guide</a>
+                <a href="{{ url_for('developer_guide') }}">Developer Guide</a>
+            </div>
+        </li>
+    </ul>
+</nav>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const navParents = document.querySelectorAll('.mm-nav-parent');
+        const closeMenu = function (currentParent) {
+            navParents.forEach(function (parent) {
+                if (parent !== currentParent) {
+                    parent.classList.remove('mm-nav-open');
+                    const button = parent.querySelector('.mm-nav-button');
+                    if (button) {
+                        button.setAttribute('aria-expanded', 'false');
+                    }
+                }
+            });
+        };
+
+        navParents.forEach(function (parent) {
+            const button = parent.querySelector('.mm-nav-button');
+            const submenu = parent.querySelector('.mm-nav-submenu');
+            if (!button || !submenu) return;
+
+            button.addEventListener('click', function (event) {
+                event.stopPropagation();
+                const shouldOpen = !parent.classList.contains('mm-nav-open');
+                closeMenu(parent);
+                if (shouldOpen) {
+                    parent.classList.add('mm-nav-open');
+                    button.setAttribute('aria-expanded', 'true');
+                }
+            });
+        });
+
+        document.addEventListener('click', function (event) {
+            if (!event.target.closest('.mm-nav-parent')) {
+                closeMenu(null);
+            }
+        });
+    });
+</script>

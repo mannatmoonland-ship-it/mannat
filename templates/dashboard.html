@@ -1,0 +1,1004 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Mannat Moon - Dashboard
+    </title>
+
+
+    <style>
+
+        * {
+            box-sizing: border-box;
+        }
+
+
+        body {
+
+            margin: 0;
+
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
+
+            background:
+                #f8fafc;
+
+            color:
+                #1e293b;
+
+        }
+
+
+        /* =================================================
+           HEADER
+        ================================================= */
+
+        header {
+
+            background:
+                #111827;
+
+            color:
+                white;
+
+            padding:
+                24px 32px;
+
+            border-bottom:
+                3px solid #0ea5e9;
+
+        }
+
+
+        header h1 {
+
+            margin:
+                0 0 8px 0;
+
+            font-size:
+                28px;
+
+            font-weight:
+                600;
+
+            letter-spacing:
+                0.5px;
+
+        }
+
+
+        header .subtitle {
+
+            margin:
+                0;
+
+            color:
+                #94a3b8;
+
+            font-size:
+                16px;
+
+            font-weight:
+                400;
+
+        }
+
+
+        /* =================================================
+           MAIN CONTAINER
+        ================================================= */
+
+        .container {
+
+            max-width:
+                1400px;
+
+            margin:
+                0 auto;
+
+            padding:
+                48px 24px;
+
+        }
+
+
+        /* =================================================
+           CARDS GRID
+        ================================================= */
+
+        .cards-grid {
+
+            display:
+                grid;
+
+            grid-template-columns:
+                repeat(4, minmax(0, 1fr));
+
+            gap:
+                24px;
+
+            align-items:
+                stretch;
+
+        }
+
+
+        @media (max-width: 1180px) {
+
+            .cards-grid {
+
+                grid-template-columns:
+                    repeat(3, minmax(0, 1fr));
+
+            }
+
+        }
+
+
+        @media (max-width: 860px) {
+
+            .cards-grid {
+
+                grid-template-columns:
+                    repeat(2, minmax(0, 1fr));
+
+            }
+
+        }
+
+
+        @media (max-width: 560px) {
+
+            .cards-grid {
+
+                grid-template-columns:
+                    1fr;
+
+            }
+
+        }
+
+
+        /* =================================================
+           CARD
+        ================================================= */
+
+        .card {
+
+            position:
+                relative;
+
+            background:
+                white;
+
+            border:
+                1px solid #e2e8f0;
+
+            border-radius:
+                16px;
+
+            padding:
+                24px;
+
+            box-shadow:
+                0 8px 20px rgba(15, 23, 42, 0.06);
+
+            transition:
+                transform 0.2s ease,
+                box-shadow 0.2s ease,
+                border-color 0.2s ease;
+
+            min-height:
+                320px;
+
+            display:
+                flex;
+
+            flex-direction:
+                column;
+
+            height:
+                100%;
+
+        }
+
+
+        .card:hover {
+
+            transform:
+                translateY(-3px);
+
+            box-shadow:
+                0 12px 24px rgba(15, 23, 42, 0.1);
+
+            border-color:
+                #cbd5e1;
+
+        }
+
+
+        .card-click-target {
+
+            position:
+                absolute;
+
+            inset:
+                0;
+
+            z-index:
+                0;
+
+            border-radius:
+                inherit;
+
+        }
+
+
+        .card-content {
+
+            position:
+                relative;
+
+            z-index:
+                1;
+
+            display:
+                flex;
+
+            flex-direction:
+                column;
+
+            flex:
+                1;
+
+            height:
+                100%;
+
+        }
+
+
+        .card-header {
+
+            display:
+                flex;
+
+            align-items:
+                center;
+
+            gap:
+                16px;
+
+            margin-bottom:
+                20px;
+
+        }
+
+
+        .card-icon {
+
+            width:
+                56px;
+
+            height:
+                56px;
+
+            border-radius:
+                12px;
+
+            display:
+                flex;
+
+            align-items:
+                center;
+
+            justify-content:
+                center;
+
+            font-size:
+                28px;
+
+        }
+
+
+        .card-icon.trade-builder {
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #0ea5e9 0%,
+                    #0284c7 100%
+                );
+
+        }
+
+
+        .card-icon.daily-reports {
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #10b981 0%,
+                    #059669 100%
+                );
+
+        }
+
+
+        .card-icon.labour-payments {
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #8b5cf6 0%,
+                    #6d28d9 100%
+                );
+
+        }
+
+
+        .card-icon.ledger-prints {
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #f59e0b 0%,
+                    #d97706 100%
+                );
+
+        }
+
+
+        .card-icon.drawings-library {
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #64748b 0%,
+                    #334155 100%
+                );
+
+        }
+
+
+        .card-title {
+
+            margin:
+                0;
+
+            font-size:
+                24px;
+
+            font-weight:
+                600;
+
+            color:
+                #1e293b;
+
+        }
+
+
+        .card-description {
+
+            margin:
+                0 0 24px 0;
+
+            font-size:
+                15px;
+
+            color:
+                #64748b;
+
+            line-height:
+                1.6;
+
+        }
+
+
+        .card-features {
+
+            margin:
+                0 0 28px 0;
+
+            padding-left:
+                20px;
+
+            flex-grow:
+                1;
+
+        }
+
+
+        .card-features li {
+
+            margin-bottom:
+                8px;
+
+            font-size:
+                14px;
+
+            color:
+                #475569;
+
+        }
+
+
+        .card-features li::marker {
+
+            color:
+                #0ea5e9;
+
+        }
+
+
+        .card-button {
+
+            display:
+                inline-block;
+
+            margin-top:
+                auto;
+
+            padding:
+                12px 28px;
+
+            background:
+                #0ea5e9;
+
+            color:
+                white;
+
+            text-decoration:
+                none;
+
+            border-radius:
+                8px;
+
+            font-size:
+                15px;
+
+            font-weight:
+                500;
+
+            transition:
+                background 0.2s ease;
+
+            position:
+                relative;
+
+            z-index:
+                1;
+
+            width:
+                fit-content;
+
+        }
+
+
+        .card-button:hover {
+
+            background:
+                #0284c7;
+
+        }
+
+
+        /* =================================================
+           FOOTER
+        ================================================= */
+
+        footer {
+
+            text-align:
+                center;
+
+            padding:
+                32px;
+
+            color:
+                #94a3b8;
+
+            font-size:
+                14px;
+
+        }
+
+    </style>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+</head>
+
+<body class="dashboard-page">
+
+
+    <!-- =================================================
+         HEADER
+    ================================================= -->
+
+    <header class="dashboard-header">
+        <a class="dashboard-brand" href="{{ url_for('dashboard') }}" aria-label="Mannat Moon home">
+            <span class="dashboard-brand-mark" aria-hidden="true">MM</span>
+            <span class="dashboard-brand-copy">
+                <strong>Mannat Moon</strong>
+                <small>Construction workspace</small>
+            </span>
+        </a>
+
+        {% include '_navigation.html' %}
+
+        <div class="dashboard-account">
+            {% if current_user %}
+                {% set role_id = current_user.role|lower %}
+                {% set role_labels = {'super_admin': 'Super Admin', 'office_staff': 'Office Staff', 'supervisor': 'Supervisor'} %}
+                {% set role_label = role_labels.get(role_id, current_user.custom_staff_type or current_user.role|replace('_', ' ')|title) %}
+                <a class="dashboard-user" href="{{ url_for('profile_settings') }}" aria-label="Open Profile Settings">
+                    <span class="dashboard-avatar" data-animal-avatar="{{ current_user.avatarId|default('cute_cat', true) }}" aria-hidden="true">{{ (current_user.full_name or current_user.username)[:1]|upper }}</span>
+                    <span class="dashboard-user-copy"><strong>{{ current_user.full_name or current_user.username }}</strong><small>{{ role_label }}</small></span>
+                </a>
+                <form method="post" action="{{ url_for('logout') }}" class="dashboard-logout">
+                    <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
+                    <button type="submit">Sign out</button>
+                </form>
+            {% else %}
+                <a href="{{ url_for('login_page') }}" class="dashboard-login">Sign in</a>
+            {% endif %}
+        </div>
+
+    </header>
+
+
+    <!-- =================================================
+         MAIN CONTENT
+    ================================================= -->
+
+    <main class="container">
+        <section class="dashboard-intro" aria-labelledby="dashboard-title">
+            <div>
+                <p class="dashboard-eyebrow"><span></span> WORKSPACE OVERVIEW</p>
+                <h2 id="dashboard-title">Project dashboard</h2>
+                <p class="dashboard-intro-copy">Everything your team needs to keep the project moving.</p>
+            </div>
+            <div class="dashboard-workspace-tag"><span aria-hidden="true"></span> Construction operations</div>
+        </section>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div style="margin-bottom:18px; padding:12px 14px; border-radius:10px; background: {{ '#dcfce7' if category == 'success' else '#fef3c7' if category == 'warning' else '#fee2e2' }}; color: {{ '#166534' if category == 'success' else '#92400e' if category == 'warning' else '#991b1b' }}; border:1px solid {{ '#86efac' if category == 'success' else '#fcd34d' if category == 'warning' else '#fca5a5' }};">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+
+        <div class="cards-grid">
+
+
+            <!-- =================================================
+                 TRADE BUILDER CARD
+            ================================================= -->
+
+              {% if current_user and current_user.role|lower == 'super_admin' %}
+            <div class="card">
+
+                <a href="/trade-builder" class="card-click-target" aria-label="Open Trade Builder"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon trade-builder">
+                            ðŸ—ï¸
+                        </div>
+
+                        <h3 class="card-title">
+                            Trade Builder
+                        </h3>
+
+                    </div>
+
+                    <p class="card-description">
+                        Manage construction trades, workers, categories, daily wages, and wage history.
+                    </p>
+
+                    <ul class="card-features">
+                        <li>Trade Management</li>
+                        <li>Worker Categories</li>
+                        <li>Wage History</li>
+                    </ul>
+
+                    <a
+                        href="/trade-builder"
+                        class="card-button"
+                    >
+                        OPEN TRADE BUILDER
+                    </a>
+
+                </div>
+
+            </div>
+              {% endif %}
+
+
+            <!-- =================================================
+                 USER MANAGEMENT CARD
+            ================================================= -->
+
+              {% if current_user and current_user.role|lower == 'super_admin' %}
+            <div class="card">
+
+                <a href="/user-management" class="card-click-target" aria-label="Open User Management"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon user-management">
+                            ðŸ‘¥
+                        </div>
+
+                        <h3 class="card-title">
+                            User Management
+                        </h3>
+
+                    </div>
+
+                    <p class="card-description">
+                        Manage secure users, roles, custom staff types, password resets, and audit history.
+                    </p>
+
+                    <ul class="card-features">
+                        <li>Role-based access control</li>
+                        <li>Password recovery workflow</li>
+                        <li>Audit logging</li>
+                    </ul>
+
+                    <a
+                        href="/user-management"
+                        class="card-button"
+                    >
+                        MANAGE USERS
+                    </a>
+
+                </div>
+
+            </div>
+            {% endif %}
+
+
+            {% if current_user and current_user.role|lower == 'super_admin' %}
+            <div class="card">
+
+                <a href="/snapshots" class="card-click-target" aria-label="Open Snapshot"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon snapshot-module">
+                            ðŸ’¾
+                        </div>
+
+                        <h3 class="card-title">Snapshot</h3>
+
+                    </div>
+
+                    <p class="card-description">Firestore Backup &amp; Restore</p>
+
+                    <ul class="card-features">
+                        <li>Create and verify local backups</li>
+                        <li>Restore to an existing or new project</li>
+                        <li>Switch projects with rollback support</li>
+                    </ul>
+
+                    <a href="/snapshots" class="card-button">OPEN SNAPSHOT</a>
+
+                </div>
+
+            </div>
+            {% endif %}
+
+
+            <div class="card">
+
+                <a href="/labour-payments" class="card-click-target" aria-label="Open Labour Payments and Contract Capping"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon labour-payments">
+                            ðŸ’°
+                        </div>
+
+                        <h3 class="card-title">
+                            Labour Payments &amp; Contract Capping
+                        </h3>
+
+                    </div>
+
+                    <p class="card-description">
+                        Manage work contracts, contract capping, labour payments, advances, and settlements.
+                    </p>
+
+                    <a
+                        href="/labour-payments"
+                        class="card-button"
+                    >
+                        OPEN LABOUR PAYMENTS
+                    </a>
+
+                </div>
+
+            </div>
+
+
+            <!-- =================================================
+                 DAILY REPORTS CARD
+            ================================================= -->
+
+            <div class="card">
+
+                <a href="/daily-reports" class="card-click-target" aria-label="Open Daily Reports"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon daily-reports">
+                            ðŸ“‹
+                        </div>
+
+                        <h3 class="card-title">
+                            Daily Reports
+                        </h3>
+
+                    </div>
+
+                    <p class="card-description">
+                        Create and manage daily construction site records with work details, workforce, materials, and visual evidence.
+                    </p>
+
+                    <ul class="card-features">
+                        <li>Date-based daily records</li>
+                        <li>Workforce tracking</li>
+                        <li>Materials logging</li>
+                        <li>Visual evidence links</li>
+                        <li>Notes and decisions</li>
+                    </ul>
+
+                    <a
+                        href="/daily-reports"
+                        class="card-button"
+                    >
+                        OPEN DAILY REPORTS
+                    </a>
+
+                </div>
+
+            </div>
+
+
+            <!-- =================================================
+                 LEDGER PRINTS CARD
+            ================================================= -->
+
+            <div class="card">
+
+                <a href="/ledger-prints" class="card-click-target" aria-label="Open Ledger Prints"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon ledger-prints">
+                            ðŸ–¨ï¸
+                        </div>
+
+                        <h3 class="card-title">
+                            Ledger Prints
+                        </h3>
+
+                    </div>
+
+                    <p class="card-description">
+                        View, print, and download trade ledgers.
+                    </p>
+
+                    <a
+                        href="/ledger-prints"
+                        class="card-button"
+                    >
+                        OPEN LEDGER PRINTS
+                    </a>
+
+                </div>
+
+            </div>
+
+
+            <div class="card">
+
+                <a href="/materials" class="card-click-target" aria-label="Open Material Builder"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon material-module">
+                            ðŸ§±
+                        </div>
+
+                        <h3 class="card-title">Material Builder</h3>
+
+                    </div>
+
+                    <p class="card-description">Manage material categories, inventory, suppliers, and supply relationships.</p>
+
+                    <ul class="card-features">
+                        <li>Material categories and catalog</li>
+                        <li>Supplier directory</li>
+                        <li>Material-supplier mapping</li>
+                    </ul>
+
+                    <a href="/materials" class="card-button">OPEN MATERIAL BUILDER</a>
+
+                </div>
+
+            </div>
+
+
+            <div class="card">
+
+                <a href="/building-cost-summary" class="card-click-target" aria-label="Open Building Cost Summary"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon cost-module">
+                            â‚¹
+                        </div>
+
+                        <h3 class="card-title">Building Cost Summary</h3>
+
+                    </div>
+
+                    <p class="card-description">Review recorded material costs and actual trade payments to date.</p>
+
+                    <a href="/building-cost-summary" class="card-button">OPEN COST SUMMARY</a>
+
+                </div>
+
+            </div>
+
+
+            <!-- =================================================
+                 DRAWINGS LIBRARY CARD
+            ================================================= -->
+
+            <div class="card">
+
+                <a href="/drawings" class="card-click-target" aria-label="Open Drawings Library"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon drawings-library">
+                            ðŸ“
+                        </div>
+
+                        <h3 class="card-title">
+                            Drawings Library
+                        </h3>
+
+                    </div>
+
+                    <p class="card-description">
+                        Manage architectural, structural, and MEP drawings.
+                    </p>
+
+                    <a
+                        href="/drawings"
+                        class="card-button"
+                    >
+                        OPEN DRAWINGS LIBRARY
+                    </a>
+
+                </div>
+
+            </div>
+
+
+            <div class="card">
+
+                <a href="{{ url_for('user_guide') }}" class="card-click-target" aria-label="Open User Guide"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon user-guide">
+                            ðŸ“–
+                        </div>
+
+                        <h3 class="card-title">User Help Guide</h3>
+
+                    </div>
+
+                    <p class="card-description">Learn how to use Mannat Moon Construction.</p>
+
+                    <a href="{{ url_for('user_guide') }}" class="card-button">Open User Guide</a>
+
+                </div>
+
+            </div>
+
+
+            {% if current_user and current_user.role|lower == 'super_admin' %}
+            <div class="card">
+
+                <a href="{{ url_for('developer_guide') }}" class="card-click-target" aria-label="Open Developer Guide"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon developer-guide">
+                            &lt;/&gt;
+                        </div>
+
+                        <h3 class="card-title">Developer Documentation</h3>
+
+                    </div>
+
+                    <p class="card-description">Technical documentation for maintaining the application.</p>
+
+                    <a href="{{ url_for('developer_guide') }}" class="card-button">Open Developer Guide</a>
+
+                </div>
+
+            </div>
+            {% endif %}
+
+
+        </div>
+
+    </main>
+
+
+    <!-- =================================================
+         FOOTER
+    ================================================= -->
+
+    <footer>
+
+        Â© 2024 Mannat Moon Construction. All rights reserved.
+
+    </footer>
+
+
+    <script type="module">
+        import { renderAnimalAvatar } from "{{ url_for('static', filename='animal_avatars.js') }}";
+        document.querySelectorAll("[data-animal-avatar]").forEach(avatar => {
+            avatar.innerHTML = renderAnimalAvatar(avatar.dataset.animalAvatar);
+        });
+    </script>
+</body>
+
+</html>

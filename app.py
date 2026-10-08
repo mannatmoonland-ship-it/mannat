@@ -137,16 +137,6 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = IS_PRODUCTION_ENVIRONMENT
-app.config["TRUSTED_PROXY_CIDRS"] = tuple(
-    cidr.strip()
-    for cidr in os.environ.get("TRUSTED_PROXY_CIDRS", "").split(",")
-    if cidr.strip()
-)
-try:
-    for trusted_proxy_cidr in app.config["TRUSTED_PROXY_CIDRS"]:
-        ipaddress.ip_network(trusted_proxy_cidr, strict=False)
-except ValueError as error:
-    raise RuntimeError("TRUSTED_PROXY_CIDRS must contain valid IP networks.") from error
 
 
 def static_asset_version(filename):
@@ -6204,79 +6194,6 @@ def _get_daily_record_for_date(date_value):
     return None
 
 
-def get_request_ip_address():
-    remote_addr = request.remote_addr or "127.0.0.1"
-    try:
-        peer = ipaddress.ip_address(remote_addr)
-    except ValueError:
-        return remote_addr
-
-    trusted_proxy_values = app.config.get("TRUSTED_PROXY_CIDRS", ())
-    if isinstance(trusted_proxy_values, str):
-        trusted_proxy_values = trusted_proxy_values.split(",")
-    trusted_networks = [
-        ipaddress.ip_network(str(value).strip(), strict=False)
-        for value in trusted_proxy_values
-        if str(value).strip()
-    ]
-
-    def is_trusted_proxy(address):
-        return any(
-            address.version == network.version and address in network
-            for network in trusted_networks
-        )
-
-    if not is_trusted_proxy(peer):
-        return str(peer)
-
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if not forwarded_for:
-        return str(peer)
-    try:
-        chain = [ipaddress.ip_address(candidate.strip()) for candidate in forwarded_for.split(",")]
-    except ValueError:
-        return str(peer)
-    client = peer
-    for candidate in reversed(chain):
-        if not is_trusted_proxy(client):
-            break
-        client = candidate
-    return str(client)
-
-
-def is_private_lan_request(address=None):
-    if IS_PRODUCTION_ENVIRONMENT:
-        trusted_proxy_values = app.config.get("TRUSTED_PROXY_CIDRS", ())
-        if isinstance(trusted_proxy_values, str):
-            trusted_proxy_values = trusted_proxy_values.split(",")
-        trusted_networks = [
-            ipaddress.ip_network(str(value).strip(), strict=False)
-            for value in trusted_proxy_values
-            if str(value).strip()
-        ]
-        try:
-            peer = ipaddress.ip_address(request.remote_addr or "")
-        except ValueError:
-            return False
-        if not trusted_networks or not any(
-            peer.version == network.version and peer in network
-            for network in trusted_networks
-        ):
-            return False
-        forwarded_for = request.headers.get("X-Forwarded-For", "")
-        if not forwarded_for or get_request_ip_address() == str(peer):
-            return False
-
-    candidate = (address or get_request_ip_address() or "127.0.0.1").strip()
-    if not candidate or candidate.lower() in {"unknown", "none"}:
-        return False
-    try:
-        parsed = ipaddress.ip_address(candidate)
-    except ValueError:
-        return False
-    return parsed.is_private or parsed.is_loopback or parsed.is_link_local or parsed.is_reserved
-
-
 def _build_daily_report_share_image_svg(date_value, report=None):
     normalized_date = _normalize_daily_report_date(date_value) or date_value
     display_date = _format_daily_report_date_for_display(normalized_date) or normalized_date
@@ -6534,8 +6451,9 @@ def _google_photos_permission_denial(permission):
 
 @app.route("/daily-reports/share-image")
 def daily_report_share_image():
-    if not is_private_lan_request():
-        return Response("The Daily Report share image is available only on the private LAN.", status=403, mimetype="text/plain")
+    _current_user, denied = _daily_record_api_authorize("daily_reports.read")
+    if denied:
+        return denied
 
     date_value = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
     normalized_date = _normalize_daily_report_date(date_value)
@@ -6543,68 +6461,30 @@ def daily_report_share_image():
         return Response("A valid date in YYYY-MM-DD format is required.", status=400, mimetype="text/plain")
 
     report = _sanitize_daily_report_for_view(_get_daily_record_for_date(normalized_date))
-    return _build_daily_report_share_image_svg(normalized_date, report)
+    response = _build_daily_report_share_image_svg(normalized_date, report)
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @app.route("/daily-reports")
 def daily_reports():
-    current_user = get_current_user()
-    if current_user:
-        csrf_token = session.get("daily_reports_csrf")
-        if not csrf_token:
-            csrf_token = secrets.token_urlsafe(32)
-            session["daily_reports_csrf"] = csrf_token
-        return render_template(
+    current_user, denied = _daily_record_api_authorize("daily_reports.read")
+    if denied:
+        return denied
+
+    csrf_token = session.get("daily_reports_csrf")
+    if not csrf_token:
+        csrf_token = secrets.token_urlsafe(32)
+        session["daily_reports_csrf"] = csrf_token
+    response = app.make_response(
+        render_template(
             "daily_reports.html",
             current_user=current_user,
             daily_reports_csrf=csrf_token,
         )
-
-    if not is_private_lan_request():
-        return (
-            render_template(
-                "daily_reports_viewer.html",
-                current_user=None,
-                selected_date=None,
-                report=None,
-                view_error="The Daily Report viewer is only available on the private LAN.",
-                can_edit=False,
-                share_url=request.url,
-                share_image_url="",
-            ),
-            403,
-        )
-
-    date_value = request.args.get("date") or datetime.now().strftime("%Y-%m-%d")
-    normalized_date = _normalize_daily_report_date(date_value)
-    if not normalized_date:
-        return (
-            render_template(
-                "daily_reports_viewer.html",
-                current_user=None,
-                selected_date=None,
-                report=None,
-                view_error="The Daily Report date must use the format YYYY-MM-DD.",
-                can_edit=False,
-                share_url=request.url,
-                share_image_url="",
-            ),
-            400,
-        )
-
-    # This read-only Daily Report page is intentionally for private-LAN access only.
-    report = _sanitize_daily_report_for_view(_get_daily_record_for_date(normalized_date))
-    share_image_url = url_for("daily_report_share_image", date=normalized_date, _external=True)
-    return render_template(
-        "daily_reports_viewer.html",
-        current_user=None,
-        selected_date=normalized_date,
-        report=report,
-        view_error=None,
-        can_edit=False,
-        share_url=request.url,
-        share_image_url=share_image_url,
     )
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @app.route("/user-guide")

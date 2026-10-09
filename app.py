@@ -11,6 +11,7 @@ import socket
 import ssl
 import threading
 import time
+import traceback
 import uuid
 from html import escape
 from collections import deque
@@ -105,6 +106,76 @@ def _get_firestore_auth_request():
                     _FIRESTORE_AUTH_POOL
                 )
     return _FIRESTORE_AUTH_REQUEST
+
+
+def _get_firestore_auth_transport_mode():
+    auth_transport = os.environ.get("FIRESTORE_GRPC_AUTH_TRANSPORT", "").strip().lower()
+    if auth_transport not in {"", "urllib3"}:
+        raise RuntimeError("FIRESTORE_GRPC_AUTH_TRANSPORT must be 'urllib3' when set.")
+    return auth_transport or "grpc"
+
+
+def _firestore_failure_category(error):
+    exception_names = {
+        cls.__name__
+        for cls in type(error).__mro__
+    }
+    if exception_names.intersection({"SSLError", "SSLCertVerificationError", "CertificateError"}):
+        return "tls"
+    if exception_names.intersection({
+        "DefaultCredentialsError",
+        "RefreshError",
+        "TransportError",
+        "CredentialsError",
+    }):
+        return "credentials"
+    if exception_names.intersection({"PermissionDenied", "Unauthenticated", "Forbidden"}):
+        return "permission_or_authentication"
+    if exception_names.intersection({"DeadlineExceeded", "Timeout", "TimeoutError"}):
+        return "timeout"
+    if exception_names.intersection({
+        "ServiceUnavailable",
+        "OSError",
+        "ConnectionError",
+        "ConnectionResetError",
+        "NewConnectionError",
+    }):
+        return "connectivity"
+    if exception_names.intersection({
+        "FileNotFoundError",
+        "JSONDecodeError",
+        "ValueError",
+        "RuntimeError",
+    }):
+        return "configuration"
+    return "unknown"
+
+
+def _log_firestore_login_failure(error):
+    exception_chain = []
+    current = error
+    seen = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        exception_chain.append(current)
+        current = current.__cause__ or (
+            None if current.__suppress_context__ else current.__context__
+        )
+
+    root_error = exception_chain[-1]
+    frames = traceback.extract_tb(root_error.__traceback__) if root_error.__traceback__ else ()
+    safe_traceback = " <- ".join(
+        f"{Path(frame.filename).name}:{frame.lineno}:{frame.name}"
+        for frame in frames[-12:]
+    ) or "unavailable"
+    safe_exception_chain = " -> ".join(type(item).__name__ for item in exception_chain)
+    app.logger.error(
+        "Firestore sign-in failure: "
+        "exception_chain=%s category=%s traceback=%s",
+        safe_exception_chain,
+        _firestore_failure_category(root_error),
+        safe_traceback,
+    )
 
 
 if FirestoreGrpcTransport is not None:
@@ -386,7 +457,11 @@ def save_active_firebase_config(config, store):
         json.dump(config, config_file, ensure_ascii=False, indent=2)
     os.replace(temporary_path, ACTIVE_FIREBASE_CONFIG_PATH)
     app._firebase_store = store
-    app._firebase_store_key = (config["project_id"], config.get("service_account_path"))
+    app._firebase_store_key = (
+        config["project_id"],
+        config.get("service_account_path"),
+        _get_firestore_auth_transport_mode(),
+    )
     app.config["FIREBASE_PROJECT_ID"] = config["project_id"]
     app.config["FIREBASE_SERVICE_ACCOUNT"] = config.get("service_account_path")
 
@@ -1194,13 +1269,26 @@ class FirebaseFirestoreStore:
     def _initialize_client(self, app_name=None):
         if firebase_admin is None:
             raise RuntimeError("firebase-admin is not installed")
+        auth_transport = _get_firestore_auth_transport_mode()
         service_account_path = self.service_account_path
         if service_account_path and not os.path.isabs(service_account_path):
             service_account_path = os.path.abspath(os.path.join(os.path.dirname(__file__), service_account_path))
         if service_account_path and os.path.exists(service_account_path):
             cred = credentials.Certificate(service_account_path)
+            credential_source = "service_account_file"
         else:
             cred = credentials.ApplicationDefault()
+            credential_source = (
+                "application_default_credentials_configured_file_missing"
+                if service_account_path
+                else "application_default_credentials"
+            )
+        app.logger.info(
+            "Initializing Firestore client: project_id=%s credential_source=%s auth_transport=%s",
+            self.project_id,
+            credential_source,
+            auth_transport,
+        )
 
         firebase_app = None
         if app_name is None:
@@ -1216,9 +1304,6 @@ class FirebaseFirestoreStore:
                 {"projectId": self.project_id},
                 name=app_name or f"mannat-{self.project_id}-{uuid.uuid4().hex[:10]}",
             )
-        auth_transport = os.environ.get("FIRESTORE_GRPC_AUTH_TRANSPORT", "").strip().lower()
-        if auth_transport not in {"", "urllib3"}:
-            raise RuntimeError("FIRESTORE_GRPC_AUTH_TRANSPORT must be 'urllib3' when set.")
         if auth_transport == "urllib3":
             if _Urllib3FirestoreClient is None:
                 raise RuntimeError("The urllib3 Firestore authentication transport is unavailable.")
@@ -2705,7 +2790,11 @@ def get_user_store():
     if firebase_admin is not None:
         try:
             active_config = get_active_firebase_config()
-            active_key = (active_config["project_id"], active_config.get("service_account_path"))
+            active_key = (
+                active_config["project_id"],
+                active_config.get("service_account_path"),
+                _get_firestore_auth_transport_mode(),
+            )
             if not hasattr(app, "_firebase_store") or getattr(app, "_firebase_store_key", None) != active_key:
                 app._firebase_store = FirebaseFirestoreStore(
                     project_id=active_config["project_id"],
@@ -3471,7 +3560,8 @@ def login_page():
         try:
             store = get_user_store()
             user = store.get_user_by_username(username)
-        except DeadlineExceeded:
+        except DeadlineExceeded as error:
+            _log_firestore_login_failure(error)
             app.logger.warning(
                 "Firestore user lookup timed out during sign-in after %.3f seconds",
                 time.monotonic() - lookup_started,
@@ -3479,6 +3569,7 @@ def login_page():
             flash("Sign-in is temporarily unavailable. Please try again shortly.", "error")
             return render_template("login.html"), 503
         except GoogleAPICallError as error:
+            _log_firestore_login_failure(error)
             app.logger.warning(
                 "Firestore user lookup failed during sign-in (%s) after %.3f seconds",
                 type(error).__name__,
@@ -3487,6 +3578,7 @@ def login_page():
             flash("Sign-in is temporarily unavailable. Please try again shortly.", "error")
             return render_template("login.html"), 503
         except RuntimeError as error:
+            _log_firestore_login_failure(error)
             app.logger.warning(
                 "User store unavailable during sign-in (%s) after %.3f seconds",
                 type(error).__name__,

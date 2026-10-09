@@ -1,4 +1,7 @@
+import subprocess
 import ssl
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import google.auth.credentials
@@ -8,6 +11,64 @@ import pytest
 from google.api_core.exceptions import DeadlineExceeded, PermissionDenied
 
 import app as app_module
+
+
+def _run_app_import_with_missing_module(module_name):
+    script = f"""
+import builtins
+import logging
+
+logging.basicConfig(level=logging.ERROR, format="%(message)s")
+original_import = builtins.__import__
+
+def fail_selected_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name == {module_name!r}:
+        raise ImportError("sensitive-test-message", name=name)
+    return original_import(name, globals, locals, fromlist, level)
+
+builtins.__import__ = fail_selected_import
+import app
+print("firebase_admin_available=" + str(app.firebase_admin is not None))
+print("transport_available=" + str(app._Urllib3FirestoreClient is not None))
+"""
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+
+def test_core_firebase_import_failure_is_logged_and_disables_firebase_only():
+    result = _run_app_import_with_missing_module("firebase_admin")
+
+    assert result.returncode == 0, result.stderr
+    assert "firebase_admin_available=False" in result.stdout
+    assert "stage=firebase_admin_core missing_module=firebase_admin" in result.stderr
+    assert "sensitive-test-message" not in result.stderr
+
+
+def test_optional_transport_import_failure_does_not_disable_firebase_admin():
+    result = _run_app_import_with_missing_module("google.auth.transport.urllib3")
+
+    assert result.returncode == 0, result.stderr
+    assert "firebase_admin_available=True" in result.stdout
+    assert "transport_available=False" in result.stdout
+    assert (
+        "stage=firestore_custom_transport "
+        "missing_module=google.auth.transport.urllib3"
+    ) in result.stderr
+    assert "sensitive-test-message" not in result.stderr
+
+
+def test_firestore_username_lookup_reports_missing_field_filter(monkeypatch):
+    store = app_module.FirebaseFirestoreStore(client=object())
+    monkeypatch.setattr(app_module, "FieldFilter", None)
+
+    with pytest.raises(RuntimeError, match="requires google-cloud-firestore FieldFilter"):
+        store.get_user_by_username("test-user")
 
 
 def test_urllib3_firestore_channel_uses_verified_google_auth_request(monkeypatch):

@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import ipaddress
 import json
+import logging
 import math
 import os
 import re
@@ -61,27 +62,52 @@ IS_PRODUCTION_ENVIRONMENT = (
     or bool(os.environ.get("RAILWAY_ENVIRONMENT"))
 )
 
+_DEPENDENCY_IMPORT_LOGGER = logging.getLogger(__name__)
+
+
+def _log_dependency_import_failure(stage, error):
+    missing_module = getattr(error, "name", None)
+    if not isinstance(missing_module, str) or not re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_.]*", missing_module
+    ):
+        missing_module = "unknown"
+    _DEPENDENCY_IMPORT_LOGGER.error(
+        "Optional dependency import failed: stage=%s missing_module=%s",
+        stage,
+        missing_module,
+    )
+
+
 try:
     import firebase_admin
     from firebase_admin import auth as firebase_auth, credentials, firestore
-    import google.auth
-    import google.auth.credentials
-    import google.auth.transport.grpc
-    import google.auth.transport.urllib3
-    from google.cloud.firestore_v1 import FieldFilter
-    from google.cloud.firestore_v1.services.firestore import client as firestore_gapic_client_module
-    from google.cloud.firestore_v1.services.firestore.transports.grpc import FirestoreGrpcTransport
-    import urllib3
-except ImportError:  # pragma: no cover - optional for local/dev fallback
+except ImportError as error:  # pragma: no cover - optional for local/dev fallback
+    _log_dependency_import_failure("firebase_admin_core", error)
     firebase_admin = None
     firebase_auth = None
     credentials = None
     firestore = None
-    FieldFilter = None
+
+try:
+    import google.auth
+    import google.auth.credentials
+    import google.auth.transport.grpc
+    import google.auth.transport.urllib3
+    from google.cloud.firestore_v1.services.firestore import client as firestore_gapic_client_module
+    from google.cloud.firestore_v1.services.firestore.transports.grpc import FirestoreGrpcTransport
+    import urllib3
+except ImportError as error:  # pragma: no cover - optional custom transport
+    _log_dependency_import_failure("firestore_custom_transport", error)
     google = None
     firestore_gapic_client_module = None
     FirestoreGrpcTransport = None
     urllib3 = None
+
+try:
+    from google.cloud.firestore_v1 import FieldFilter
+except ImportError as error:  # pragma: no cover - surfaced by the login lookup
+    _log_dependency_import_failure("firestore_username_lookup", error)
+    FieldFilter = None
 
 
 _FIRESTORE_AUTH_REQUEST = None
@@ -178,7 +204,7 @@ def _log_firestore_login_failure(error):
     )
 
 
-if FirestoreGrpcTransport is not None:
+if FirestoreGrpcTransport is not None and firestore is not None:
     class _Urllib3FirestoreGrpcTransport(FirestoreGrpcTransport):
         @classmethod
         def create_channel(
@@ -2011,6 +2037,10 @@ class FirebaseFirestoreStore:
         return mutate(firestore_transaction)
 
     def get_user_by_username(self, username):
+        if FieldFilter is None:
+            raise RuntimeError(
+                "Firestore username lookup requires google-cloud-firestore FieldFilter."
+            )
         username = (username or "").strip().lower()
         docs = self._collection("users").where(
             filter=FieldFilter("username_lower", "==", username)

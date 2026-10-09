@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import socket
+import ssl
 import threading
 import time
 import uuid
@@ -20,6 +21,8 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 import requests
+from google.api_core.exceptions import DeadlineExceeded, GoogleAPICallError
+from google.api_core.retry import Retry
 from dotenv import load_dotenv
 from flask import (
     Flask,
@@ -60,11 +63,108 @@ IS_PRODUCTION_ENVIRONMENT = (
 try:
     import firebase_admin
     from firebase_admin import auth as firebase_auth, credentials, firestore
+    import google.auth
+    import google.auth.credentials
+    import google.auth.transport.grpc
+    import google.auth.transport.urllib3
+    from google.cloud.firestore_v1 import FieldFilter
+    from google.cloud.firestore_v1.services.firestore import client as firestore_gapic_client_module
+    from google.cloud.firestore_v1.services.firestore.transports.grpc import FirestoreGrpcTransport
+    import urllib3
 except ImportError:  # pragma: no cover - optional for local/dev fallback
     firebase_admin = None
     firebase_auth = None
     credentials = None
     firestore = None
+    FieldFilter = None
+    google = None
+    firestore_gapic_client_module = None
+    FirestoreGrpcTransport = None
+    urllib3 = None
+
+
+_FIRESTORE_AUTH_REQUEST = None
+_FIRESTORE_AUTH_POOL = None
+_FIRESTORE_AUTH_REQUEST_LOCK = threading.Lock()
+
+
+def _get_firestore_auth_request():
+    global _FIRESTORE_AUTH_POOL, _FIRESTORE_AUTH_REQUEST
+    if _FIRESTORE_AUTH_REQUEST is None:
+        with _FIRESTORE_AUTH_REQUEST_LOCK:
+            if _FIRESTORE_AUTH_REQUEST is None:
+                tls_context = ssl.create_default_context()
+                tls_context.check_hostname = True
+                tls_context.verify_mode = ssl.CERT_REQUIRED
+                _FIRESTORE_AUTH_POOL = urllib3.PoolManager(
+                    ssl_context=tls_context,
+                    retries=False,
+                    timeout=urllib3.Timeout(connect=5, read=5),
+                )
+                _FIRESTORE_AUTH_REQUEST = google.auth.transport.urllib3.Request(
+                    _FIRESTORE_AUTH_POOL
+                )
+    return _FIRESTORE_AUTH_REQUEST
+
+
+if FirestoreGrpcTransport is not None:
+    class _Urllib3FirestoreGrpcTransport(FirestoreGrpcTransport):
+        @classmethod
+        def create_channel(
+            cls,
+            host="firestore.googleapis.com",
+            credentials=None,
+            credentials_file=None,
+            scopes=None,
+            quota_project_id=None,
+            **kwargs,
+        ):
+            if credentials_file is not None:
+                if credentials is not None:
+                    raise ValueError("'credentials' and 'credentials_file' are mutually exclusive.")
+                credentials, _ = google.auth.load_credentials_from_file(
+                    credentials_file,
+                    scopes=scopes,
+                    default_scopes=cls.AUTH_SCOPES,
+                )
+            elif credentials is None:
+                credentials, _ = google.auth.default(
+                    scopes=scopes,
+                    default_scopes=cls.AUTH_SCOPES,
+                )
+            else:
+                credentials = google.auth.credentials.with_scopes_if_required(
+                    credentials,
+                    scopes=scopes,
+                    default_scopes=cls.AUTH_SCOPES,
+                )
+
+            if quota_project_id and isinstance(
+                credentials, google.auth.credentials.CredentialsWithQuotaProject
+            ):
+                credentials = credentials.with_quota_project(quota_project_id)
+
+            ssl_credentials = kwargs.pop("ssl_credentials", None)
+            return google.auth.transport.grpc.secure_authorized_channel(
+                credentials,
+                _get_firestore_auth_request(),
+                host,
+                ssl_credentials=ssl_credentials,
+                **kwargs,
+            )
+
+
+    class _Urllib3FirestoreClient(firestore.Client):
+        @property
+        def _firestore_api(self):
+            return self._firestore_api_helper(
+                _Urllib3FirestoreGrpcTransport,
+                firestore_gapic_client_module.FirestoreClient,
+                firestore_gapic_client_module,
+            )
+else:  # pragma: no cover - Firebase dependencies are optional
+    _Urllib3FirestoreGrpcTransport = None
+    _Urllib3FirestoreClient = None
 
 
 def find_firebase_service_account_path():
@@ -844,6 +944,12 @@ class InMemoryFirestoreStore:
         self.users[user["id"]] = self._normalize_user(user)
         return self.users[user["id"]]
 
+    def delete_user(self, user_id):
+        if user_id not in self.users:
+            return False
+        del self.users[user_id]
+        return True
+
     def create_trade(self, trade_id, payload):
         with self._trade_mutation_lock:
             existing = self.trades.get(trade_id)
@@ -1110,7 +1216,19 @@ class FirebaseFirestoreStore:
                 {"projectId": self.project_id},
                 name=app_name or f"mannat-{self.project_id}-{uuid.uuid4().hex[:10]}",
             )
-        return firebase_app, firestore.client(app=firebase_app)
+        auth_transport = os.environ.get("FIRESTORE_GRPC_AUTH_TRANSPORT", "").strip().lower()
+        if auth_transport not in {"", "urllib3"}:
+            raise RuntimeError("FIRESTORE_GRPC_AUTH_TRANSPORT must be 'urllib3' when set.")
+        if auth_transport == "urllib3":
+            if _Urllib3FirestoreClient is None:
+                raise RuntimeError("The urllib3 Firestore authentication transport is unavailable.")
+            db = _Urllib3FirestoreClient(
+                credentials=firebase_app.credential.get_credential(),
+                project=firebase_app.project_id,
+            )
+        else:
+            db = firestore.client(app=firebase_app)
+        return firebase_app, db
 
     def _collection(self, name):
         return self.db.collection(name)
@@ -1809,7 +1927,9 @@ class FirebaseFirestoreStore:
 
     def get_user_by_username(self, username):
         username = (username or "").strip().lower()
-        docs = self._collection("users").where("username_lower", "==", username).limit(1).stream()
+        docs = self._collection("users").where(
+            filter=FieldFilter("username_lower", "==", username)
+        ).limit(1).stream(retry=Retry(deadline=5), timeout=5)
         for doc in docs:
             user = doc.to_dict()
             user["id"] = doc.id
@@ -1848,6 +1968,13 @@ class FirebaseFirestoreStore:
         payload["is_active"] = payload["status"] == "active"
         self._collection("users").document(user_id).set(payload, merge=True)
         return self.get_user(user_id)
+
+    def delete_user(self, user_id):
+        reference = self._collection("users").document(user_id)
+        if not reference.get().exists:
+            return False
+        reference.delete()
+        return True
 
     def update_user_profile(self, user_id, full_name, email, recovery_email):
         reference = self._collection("users").document(user_id)
@@ -3337,15 +3464,40 @@ def login_asset(filename):
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
     if request.method == "POST":
+        app.logger.info("Login POST received")
         username = normalize_username(request.form.get("username"))
         password = request.form.get("password", "")
+        lookup_started = time.monotonic()
         try:
             store = get_user_store()
             user = store.get_user_by_username(username)
-        except RuntimeError:
-            app.logger.exception("Unable to access account information during sign-in")
+        except DeadlineExceeded:
+            app.logger.warning(
+                "Firestore user lookup timed out during sign-in after %.3f seconds",
+                time.monotonic() - lookup_started,
+            )
+            flash("Sign-in is temporarily unavailable. Please try again shortly.", "error")
+            return render_template("login.html"), 503
+        except GoogleAPICallError as error:
+            app.logger.warning(
+                "Firestore user lookup failed during sign-in (%s) after %.3f seconds",
+                type(error).__name__,
+                time.monotonic() - lookup_started,
+            )
+            flash("Sign-in is temporarily unavailable. Please try again shortly.", "error")
+            return render_template("login.html"), 503
+        except RuntimeError as error:
+            app.logger.warning(
+                "User store unavailable during sign-in (%s) after %.3f seconds",
+                type(error).__name__,
+                time.monotonic() - lookup_started,
+            )
             flash("Sign-in is temporarily unavailable. Please contact your administrator.", "error")
-            return render_template("login.html")
+            return render_template("login.html"), 503
+        app.logger.info(
+            "Login account lookup completed in %.3f seconds",
+            time.monotonic() - lookup_started,
+        )
 
         if (
             not isinstance(user, dict)
@@ -3848,6 +4000,61 @@ def user_management_page():
     users = sorted(store.list_users(), key=lambda item: item.get("username", "").lower())
     custom_types = store.list_custom_staff_types()
     return render_template("user_management.html", users=users, custom_types=custom_types, current_user=get_current_user())
+
+
+@app.route("/user-management/<user_id>/delete", methods=["POST"])
+@require_authenticated_form_csrf
+@require_login
+@require_role("super_admin")
+def user_management_delete_user(user_id):
+    store = get_user_store()
+    target = store.get_user(user_id)
+    actor = get_current_user()
+    if not target:
+        flash("User not found.", "error")
+        return redirect(url_for("user_management_page"))
+
+    actor_id = str(actor.get("id") or "") if actor else ""
+    target_id = str(target.get("id") or "")
+    if target_id == actor_id:
+        flash("You cannot delete your own account while signed in.", "error")
+        return redirect(url_for("user_management_page"))
+
+    if str(target.get("role", "")).lower() == "super_admin":
+        remaining_super_admins = [
+            user for user in store.list_users()
+            if str(user.get("id")) != target_id
+            and str(user.get("role", "")).lower() == "super_admin"
+            and bool(user.get("is_active", True))
+        ]
+        if not remaining_super_admins:
+            flash("At least one active Super Admin account must remain in the system.", "error")
+            return redirect(url_for("user_management_page"))
+
+    if target.get("is_active") and str(target.get("role", "")).lower() == "super_admin":
+        active_super_admins = [
+            user for user in store.list_users()
+            if str(user.get("role", "")).lower() == "super_admin"
+            and bool(user.get("is_active", True))
+        ]
+        if len(active_super_admins) <= 1:
+            flash("The last active Super Admin account cannot be deleted.", "error")
+            return redirect(url_for("user_management_page"))
+
+    destroyed_user = dict(target)
+    try:
+        deleted = store.delete_user(target_id)
+    except Exception as error:
+        app.logger.error("User account deletion failed (%s).", type(error).__name__)
+        flash("User could not be deleted. Please try again.", "error")
+        return redirect(url_for("user_management_page"))
+    if not deleted:
+        flash("User could not be deleted. Please try again.", "error")
+        return redirect(url_for("user_management_page"))
+
+    add_audit_log(actor_id, "user_deleted", f"Deleted user account {destroyed_user.get('username') or destroyed_user.get('full_name') or target_id}", target_id)
+    flash(f"User account '{destroyed_user.get('username') or destroyed_user.get('full_name') or 'Unknown'}' was removed.", "success")
+    return redirect(url_for("user_management_page"))
 
 
 @app.route("/user-management/create", methods=["POST"])

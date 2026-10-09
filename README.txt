@@ -26,6 +26,7 @@ DEVELOPMENT AND PRODUCTION SERVER
 Development:
 - Start the existing Flask development server with `python app.py`.
 - It continues to bind to `0.0.0.0:5020` so existing LAN testing remains available. Use it only on a trusted development network; it exits rather than starting if `FLASK_ENV=production`.
+- On a local machine where Google credential refresh through Requests fails but verified system TLS works, set `FIRESTORE_GRPC_AUTH_TRANSPORT=urllib3` in the ignored `.env` file. This changes only the local Firestore gRPC credential-refresh transport and retains certificate and hostname verification.
 
 Production on Windows:
 - Install the listed dependencies in the application's virtual environment: `python -m pip install -r requirements.txt`.

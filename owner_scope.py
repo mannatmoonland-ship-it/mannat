@@ -4,6 +4,7 @@ import math
 import uuid
 
 from google.api_core.exceptions import AlreadyExists
+from google.cloud.firestore_v1 import FieldFilter
 
 
 OWNER_SCOPE_COLLECTION = "owner_scopes"
@@ -361,7 +362,9 @@ def update_owner_scope_item(db, item_id, payload):
 
         linked_payments = list(
             transaction.get(
-                payments_collection.where("expenseItemId", "==", item_id)
+                payments_collection.where(
+                    filter=FieldFilter("expenseItemId", "==", item_id)
+                )
             )
         )
         if payment is not None and len(linked_payments) != 1:
@@ -392,7 +395,9 @@ def delete_owner_scope_item(db, item_id):
 
         linked_payments = list(
             transaction.get(
-                payments_collection.where("expenseItemId", "==", item_id)
+                payments_collection.where(
+                    filter=FieldFilter("expenseItemId", "==", item_id)
+                )
             )
         )
         if len(linked_payments) > 499:

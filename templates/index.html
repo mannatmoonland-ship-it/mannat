@@ -948,6 +948,102 @@
 
         }
 
+        .settlement-summary-help {
+            margin: 6px 0 0;
+            color: #166534;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+
+        .contract-payment-breakdown {
+            display: grid;
+            gap: 4px;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #e2e8f0;
+            color: #475569;
+            font-size: 11px;
+            line-height: 1.35;
+        }
+
+        .contract-payment-breakdown div {
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .advance-summary-box {
+
+            display:
+                flex;
+
+            flex-direction:
+                column;
+
+            gap:
+                8px;
+
+        }
+
+
+        .advance-summary-line {
+
+            display:
+                flex;
+
+            align-items:
+                baseline;
+
+            justify-content:
+                space-between;
+
+            gap:
+                12px;
+
+        }
+
+
+        .advance-summary-line .summary-label {
+
+            font-size:
+                12px;
+
+            text-transform:
+                none;
+
+        }
+
+
+        .advance-summary-line .summary-value {
+
+            margin-top:
+                0;
+
+            font-size:
+                14px;
+
+            white-space:
+                nowrap;
+
+        }
+
+
+        .advance-summary-balance .summary-label,
+        .advance-summary-balance .summary-value {
+
+            font-weight:
+                700;
+
+        }
+
+
+        .advance-summary-balance .summary-value {
+
+            font-size:
+                20px;
+
+        }
+
 
         /* =================================================
            PAYMENT PROGRESS
@@ -1098,6 +1194,22 @@
             margin-bottom:
                 15px;
 
+        }
+
+        #tradeList .labour-account-summary {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .financial-module #paymentModal .labour-account-summary {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .account-summary-section {
+            margin-bottom: 18px;
+        }
+
+        .account-summary-section h4 {
+            margin: 10px 0 6px;
         }
 
 
@@ -1485,7 +1597,9 @@
 
             .worker-grid,
             .summary-grid,
-            .payment-summary {
+            .payment-summary,
+            #tradeList .labour-account-summary,
+            .financial-module #paymentModal .labour-account-summary {
 
                 grid-template-columns:
                     1fr;
@@ -1546,7 +1660,9 @@
 <body
     class="{% if financial_only %}financial-module{% else %}trade-builder-page{% endif %}"
     {% if financial_only %}data-labour-payments-csrf="{{ labour_payments_csrf }}"{% endif %}
-    {% if not financial_only %}data-contract-values-csrf="{{ contract_values_csrf }}" data-trade-builder-csrf="{{ trade_builder_csrf }}"{% endif %}
+    data-contract-values-csrf="{{ contract_values_csrf }}"
+    data-can-edit-contract-values="{{ 'true' if can_edit_contract_values else 'false' }}"
+    {% if not financial_only %}data-trade-builder-csrf="{{ trade_builder_csrf }}"{% endif %}
 >
 
 
@@ -1966,18 +2082,26 @@
                 <select id="advanceAdjustmentMode">
 
                     <option value="none">
-                        No Deduction
+                        No Advance Deduction
                     </option>
 
                     <option value="partial">
-                        Partial Deduction
+                        Partial Advance Deduction
                     </option>
 
                     <option value="full">
-                        Full Deduction
+                        Full Advance Deduction
                     </option>
 
                 </select>
+
+                <div id="advanceDeductionUnavailable" class="form-help" hidden>
+                    No outstanding labour advance. Advance deduction is not applicable.
+                </div>
+
+                <div class="form-help">
+                    This recovers a previously issued Labour Advance. It is an accounting adjustment, not an additional cash payment.
+                </div>
 
             </div>
 
@@ -1990,7 +2114,7 @@
             >
 
                 <label>
-                    Deduction Amount
+                    Advance Deduction Amount
                 </label>
 
                 <input
@@ -2111,137 +2235,86 @@
             </h3>
 
 
+            {% if financial_only %}
+            <section class="account-summary-section">
+                <h4>Contract Account</h4>
+                <div class="payment-summary">
+                    <div class="summary-box">
+                        <div class="summary-label">Total Contract Value</div>
+                        <div id="contractTotalSummary" class="summary-value">Ã¢â€šÂ¹0</div>
+                    </div>
+                    <div class="summary-box">
+                        <div class="summary-label">Total Payments Counted Against Contract</div>
+                        <div id="totalPayments" class="summary-value">Ã¢â€šÂ¹0</div>
+                        <div id="contractPaymentBreakdown" class="contract-payment-breakdown" aria-label="Contract payment breakdown"></div>
+                    </div>
+                    <div class="summary-box">
+                        <div class="summary-label">Remaining Contract Value</div>
+                        <div id="contractBalanceSummary" class="summary-value">Ã¢â€šÂ¹0</div>
+                    </div>
+                    <div class="summary-box">
+                        <div class="summary-label">Contract Paid</div>
+                        <div id="contractPaidPercentageSummary" class="summary-value">0%</div>
+                    </div>
+                    <div class="summary-box">
+                        <div class="summary-label">Contract Remaining</div>
+                        <div id="contractRemainingPercentageSummary" class="summary-value">0%</div>
+                    </div>
+                </div>
+                <p class="form-help">
+                    This account follows the existing contract-payment rules. Recorded advances and settlement payments count as payments; an advance deduction is not an additional payment.
+                </p>
+            </section>
+
+            <section class="account-summary-section">
+                <h4>Labour Account</h4>
+                <div class="payment-summary labour-account-summary">
+                    <div class="summary-box">
+                        <div class="summary-label">Total Labour Earned</div>
+                        <div id="labourEarnedTotal" class="summary-value">Ã¢â€šÂ¹0</div>
+                    </div>
+                    <div class="summary-box advance-summary-box">
+                        <div class="advance-summary-line">
+                            <span class="summary-label">Total Advances Issued (Lifetime)</span>
+                            <strong id="labourAdvancesTotal" class="summary-value">Ã¢â€šÂ¹0</strong>
+                        </div>
+                        <div class="advance-summary-line">
+                            <span class="summary-label">Less: Total Advance Recovered</span>
+                            <strong id="advanceDeductionsTotal" class="summary-value">Ã¢â€šÂ¹0</strong>
+                        </div>
+                        <div class="advance-summary-line advance-summary-balance">
+                            <span class="summary-label">Current Advance Balance to Recover</span>
+                            <strong id="advanceBalance" class="summary-value">Ã¢â€šÂ¹0</strong>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            {% else %}
             <div class="payment-summary">
-
-
                 <div class="summary-box">
-
-                    <div class="summary-label">
-                        {% if financial_only %}
-                        Total Payments Against Contract
-                        {% else %}
-                        Total Payments
-                        {% endif %}
-                    </div>
-
-                    <div
-                        id="totalPayments"
-                        class="summary-value"
-                    >
-                        Ã¢â€šÂ¹0
-                    </div>
-
+                    <div class="summary-label">Total Payments</div>
+                    <div id="totalPayments" class="summary-value">Ã¢â€šÂ¹0</div>
                 </div>
-
-
                 <div class="summary-box">
-
-                    <div class="summary-label">
-                        Labour Advance Balance
-                    </div>
-
-                    <div
-                        id="advanceBalance"
-                        class="summary-value"
-                    >
-                        Ã¢â€šÂ¹0
-                    </div>
-
+                    <div class="summary-label">Total Labour Earned</div>
+                    <div id="labourEarnedTotal" class="summary-value">Ã¢â€šÂ¹0</div>
                 </div>
-
-
-                <div class="summary-box">
-
-                    <div class="summary-label">
-                        Outstanding Balance
+                <div class="summary-box advance-summary-box">
+                    <div class="advance-summary-line">
+                        <span class="summary-label">Total Advances Issued (Lifetime)</span>
+                        <strong id="labourAdvancesTotal" class="summary-value">Ã¢â€šÂ¹0</strong>
                     </div>
-
-                    <div
-                        id="outstandingBalance"
-                        class="summary-value"
-                    >
-                        Ã¢â€šÂ¹0
+                    <div class="advance-summary-line">
+                        <span class="summary-label">Less: Total Advance Recovered</span>
+                        <strong id="advanceDeductionsTotal" class="summary-value">Ã¢â€šÂ¹0</strong>
                     </div>
-
+                    <div class="advance-summary-line advance-summary-balance">
+                        <span class="summary-label">Current Advance Balance to Recover</span>
+                        <strong id="advanceBalance" class="summary-value">Ã¢â€šÂ¹0</strong>
+                    </div>
                 </div>
-
-
-                <div class="summary-box">
-
-                    <div class="summary-label">
-                        Labour Settlements
-                    </div>
-
-                    <div
-                        id="settlementTotal"
-                        class="summary-value"
-                    >
-                        Ã¢â€šÂ¹0
-                    </div>
-
-                </div>
-
-                <div class="summary-box">
-                    <div class="summary-label">Daily Wage Payments</div>
-                    <div id="dailyWagePaymentsTotal" class="summary-value">Ã¢â€šÂ¹0</div>
-                </div>
-
-                <div class="summary-box">
-                    <div class="summary-label">Lump-Sum Payments</div>
-                    <div id="lumpSumPaymentsTotal" class="summary-value">Ã¢â€šÂ¹0</div>
-                </div>
-
-
-                {% if financial_only %}
-                <div class="summary-box">
-
-                    <div class="summary-label">
-                        Total Labour Earned
-                    </div>
-
-                    <div
-                        id="labourEarnedTotal"
-                        class="summary-value"
-                    >
-                        Ã¢â€šÂ¹0
-                    </div>
-
-                </div>
-
-
-                <div class="summary-box">
-
-                    <div class="summary-label">
-                        Labour Advances Received
-                    </div>
-
-                    <div
-                        id="labourAdvancesTotal"
-                        class="summary-value"
-                    >
-                        Ã¢â€šÂ¹0
-                    </div>
-
-                </div>
-
-
-                <div class="summary-box">
-
-                    <div class="summary-label">
-                        Advance Deductions
-                    </div>
-
-                    <div
-                        id="advanceDeductionsTotal"
-                        class="summary-value"
-                    >
-                        Ã¢â€šÂ¹0
-                    </div>
-
-                </div>
-                {% endif %}
-
             </div>
+            {% endif %}
 
         </div>
 

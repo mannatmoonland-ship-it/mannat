@@ -7,16 +7,20 @@ MANNAT MOON CONSTRUCTION - TRADE BUILDER & GOOGLE PHOTOS TOOL
 2. Install dependencies:
    pip install -r requirements.txt
 
-3. Install Chromium for Playwright:
+3. Copy `.env.example` to `.env` and set the Firebase project ID and matching
+   Firebase Web configuration. Configure a Firebase Admin credential outside
+   source control for Firestore access. Never commit `.env` or credentials.
+
+4. Install Chromium for Playwright:
    python -m playwright install chromium
 
-4. Run:
+5. Run:
    python app.py
 
-5. Open Trade Builder:
+6. Open Trade Builder:
    http://127.0.0.1:5020/
 
-6. Open Google Photos Tool:
+7. Open Google Photos Tool:
    http://127.0.0.1:5020/google-photos
 
 ============================================================
@@ -26,6 +30,7 @@ DEVELOPMENT AND PRODUCTION SERVER
 Development:
 - Start the existing Flask development server with `python app.py`.
 - It continues to bind to `0.0.0.0:5020` so existing LAN testing remains available. Use it only on a trusted development network; it exits rather than starting if `FLASK_ENV=production`.
+- On a local machine where Google credential refresh through Requests fails but verified system TLS works, set `FIRESTORE_GRPC_AUTH_TRANSPORT=urllib3` in the ignored `.env` file. This changes only the local Firestore gRPC credential-refresh transport and retains certificate and hostname verification.
 
 Production on Windows:
 - Install the listed dependencies in the application's virtual environment: `python -m pip install -r requirements.txt`.
@@ -40,16 +45,23 @@ Production on Windows:
 - Caddy/TLS configuration is a separate future stage and is not included here.
 
 Render/Railway source startup (deployment preparation only):
+- Render service type: Web Service using the Python runtime. No Render manifest is currently provided; configure the service through the Render dashboard using the commands below. The local validation environment is Python 3.12.6; select a compatible Python 3.12 runtime and verify it against the resolved dependencies during a staging build.
+- Render build command: `pip install -r requirements.txt`.
+- Render start command: `python wsgi.py`.
+- Render health-check path: `/health`. This is an unauthenticated liveness check only; it does not test Firebase or other external services.
 - Use `python wsgi.py` as the provider start command. It runs Waitress on `0.0.0.0` and reads the provider-assigned `PORT` (defaulting to 5020 only for local use); it never starts Flask's development server.
 - Set `FLASK_ENV=production` and a unique random `SECRET_KEY` of at least 32 bytes in the provider's secret environment.
 - Set `PUBLIC_BASE_URL` to the application's canonical public HTTPS origin (for example, `https://app.example.com`, with no path). Production password-reset and account-setup links use this configured origin only; missing or non-HTTPS values fail closed. Development without this setting uses `http://127.0.0.1:5020`; to test email links on an office LAN, explicitly set a development `PUBLIC_BASE_URL`.
 - Configure Daily Reports access through authenticated sessions with the `daily_reports.read` permission. Both `/daily-reports` and `/daily-reports/share-image` require this permission.
-- Supply `FIREBASE_PROJECT_ID` and the matching public `FIREBASE_WEB_CONFIG` as provider environment values. Supply Firebase Admin credentials as a provider secret file referenced by `FIREBASE_SERVICE_ACCOUNT`, or as `FIREBASE_SERVICE_ACCOUNT_JSON` / `FIREBASE_SERVICE_ACCOUNT_BASE64`; environment-provided credential JSON is written to a private ignored `instance` file at startup.
+- Explicitly supply `FIREBASE_PROJECT_ID` and the matching public `FIREBASE_WEB_CONFIG` as provider environment values. Deployed environments do not use the local-development Firebase project or Web-config defaults. Supply Firebase Admin credentials as a provider secret file referenced by `FIREBASE_SERVICE_ACCOUNT`, or as `FIREBASE_SERVICE_ACCOUNT_JSON` / `FIREBASE_SERVICE_ACCOUNT_BASE64`; the credential project ID must match the selected Firebase project. Environment-provided credential JSON is written to a private ignored `instance` file at startup. Configure separate Firebase projects, credentials, and `instance/` storage for staging and production; never share a persistent disk or copy production credentials into staging.
+- The initial active project comes from these explicit environment values. The existing Super Admin project-switch workflow can intentionally save a different active project in `instance/firebase_active_project.json`; review and protect that capability when configuring a deployed service, and do not share its `instance/` storage between environments.
 - Configure the existing mail, bootstrap-account (only for first initialization), and Camera authentication secrets through the provider secret store. Never upload `.env`, service-account JSON, or private keys as source/deployment artifacts.
 - Firebase Authentication must be enabled and configured in the selected Firebase project before browser custom-token sign-in can succeed. This startup command does not enable Firebase services or deploy the application.
 - `instance/` and `backups/` are local filesystem storage, not durable cloud persistence. Do not rely on Render/Railway local filesystems for important recovery data; choose persistent storage or an external backup design before relying on those files for recovery.
+- This repository does not configure a Render persistent disk or external backup store. Snapshot/recovery persistence and process-local restore-preview state across restarts or multiple instances remain deployment decisions; do not enable recovery workflows in a multi-instance service until their persistence and coordination requirements are addressed.
+- Playwright is declared as a Python dependency, but the documented build command does not install Chromium or its Linux system libraries. Verify these dependencies in a staging service before enabling Google Photos extraction there; the feature requires outbound network access.
 - Stage a deployment source artifact separately from this development workspace and run `python verify_deployment_artifact.py <staging-directory>` before upload. The verifier rejects `.env*`, Firebase service-account JSON, private-key files, backup/instance/build/dist/virtual-environment/dependency directories, test secret fixtures, and symlinks. Also exclude `.venv*`, `node_modules/`, `.pytest_cache/`, `__pycache__/`, `tests/`, `backups/`, `instance/`, `dist/` (including the Windows executable), `build/`, local Firebase/debug logs, `.env`, and `mannat-moon-construction-firebase-adminsdk-*.json`; include only source/runtime dependencies and required static/templates files. Do not include `.env.example` in production artifacts.
-- `.gitignore` contains local-only exclusions, but this workspace is not a Git repository, so Git tracked-status cannot be verified. Ignore rules alone do not prove a provider bundle is clean; inspect the exact staged artifact with the verifier and review its file list without opening or printing secrets.
+- `.gitignore` contains local-only exclusions, but ignore rules alone do not prove a provider bundle is clean. Inspect the exact staged artifact with the verifier and review its file list without opening or printing secrets.
 
 ============================================================
 TRADE BUILDER

@@ -584,6 +584,10 @@ h1 {
 }
 
 .dr-ev-preview-loading {
+    display: grid;
+    min-height: 160px;
+    aspect-ratio: 16 / 9;
+    place-items: center;
     padding: 12px;
     background: #f8fafc;
     border: 1px dashed #cbd5e1;
@@ -591,6 +595,12 @@ h1 {
     color: #667085;
     font-size: 13px;
     text-align: center;
+}
+
+.dr-ev-preview-loading > img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
 }
 
 .dr-open {

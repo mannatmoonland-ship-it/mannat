@@ -21,9 +21,9 @@
     max-height: min(90vh, 640px);
     overflow-y: auto;
     padding: 24px;
-    color: #e7edf6;
-    background: #1e1e1e;
-    border: 1px solid #39485f;
+    color: #e6f2e9;
+    background: #111b17;
+    border: 1px solid #263c31;
     border-radius: 12px;
     box-shadow: 0 24px 70px rgba(0, 0, 0, .45);
     user-select: none;
@@ -40,7 +40,7 @@
     width: 32px;
     height: 32px;
     padding: 0;
-    color: #c6d0df;
+    color: #a9e4bc;
     background: transparent;
     border: 0;
     border-radius: 6px;
@@ -49,11 +49,11 @@
     cursor: pointer;
 }
 
-.custom-dialog-close:hover { color: #fff; background: #303944; }
+.custom-dialog-close:hover { color: #c1f0cf; background: #1c2b23; }
 
 .custom-dialog h2 {
     margin: 0 0 12px;
-    color: #f5f7fb;
+    color: #f2f7f3;
     font-size: 20px;
     line-height: 1.3;
 }
@@ -61,12 +61,12 @@
 .custom-dialog-message {
     white-space: pre-wrap;
     line-height: 1.55;
-    color: #c6d0df;
+    color: #c5d3c9;
 }
 
 .custom-dialog-details {
     margin-top: 10px;
-    color: #aebbcf;
+    color: #aebdb2;
     white-space: pre-wrap;
     line-height: 1.5;
 }
@@ -76,9 +76,9 @@
     width: 100%;
     margin-top: 18px;
     padding: 11px 12px;
-    color: #f5f7fb;
-    background: #12161d;
-    border: 1px solid #8299b7;
+    color: #e6f2e9;
+    background: #0b1410;
+    border: 1px solid #496253;
     border-radius: 7px;
     font: inherit;
     user-select: text;
@@ -101,15 +101,15 @@
 }
 
 .custom-dialog-confirm {
-    color: #172033;
-    background: #b9d8f6;
-    border: 1px solid #b9d8f6;
+    color: #102018;
+    background: #a9e4bc;
+    border: 1px solid #a9e4bc;
 }
 
 .custom-dialog-cancel {
-    color: #dce8f7;
-    background: #202936;
-    border: 1px solid #6683ab;
+    color: #e6f2e9;
+    background: #1c2b23;
+    border: 1px solid #496253;
 }
 
 .custom-dialog-danger-button {
@@ -122,7 +122,7 @@
 
 .custom-dialog-actions button:focus-visible,
 .custom-dialog-input:focus-visible {
-    outline: 3px solid #8bc4ff;
+    outline: 3px solid #a9e4bc;
     outline-offset: 2px;
 }
 
@@ -133,6 +133,6 @@
 }
 
 .custom-dialog-close:focus-visible {
-    outline: 3px solid #8bc4ff;
+    outline: 3px solid #a9e4bc;
     outline-offset: 2px;
 }

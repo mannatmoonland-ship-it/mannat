@@ -25,12 +25,9 @@ import {
 } from "./settlement_logic.mjs";
 
 import {
-    calculateContractPaymentSummary
-} from "./contract_payment_summary.mjs";
-
-import {
     downloadLedgerPDF,
-    downloadPaymentLedgerPDF
+    downloadPaymentLedgerPDF,
+    paymentLedgerSummary
 } from "./ledger_pdf.js";
 
 import {
@@ -140,12 +137,15 @@ let editingTradeId = null;
 let pendingTradeCreateRequest = null;
 
 async function sendTradeMutation(url, method, payload = null) {
+    const csrfToken = document.body.dataset.tradeBuilderCsrf
+        || document.querySelector("[data-trade-builder-csrf]")?.dataset.tradeBuilderCsrf
+        || "";
     const response = await fetch(url, {
         method,
         credentials: "same-origin",
         headers: {
             "Content-Type": "application/json",
-            "X-CSRF-Token": document.body.dataset.tradeBuilderCsrf || ""
+            "X-CSRF-Token": csrfToken
         },
         body: payload === null ? null : JSON.stringify(payload)
     });
@@ -156,7 +156,9 @@ async function sendTradeMutation(url, method, payload = null) {
         throw new Error("The server returned an unreadable response.");
     }
     if (!response.ok) {
-        throw new Error(result.error || "Unable to save Trade Builder changes.");
+        const error = new Error(result.error || "Unable to save Trade Builder changes.");
+        error.safeApiMessage = true;
+        throw error;
     }
     return result;
 }
@@ -177,6 +179,9 @@ let settlementAmountUserEdited = false;
 
 const financialOnly =
     document.body.classList.contains("financial-module");
+
+const canEditContractValues =
+    document.body.dataset.canEditContractValues === "true";
 
 const tradesById = new Map();
 
@@ -874,11 +879,31 @@ function renderSelectedFinancialTrade(tradeId) {
     }
 }
 
+function renderUpdatedContractTrade(tradeId, contractItems) {
+    const trade = tradesById.get(tradeId);
+    if (!trade) {
+        throw new Error("Trade data is no longer available. Reload the page and try again.");
+    }
+    trade.contractItems = contractItems;
+
+    if (financialOnly) {
+        const selector = document.getElementById("financialTradeSelect");
+        if (selector?.value === tradeId) {
+            renderSelectedFinancialTrade(tradeId);
+        }
+        return;
+    }
+
+    renderTrade(trade);
+}
+
 
 async function sendContractValueMutation(path, method, payload) {
     const csrfToken = document.body.dataset.contractValuesCsrf || "";
     if (!csrfToken) {
-        throw new Error("Your session expired. Reload the page and try again.");
+        const error = new Error("Your session expired. Reload the page and try again.");
+        error.safeApiMessage = true;
+        throw error;
     }
     const response = await fetch(path, {
         method,
@@ -893,10 +918,14 @@ async function sendContractValueMutation(path, method, payload) {
     try {
         result = await response.json();
     } catch {
-        throw new Error("Unable to save contract values. Please try again.");
+        const error = new Error("Unable to save contract values. Please try again.");
+        error.safeApiMessage = true;
+        throw error;
     }
     if (!response.ok) {
-        throw new Error(typeof result.error === "string" ? result.error : "Unable to save contract values. Please try again.");
+        const error = new Error(typeof result.error === "string" ? result.error : "Unable to save contract values. Please try again.");
+        error.safeApiMessage = true;
+        throw error;
     }
     if (!Array.isArray(result.contractItems)) {
         throw new Error("The server returned an invalid contract update.");
@@ -1127,47 +1156,15 @@ function calculateTradeFinancialSummary(
     contractItems,
     transactions
 ) {
-    const validTransactions = (Array.isArray(transactions) ? transactions : []).filter(transaction =>
-        transaction && [
-            "mobilization_advance",
-            "labour_advance",
-            "labour_settlement",
-            COMPLETED_WORK_PAYMENT_TYPE
-        ].includes(transaction.type)
-    );
-    const contractSummary = calculateContractPaymentSummary(contractItems, validTransactions);
-    const {
-        contractTotal,
-        contractPayments,
-        balanceContractValue,
-        paidPercentage,
-        remainingPercentage
-    } = contractSummary;
-    const labourSettlements = validTransactions
-        .filter(transaction => transaction.type === "labour_settlement")
-        .reduce((total, transaction) => total + Number(transaction.amount || 0), 0);
-    const labourEarned = validTransactions
-        .filter(transaction => transaction.type === "labour_settlement")
-        .reduce((total, transaction) => total + Number(transaction.labourEarned || 0), 0);
-    const labourAdvances = validTransactions
-        .filter(transaction => transaction.type === "labour_advance")
-        .reduce((total, transaction) => total + Number(transaction.amount || 0), 0);
-    const advanceDeductions = validTransactions
-        .filter(transaction => transaction.type === "labour_settlement")
-        .reduce((total, transaction) => total + Number(transaction.advanceAdjustment || 0), 0);
+    const summary = paymentLedgerSummary({
+        contractItems,
+        paymentTransactions: transactions
+    });
+
     return {
-        contractTotal,
-        contractPayments,
-        balanceContractValue,
-        paidPercentage,
-        remainingPercentage,
-        labourEarned,
-        labourSettlements,
-        labourAdvances,
-        advanceDeductions,
-        advanceBalance: calculateAdvanceBalance(validTransactions),
-        outstandingLabourBalance: calculateOutstandingLabourBalance(validTransactions),
-        validTransactions
+        ...summary,
+        contractTotal: summary.contractValue,
+        outstandingLabourBalance: summary.outstandingBalance
     };
 }
 
@@ -1256,7 +1253,7 @@ function renderContractTable(
                         </th>
 
 
-                        <th
+                        ${canEditContractValues ? `<th
                             style="
                                 text-align:center;
                                 padding:9px;
@@ -1265,7 +1262,7 @@ function renderContractTable(
                             "
                         >
                             Actions
-                        </th>
+                        </th>` : ""}
 
                     </tr>
 
@@ -1310,7 +1307,7 @@ function renderContractTable(
                                     </td>
 
 
-                                    <td
+                                    ${canEditContractValues ? `<td
                                         style="
                                             padding:9px;
                                             text-align:center;
@@ -1346,6 +1343,7 @@ function renderContractTable(
                                         </button>
 
                                     </td>
+                                    ` : ""}
 
                                 </tr>
 
@@ -1382,7 +1380,7 @@ function renderContractTable(
                         </td>
 
 
-                        <td></td>
+                        ${canEditContractValues ? "<td></td>" : ""}
 
                     </tr>
 
@@ -1465,17 +1463,16 @@ async function addContractItem(
     }
 
     try {
-        await sendContractValueMutation(
+        const result = await sendContractValueMutation(
             `/api/trades/${encodeURIComponent(tradeId)}/contract-items`,
             "POST",
             { name: cleanName, amount }
         );
 
+        renderUpdatedContractTrade(tradeId, result.contractItems);
         showStatus(
             "Contract item added."
         );
-
-        await loadTrades();
 
     }
 
@@ -1486,7 +1483,7 @@ async function addContractItem(
         );
 
         showStatus(
-            "Unable to add the contract item. Please try again.",
+            error.safeApiMessage ? error.message : "Unable to add the contract item. Please try again.",
             true
         );
 
@@ -1506,30 +1503,10 @@ async function editContractItem(
 
     try {
 
-        const tradeRef =
-            doc(
-                db,
-                TRADES_COLLECTION,
-                tradeId
-            );
-
-        const snapshot =
-            await getDoc(
-                tradeRef
-            );
-
-        if (
-            !snapshot.exists()
-        ) {
-
-            throw new Error(
-                "Trade no longer exists."
-            );
-
+        const trade = tradesById.get(tradeId);
+        if (!trade) {
+            throw new Error("Trade data is no longer available. Reload the page and try again.");
         }
-
-        const trade =
-            snapshot.data();
 
         const items =
             Array.isArray(
@@ -1627,17 +1604,16 @@ async function editContractItem(
 
         }
 
-        await sendContractValueMutation(
+        const result = await sendContractValueMutation(
             `/api/trades/${encodeURIComponent(tradeId)}/contract-items/${encodeURIComponent(contractId)}`,
             "PATCH",
             { name: cleanName, amount: newAmount }
         );
 
+        renderUpdatedContractTrade(tradeId, result.contractItems);
         showStatus(
             "Contract item updated."
         );
-
-        await loadTrades();
 
     }
 
@@ -1648,7 +1624,7 @@ async function editContractItem(
         );
 
         showStatus(
-            "Unable to update the contract item. Please try again.",
+            error.safeApiMessage ? error.message : "Unable to update the contract item. Please try again.",
             true
         );
 
@@ -1686,15 +1662,11 @@ async function deleteContractItem(
             `/api/trades/${encodeURIComponent(tradeId)}/contract-items/${encodeURIComponent(contractId)}`,
             "DELETE"
         );
-        if (!result.contractItems) {
-            throw new Error("The server returned an invalid contract update.");
-        }
 
+        renderUpdatedContractTrade(tradeId, result.contractItems);
         showStatus(
             "Contract item deleted."
         );
-
-        await loadTrades();
 
     }
 
@@ -1705,7 +1677,7 @@ async function deleteContractItem(
         );
 
         showStatus(
-            "Unable to delete the contract item. Please try again.",
+            error.safeApiMessage ? error.message : "Unable to delete the contract item. Please try again.",
             true
         );
 
@@ -1734,6 +1706,7 @@ function renderTrade(
 
     card.className =
         "trade-card";
+    card.dataset.tradeId = trade.id;
 
 
     const workers = getTradeWorkerCategories(trade);
@@ -1755,9 +1728,7 @@ function renderTrade(
             : [];
 
 
-    const financialSummary = financialOnly
-        ? calculateTradeFinancialSummary(contractItems, transactions)
-        : null;
+    const financialSummary = calculateTradeFinancialSummary(contractItems, transactions);
     const contractTotal = financialOnly ? financialSummary.contractTotal : calculateContractTotal(contractItems);
     const totalPayments = financialOnly ? financialSummary.contractPayments : calculateTotalPayments(transactions);
     const paymentPercentage = financialOnly
@@ -1807,15 +1778,9 @@ function renderTrade(
     const advanceBalance = financialOnly
         ? financialSummary.advanceBalance
         : calculateAdvanceBalance(transactions);
-    const settlementTotal = financialOnly
-        ? financialSummary.labourSettlements
-        : transactions.filter(transaction => transaction.type === "labour_settlement").reduce((total, transaction) => total + Number(transaction.amount || 0), 0);
-    const outstandingLabourBalance = financialOnly
-        ? financialSummary.outstandingLabourBalance
-        : calculateOutstandingLabourBalance(transactions);
-    const labourEarned = financialOnly ? financialSummary.labourEarned : 0;
-    const labourAdvances = financialOnly ? financialSummary.labourAdvances : 0;
-    const advanceDeductions = financialOnly ? financialSummary.advanceDeductions : 0;
+    const labourEarned = financialSummary.labourEarned;
+    const labourAdvances = financialSummary.labourAdvances;
+    const advanceDeductions = financialSummary.advanceDeductions;
 
 
     card.innerHTML = `
@@ -2015,12 +1980,12 @@ function renderTrade(
                 </div>
 
 
-                <button
+                ${canEditContractValues ? `<button
                     type="button"
                     class="btn-primary btn-small add-contract-btn"
                 >
                     + Add Contract Item
-                </button>
+                </button>` : ""}
 
             </div>
 
@@ -2036,6 +2001,7 @@ function renderTrade(
 
             <!-- CONTRACT SUMMARY -->
 
+            <h4>Contract Account</h4>
             <div
                 style="
                     display:grid;
@@ -2077,7 +2043,7 @@ function renderTrade(
                     <div
                         class="summary-label"
                     >
-                        TOTAL PAYMENTS AGAINST CONTRACT
+                        TOTAL PAYMENTS COUNTED AGAINST CONTRACT
                     </div>
 
 
@@ -2292,8 +2258,9 @@ function renderTrade(
                 Labour Payments
             </h3>
 
+            <h4>Labour Account</h4>
 
-            <div class="payment-summary">
+            <div class="payment-summary labour-account-summary">
 
 
                 <div class="summary-box">
@@ -2314,95 +2281,20 @@ function renderTrade(
                 </div>
 
 
-                <div class="summary-box">
-
-                    <div class="summary-label">
-                        LABOUR SETTLEMENTS PAID
+                <div class="summary-box advance-summary-box">
+                    <div class="advance-summary-line">
+                        <span class="summary-label">Total Advances Issued (Lifetime)</span>
+                        <strong class="summary-value">${money(labourAdvances)}</strong>
                     </div>
-
-
-                    <div class="summary-value">
-
-                        ${money(
-                            settlementTotal
-                        )}
-
+                    <div class="advance-summary-line">
+                        <span class="summary-label">Less: Total Advance Recovered</span>
+                        <strong class="summary-value">${money(advanceDeductions)}</strong>
                     </div>
-
+                    <div class="advance-summary-line advance-summary-balance">
+                        <span class="summary-label">Current Advance Balance to Recover</span>
+                        <strong class="summary-value">${money(advanceBalance)}</strong>
+                    </div>
                 </div>
-
-
-                <div class="summary-box">
-
-                    <div class="summary-label">
-                        LABOUR ADVANCES RECEIVED
-                    </div>
-
-
-                    <div class="summary-value">
-
-                        ${money(
-                            labourAdvances
-                        )}
-
-                    </div>
-
-                </div>
-
-
-                <div class="summary-box">
-
-                    <div class="summary-label">
-                        ADVANCE DEDUCTIONS
-                    </div>
-
-
-                    <div class="summary-value">
-
-                        ${money(
-                            advanceDeductions
-                        )}
-
-                    </div>
-
-                </div>
-
-
-                <div class="summary-box">
-
-                    <div class="summary-label">
-                        REMAINING ADVANCE BALANCE
-                    </div>
-
-
-                    <div class="summary-value">
-
-                        ${money(
-                            advanceBalance
-                        )}
-
-                    </div>
-
-                </div>
-
-
-                <div class="summary-box">
-
-                    <div class="summary-label">
-                        OUTSTANDING BALANCE
-                    </div>
-
-
-                    <div class="summary-value">
-
-                        ${money(
-                            outstandingLabourBalance
-                        )}
-
-                    </div>
-
-                </div>
-
 
             </div>
 
@@ -2495,7 +2387,7 @@ function renderTrade(
 
     card.querySelector(
         ".add-contract-btn"
-    ).addEventListener(
+    )?.addEventListener(
         "click",
         () =>
             addContractItem(
@@ -2558,9 +2450,13 @@ function renderTrade(
         );
 
 
-    list.appendChild(
-        card
-    );
+    const existingCard = [...list.querySelectorAll(".trade-card")]
+        .find(current => current.dataset.tradeId === trade.id);
+    if (existingCard) {
+        existingCard.replaceWith(card);
+    } else {
+        list.appendChild(card);
+    }
 
 }
 
@@ -2788,7 +2684,7 @@ async function saveTrade() {
 
 
         showStatus(
-            "Unable to save the trade. Please try again.",
+            error.safeApiMessage ? error.message : "Unable to save the trade. Please try again.",
             true
         );
 
@@ -2866,7 +2762,7 @@ async function removeTrade(
     if (
         !(await showConfirmDialog({
             title: "Mannat Moon",
-            message: `Are you sure you want to delete "${trades.find(trade => trade.id === tradeId)?.name || "this trade"}"?`,
+            message: `Are you sure you want to delete "${tradesById.get(tradeId)?.name || "this trade"}"?`,
             details: "This will also remove its payment ledger and contract table.",
             confirmText: "Delete",
             cancelText: "Cancel",
@@ -2904,7 +2800,7 @@ async function removeTrade(
 
 
         showStatus(
-            "Unable to delete the trade. Please try again.",
+            error.safeApiMessage ? error.message : "Unable to delete the trade. Please try again.",
             true
         );
 
@@ -2924,6 +2820,7 @@ function openTradeLedgerModal(trade) {
     const contractItems = Array.isArray(trade.contractItems) ? trade.contractItems : [];
     const transactions = sortPaymentTransactions(trade.paymentTransactions);
     const summary = calculateTradeFinancialSummary(contractItems, transactions);
+    const chronologicalTransactions = [...transactions].reverse();
     const transactionLabel = type => ({
         mobilization_advance: "Mobilization Advance",
         labour_advance: "Labour Advance",
@@ -2937,8 +2834,7 @@ function openTradeLedgerModal(trade) {
         <div class="ledger-modal-meta">
             <div><strong>Trade</strong><span>${escapeHtml(trade.name || "Unnamed trade")}</span></div>
             <div><strong>Contract Value</strong><span>${money(summary.contractTotal)}</span></div>
-            <div><strong>Payments Against Contract</strong><span>${money(summary.contractPayments)}</span></div>
-            <div><strong>Advance Balance</strong><span>${money(summary.advanceBalance)}</span></div>
+            <div><strong>Payments Counted Against Contract</strong><span>${money(summary.contractPayments)}</span></div>
         </div>
 
         <h3>Worker Categories</h3>
@@ -2946,20 +2842,41 @@ function openTradeLedgerModal(trade) {
 
         <h3>Work Contracts / Capping</h3>
         ${contractItems.length ? `<table class="ledger-modal-table"><thead><tr><th>Contract Item</th><th>Amount</th></tr></thead><tbody>${contractItems.map(item => `<tr><td>${escapeHtml(item.name)}</td><td>${money(item.amount)}</td></tr>`).join("")}</tbody></table>` : '<div class="ledger-modal-empty">No contract items recorded.</div>'}
+        <h4>Contract Account</h4>
         <div class="ledger-modal-financials">
             <span>Total Contract Value: <strong>${money(summary.contractTotal)}</strong></span>
-            <span>Balance Contract Value: <strong>${money(summary.balanceContractValue)}</strong></span>
-            <span>Paid: <strong>${summary.paidPercentage.toFixed(2)}%</strong></span>
-            <span>Remaining: <strong>${summary.remainingPercentage.toFixed(2)}%</strong></span>
+            <span>Total Payments Counted Against Contract: <strong>${money(summary.contractPayments)}</strong></span>
+            <span>Remaining Contract Value: <strong>${money(summary.balanceContractValue)}</strong></span>
+            <span>Contract Paid: <strong>${summary.paidPercentage.toFixed(2)}%</strong></span>
+            <span>Contract Remaining: <strong>${summary.remainingPercentage.toFixed(2)}%</strong></span>
+        </div>
+        <div class="ledger-modal-financials contract-payment-breakdown" aria-label="Contract payment breakdown">
+            ${summary.contractPaymentBreakdown.map(category => `<span>${escapeHtml(category.label)}: <strong>${money(category.amount)}</strong></span>`).join("")}
+        </div>
+        <h4>Labour Account</h4>
+        <div class="ledger-modal-financials">
             <span>Total Labour Earned: <strong>${money(summary.labourEarned)}</strong></span>
-            <span>Labour Settlements Paid: <strong>${money(summary.labourSettlements)}</strong></span>
-            <span>Labour Advances Received: <strong>${money(summary.labourAdvances)}</strong></span>
-            <span>Advance Deductions: <strong>${money(summary.advanceDeductions)}</strong></span>
-            <span>Outstanding Labour Balance: <strong>${money(summary.outstandingLabourBalance)}</strong></span>
+            <span>Total Advances Issued (Lifetime): <strong>${money(summary.labourAdvances)}</strong></span>
+            <span>Less: Total Advance Recovered: <strong>${money(summary.advanceDeductions)}</strong></span>
+            <span>Current Advance Balance to Recover: <strong>${money(summary.advanceBalance)}</strong></span>
         </div>
 
         <h3>Payment History</h3>
-        ${transactions.length ? `<div class="ledger-modal-table-wrap"><table class="ledger-modal-table"><thead><tr><th>Date</th><th>Transaction Type</th><th>Amount</th><th>Payment Mode</th><th>Remarks</th></tr></thead><tbody>${transactions.map(transaction => `<tr><td>${formatDateWithDay(transaction.date)}</td><td>${escapeHtml(transactionLabel(transaction.type))}</td><td>${money(transaction.amount)}</td><td>${escapeHtml(transaction.paymentMode || "")}</td><td>${escapeHtml(transaction.remarks || "")}</td></tr>`).join("")}</tbody></table></div>` : '<div class="ledger-modal-empty">No payment transactions yet.</div>'}
+        ${transactions.length ? `<div class="ledger-modal-table-wrap"><table class="ledger-modal-table"><thead><tr><th>Date / Type</th><th>Worker Category</th><th>Labour Earned</th><th>Advance Deduction</th><th>Amount Paid</th><th>Pending Labour Payment</th><th>Payment Mode / Remarks</th></tr></thead><tbody>${transactions.map(transaction => {
+            let pendingLabourPayment = "-";
+            if (transaction.type === "labour_settlement") {
+                const outstandingBalance = transaction.id
+                    ? calculateOutstandingBalanceAfterTransaction(transactions, transaction.id)
+                    : calculateOutstandingLabourBalance(
+                        chronologicalTransactions.slice(
+                            0,
+                            chronologicalTransactions.indexOf(transaction) + 1
+                        )
+                    );
+                pendingLabourPayment = money(outstandingBalance);
+            }
+            return `<tr><td>${escapeHtml(formatDateWithDay(transaction.date))}<br>${escapeHtml(transactionLabel(transaction.type))}</td><td>${escapeHtml(transaction.workerCategoryName || "")}</td><td>${transaction.type === "labour_settlement" ? money(transaction.labourEarned) : "-"}</td><td>${transaction.type === "labour_settlement" ? money(transaction.advanceAdjustment) : "-"}</td><td>${money(transaction.amount)}</td><td>${pendingLabourPayment}</td><td>${escapeHtml([transaction.paymentMode, transaction.remarks].filter(Boolean).join(" / "))}</td></tr>`;
+        }).join("")}</tbody></table></div>` : '<div class="ledger-modal-empty">No payment transactions yet.</div>'}
     `;
 
     modal.classList.add("show");
@@ -2996,6 +2913,18 @@ function openPaymentTransactionDetails(paymentId) {
     const content = document.getElementById("tradeLedgerModalContent");
     const downloadButton = document.getElementById("tradeLedgerDownloadPdf");
     const transactionId = String(transaction.id || "");
+    const isLabourSettlement = transaction.type === "labour_settlement";
+    const chronologicalTransactions = sortPaymentTransactions(currentPaymentTrade.paymentTransactions).reverse();
+    const pendingLabourPayment = isLabourSettlement
+        ? transaction.id
+            ? calculateOutstandingBalanceAfterTransaction(currentPaymentTrade.paymentTransactions, transaction.id)
+            : calculateOutstandingLabourBalance(
+                chronologicalTransactions.slice(
+                    0,
+                    chronologicalTransactions.indexOf(transaction) + 1
+                )
+            )
+        : null;
 
     currentViewLedgerTrade = null;
     title.textContent = "Payment Transaction Details";
@@ -3008,7 +2937,12 @@ function openPaymentTransactionDetails(paymentId) {
             <div><strong>Trade Name</strong><span>${escapeHtml(currentPaymentTrade.name || "Unnamed trade")}</span></div>
             ${transaction.type === "lump_sum_payment" ? `<div><strong>Worker Category</strong><span>${escapeHtml(transaction.workerCategoryName || "Unspecified")}</span></div>` : ""}
             <div><strong>Payment Mode</strong><span>${escapeHtml(transaction.paymentMode || "Not specified")}</span></div>
-            <div><strong>Amount</strong><span>${money(transaction.amount)}</span></div>
+            <div><strong>${isLabourSettlement ? "Amount Paid" : "Amount"}</strong><span>${money(transaction.amount)}</span></div>
+            ${isLabourSettlement ? `
+            <div><strong>Labour Earned</strong><span>${money(transaction.labourEarned)}</span></div>
+            <div><strong>Advance Deduction</strong><span>${money(transaction.advanceAdjustment)}</span></div>
+            <div><strong>Pending Labour Payment</strong><span>${money(pendingLabourPayment)}</span></div>
+            ` : ""}
             <div><strong>Remarks</strong><span>${escapeHtml(transaction.remarks || "None")}</span></div>
             <div class="payment-transaction-id">
                 <strong>Transaction ID</strong>
@@ -3065,6 +2999,8 @@ function openPaymentModal(
 
     editingPaymentId =
         null;
+
+    settlementAmountUserEdited = false;
 
 
     document.getElementById(
@@ -3408,7 +3344,7 @@ function updateSettlementBreakdownUI() {
     ) {
 
         amountHelp.textContent =
-            "Amount Available to Pay = Previous Outstanding + Labour Earned − Advance Deduction";
+            "Amount Being Paid Now is the actual payment. Available to pay = previous Pending Labour Payment + Labour Earned − Advance Deduction.";
 
     }
 
@@ -3523,7 +3459,7 @@ function updateSettlementBreakdownUI() {
 
                 <div>
                     <strong>
-                        Remaining Advance Balance:
+                        Advance Balance After Settlement:
                     </strong>
                     ${money(
                         settlementValues.remainingAdvanceBalance
@@ -3532,7 +3468,7 @@ function updateSettlementBreakdownUI() {
 
                 <div>
                     <strong>
-                        Amount Paid Now:
+                        Amount Being Paid Now:
                     </strong>
                     ${money(
                         Number(
@@ -3543,7 +3479,7 @@ function updateSettlementBreakdownUI() {
 
                 <div>
                     <strong>
-                        Outstanding Balance:
+                        Pending Labour Payment After Settlement:
                     </strong>
                     ${money(
                         settlementValues.outstandingBalance
@@ -3671,6 +3607,14 @@ function renderLumpSumAgreements(trade, transactions) {
 
 function updatePartialAdjustment() {
 
+    const availability =
+        updateAdvanceDeductionAvailability();
+    const balance = availability.balance;
+
+    if (availability.modeCleared) {
+        settlementAmountUserEdited = false;
+    }
+
     const mode =
         document.getElementById(
             "advanceAdjustmentMode"
@@ -3684,6 +3628,7 @@ function updatePartialAdjustment() {
 
 
     if (
+        balance > 0 &&
         mode ===
         "partial"
     ) {
@@ -3705,6 +3650,45 @@ function updatePartialAdjustment() {
 
 }
 
+function updateAdvanceDeductionAvailability(transactions = currentPaymentTrade?.paymentTransactions) {
+    const modeSelect = document.getElementById("advanceAdjustmentMode");
+    const partialOption = modeSelect.querySelector('option[value="partial"]');
+    const fullOption = modeSelect.querySelector('option[value="full"]');
+    const adjustmentAmountInput = document.getElementById("adjustmentAmount");
+    const partialField = document.getElementById("partialAdjustmentField");
+    const unavailableMessage = document.getElementById("advanceDeductionUnavailable");
+    const activeTransactions = Array.isArray(transactions) ? [...transactions] : [];
+
+    if (editingPaymentId) {
+        const editingIndex = activeTransactions.findIndex(transaction =>
+            transaction?.id === editingPaymentId
+        );
+        if (editingIndex !== -1) {
+            activeTransactions.splice(editingIndex, 1);
+        }
+    }
+
+    const balance = calculateAdvanceBalance(activeTransactions);
+    const unavailable = balance <= 0;
+    const modeCleared = unavailable &&
+        (modeSelect.value === "partial" || modeSelect.value === "full");
+
+    partialOption.disabled = unavailable;
+    fullOption.disabled = unavailable;
+    adjustmentAmountInput.disabled = unavailable;
+    unavailableMessage.hidden = !unavailable;
+
+    if (unavailable) {
+        if (modeCleared) {
+            modeSelect.value = "none";
+        }
+        adjustmentAmountInput.value = "";
+        partialField.style.display = "none";
+    }
+
+    return { balance, modeCleared };
+}
+
 
 /* =========================================================
    CALCULATE SETTLEMENT
@@ -3720,6 +3704,12 @@ function calculateSettlementAmount() {
 
     }
 
+    const availability =
+        updateAdvanceDeductionAvailability();
+    const balance = availability.balance;
+    if (availability.modeCleared) {
+        settlementAmountUserEdited = false;
+    }
 
     const earned =
         Number(
@@ -3790,7 +3780,9 @@ function calculateSettlementAmount() {
         });
 
     if (
-        (mode === "full" || mode === "partial") &&
+        (mode === "full" ||
+            mode === "partial" ||
+            (balance <= 0 && !editingPaymentId)) &&
         !settlementAmountUserEdited
     ) {
 
@@ -3825,17 +3817,9 @@ function renderPaymentHistory(
 
     const transactions = sortPaymentTransactions(trade.paymentTransactions);
 
-    const financialSummary = financialOnly
-        ? calculateTradeFinancialSummary(trade.contractItems, transactions)
-        : null;
+    const financialSummary = calculateTradeFinancialSummary(trade.contractItems, transactions);
     const totalPayments = financialOnly ? financialSummary.contractPayments : calculateTotalPayments(transactions);
     const advanceBalance = financialOnly ? financialSummary.advanceBalance : calculateAdvanceBalance(transactions);
-    const settlements = financialOnly
-        ? financialSummary.labourSettlements
-        : transactions.filter(transaction => transaction.type === "labour_settlement").reduce((total, transaction) => total + Number(transaction.amount || 0), 0);
-    const lumpSumPayments = transactions
-        .filter(transaction => transaction.type === "lump_sum_payment")
-        .reduce((total, transaction) => total + Number(transaction.amount || 0), 0);
 
 
     document.getElementById(
@@ -3844,6 +3828,16 @@ function renderPaymentHistory(
         money(
             totalPayments
         );
+
+    const contractPaymentBreakdown =
+        document.getElementById("contractPaymentBreakdown");
+    if (contractPaymentBreakdown) {
+        contractPaymentBreakdown.innerHTML = financialOnly
+            ? financialSummary.contractPaymentBreakdown.map(category =>
+                `<div><span>${escapeHtml(category.label)}</span><strong>${money(category.amount)}</strong></div>`
+            ).join("")
+            : "";
+    }
 
 
     document.getElementById(
@@ -3854,34 +3848,16 @@ function renderPaymentHistory(
         );
 
 
-    document.getElementById(
-        "settlementTotal"
-    ).textContent =
-        money(
-            settlements
-        );
-    const dailyWagePaymentsTotal = document.getElementById("dailyWagePaymentsTotal");
-    const lumpSumPaymentsTotal = document.getElementById("lumpSumPaymentsTotal");
-    if (dailyWagePaymentsTotal) dailyWagePaymentsTotal.textContent = money(settlements);
-    if (lumpSumPaymentsTotal) lumpSumPaymentsTotal.textContent = money(lumpSumPayments);
+    document.getElementById("labourEarnedTotal").textContent = money(financialSummary.labourEarned);
+    document.getElementById("labourAdvancesTotal").textContent = money(financialSummary.labourAdvances);
+    document.getElementById("advanceDeductionsTotal").textContent = money(financialSummary.advanceDeductions);
 
     if (financialOnly) {
-        document.getElementById("labourEarnedTotal").textContent = money(financialSummary.labourEarned);
-        document.getElementById("labourAdvancesTotal").textContent = money(financialSummary.labourAdvances);
-        document.getElementById("advanceDeductionsTotal").textContent = money(financialSummary.advanceDeductions);
+        document.getElementById("contractTotalSummary").textContent = money(financialSummary.contractTotal);
+        document.getElementById("contractBalanceSummary").textContent = money(financialSummary.balanceContractValue);
+        document.getElementById("contractPaidPercentageSummary").textContent = `${financialSummary.paidPercentage.toFixed(2)}%`;
+        document.getElementById("contractRemainingPercentageSummary").textContent = `${financialSummary.remainingPercentage.toFixed(2)}%`;
     }
-
-
-    const outstandingBalance = financialOnly
-        ? financialSummary.outstandingLabourBalance
-        : calculateOutstandingLabourBalance(transactions);
-
-    document.getElementById(
-        "outstandingBalance"
-    ).textContent =
-        money(
-            outstandingBalance
-        );
 
     renderLumpSumAgreements(trade, transactions);
 
@@ -4049,7 +4025,7 @@ function renderPaymentHistory(
                                     `
 
                                         <strong>
-                                            Earned:
+                                            Labour Earned:
                                         </strong>
 
                                         ${money(
@@ -4059,7 +4035,7 @@ function renderPaymentHistory(
                                         <br>
 
                                         <strong>
-                                            Deduction:
+                                            Advance Deduction:
                                         </strong>
 
                                         ${money(
@@ -4069,7 +4045,7 @@ function renderPaymentHistory(
                                         <br>
 
                                         <strong>
-                                            Paid Now:
+                                            Amount Being Paid Now:
                                         </strong>
 
                                         ${money(
@@ -4081,7 +4057,7 @@ function renderPaymentHistory(
                                         <br>
 
                                         <strong>
-                                            Outstanding:
+                                            Pending Labour Payment After Settlement:
                                         </strong>
 
                                         ${money(
@@ -4369,6 +4345,8 @@ function editPayment(
     editingPaymentId =
         paymentId;
 
+    settlementAmountUserEdited = false;
+
 
     document.getElementById(
         "paymentType"
@@ -4419,6 +4397,7 @@ function editPayment(
         if (
             adjustment <= 0
         ) {
+            settlementAmountUserEdited = true;
 
             document.getElementById(
                 "advanceAdjustmentMode"
@@ -5084,7 +5063,7 @@ async function savePayment() {
         ) {
 
             showStatus(
-                "Amount paid now cannot exceed the current outstanding labour balance.",
+                "Amount paid now cannot exceed the current pending payment from the owner.",
                 true
             );
 
@@ -5138,6 +5117,21 @@ async function savePayment() {
         const freshTrade =
             freshSnapshot.data();
 
+        if (type === "labour_settlement") {
+            currentPaymentTrade = {
+                ...currentPaymentTrade,
+                ...freshTrade,
+                id: currentPaymentTrade.id
+            };
+            const availability = updateAdvanceDeductionAvailability(
+                freshTrade.paymentTransactions
+            );
+            if (availability.modeCleared) {
+                settlementAmountUserEdited = false;
+            }
+            calculateSettlementAmount();
+            amount = Number(document.getElementById("paymentAmount").value || 0);
+        }
 
         let transactions =
             Array.isArray(
@@ -5235,6 +5229,8 @@ async function savePayment() {
             paymentAmount: document.getElementById("paymentAmount"),
             paymentRemarks: document.getElementById("paymentRemarks")
         });
+        settlementAmountUserEdited = false;
+        updatePaymentForm();
 
 
         await loadTrades();

@@ -64,7 +64,9 @@ async function sendDrawingsMutation(path, method, payload) {
     throw new Error("The server returned an invalid response.");
   }
   if (!response.ok) {
-    throw new Error(typeof result.error === "string" ? result.error : "Unable to save the Drawings Library change.");
+    const error = new Error(typeof result.error === "string" ? result.error : "Unable to save the Drawings Library change.");
+    error.safeApiMessage = true;
+    throw error;
   }
   return result;
 }
@@ -366,7 +368,7 @@ async function saveDrawing(event) {
     await loadData();
   } catch (error) {
     console.error(error);
-    setStatus("Unable to save the drawing. Please check your connection and try again.", true);
+    setStatus(error?.safeApiMessage ? error.message : "Unable to save the drawing. Please check your connection and try again.", true);
   } finally {
     savingDrawing = false;
   }

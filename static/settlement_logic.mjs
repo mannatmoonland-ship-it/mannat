@@ -5,17 +5,39 @@ export function calculateAdvanceBalance(transactions) {
         return 0;
     }
 
+    const positiveAmount = value => {
+        if (typeof value === 'boolean' || value === null || value === '') {
+            return 0;
+        }
+
+        const amount = Number(value);
+        return Number.isFinite(amount) && amount > 0 ? amount : 0;
+    };
+
     transactions.forEach(transaction => {
+        if (!transaction || typeof transaction !== 'object') {
+            return;
+        }
+
         if (transaction.type === 'labour_advance') {
-            balance += Number(transaction.amount || 0);
+            balance += positiveAmount(transaction.amount);
         }
 
         if (transaction.type === 'labour_settlement') {
-            balance -= Number(transaction.advanceAdjustment || 0);
+            balance -= positiveAmount(transaction.advanceAdjustment);
         }
     });
 
     return Math.max(0, balance);
+}
+
+export function calculateNetLabourPayable(labourEarned = 0, advanceRecovered = 0) {
+    const earned = Number(labourEarned);
+    const recovered = Number(advanceRecovered);
+    const validEarned = Number.isFinite(earned) ? Math.max(0, earned) : 0;
+    const validRecovered = Number.isFinite(recovered) ? Math.max(0, recovered) : 0;
+
+    return Math.max(0, validEarned - validRecovered);
 }
 
 export function getSettlementFormResetState() {
@@ -158,7 +180,6 @@ export function calculateOutstandingLabourBalance(transactions = []) {
             transaction.outstandingBalance !== null &&
             transaction.outstandingBalance !== '' &&
             Number.isFinite(Number(transaction.outstandingBalance));
-
         if (hasStoredOutstanding) {
             runningOutstanding = Number(transaction.outstandingBalance || 0);
             return;

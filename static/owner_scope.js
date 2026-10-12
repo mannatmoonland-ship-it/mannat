@@ -3,6 +3,10 @@ import { sortOwnerScopeItemsByPaymentDate } from "./owner_scope_sort.mjs";
 import { downloadOwnerScopePDF } from "./owner_scope_pdf.js";
 import { showConfirmDialog } from "./dialogs.js";
 import { buildOwnerScopeDeleteConfirmation } from "./owner_scope_delete_confirmation.mjs";
+import {
+    generateSecureRequestId,
+    reserveSecureRequestId
+} from "./secure_request_id.mjs";
 
 const categoryLabels = Object.freeze({
     labour: "Labour",
@@ -54,6 +58,11 @@ const money = new Intl.NumberFormat("en-IN", {
 let ownerScopeData = null;
 let editingItemId = null;
 let editingPaymentDetails = false;
+let createRequestIdReady = false;
+let reservedCreateRequestId = null;
+let createRequestIdError = "Secure Owner Scope request IDs are not initialized.";
+
+const ownerScopeRequestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function showStatus(message, kind = "") {
     page.status.textContent = message;
@@ -178,23 +187,76 @@ async function requestJson(url, options = {}) {
     return body;
 }
 
+function persistOwnerScopeCreateRequest(requestId, body) {
+    try {
+        sessionStorage.setItem(createRequestStorageKey, JSON.stringify({ id: requestId, body }));
+    } catch {
+        throw new Error(
+            "Owner Scope cannot safely store the request ID for retries. Enable session storage and reload the page."
+        );
+    }
+}
+
+function initializeOwnerScopeCreateRequestId({ forceNew = false } = {}) {
+    try {
+        reservedCreateRequestId = reserveSecureRequestId(
+            sessionStorage,
+            createRequestStorageKey,
+            { forceNew }
+        );
+        createRequestIdReady = true;
+        createRequestIdError = "";
+    } catch {
+        reservedCreateRequestId = null;
+        createRequestIdReady = false;
+        createRequestIdError =
+            "Secure Owner Scope request IDs could not be initialized. Use a supported browser with session storage enabled, then reload the page.";
+        throw new Error(createRequestIdError);
+    }
+}
+
 function ownerScopeCreateRequestId(payload) {
+    if (!createRequestIdReady || !reservedCreateRequestId) {
+        throw new Error(createRequestIdError);
+    }
+
     const body = JSON.stringify(payload);
-    const savedRequest = JSON.parse(
-        sessionStorage.getItem(createRequestStorageKey) || "null"
-    );
+    let savedRequest;
+    try {
+        savedRequest = JSON.parse(
+            sessionStorage.getItem(createRequestStorageKey) || "null"
+        );
+    } catch {
+        createRequestIdReady = false;
+        createRequestIdError =
+            "Owner Scope cannot read its saved request ID. Enable session storage and reload the page.";
+        throw new Error(
+            createRequestIdError
+        );
+    }
     if (
         savedRequest?.body === body
         && typeof savedRequest.id === "string"
-        && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(savedRequest.id)
+        && ownerScopeRequestIdPattern.test(savedRequest.id)
     ) {
         return savedRequest.id;
     }
-    if (typeof globalThis.crypto?.randomUUID !== "function") {
-        throw new Error("Secure Owner Scope request IDs are unavailable.");
+
+    let requestId;
+    try {
+        requestId = savedRequest?.body === null
+            && savedRequest.id === reservedCreateRequestId
+            ? reservedCreateRequestId
+            : generateSecureRequestId();
+        persistOwnerScopeCreateRequest(requestId, body);
+    } catch (error) {
+        createRequestIdReady = false;
+        createRequestIdError = error.message.includes("Secure random")
+            ? "Secure Owner Scope request IDs could not be generated. Use a supported browser, then reload the page."
+            : error.message;
+        throw new Error(createRequestIdError);
     }
-    const requestId = globalThis.crypto.randomUUID();
-    sessionStorage.setItem(createRequestStorageKey, JSON.stringify({ id: requestId, body }));
+    reservedCreateRequestId = requestId;
     return requestId;
 }
 
@@ -225,6 +287,11 @@ function openItemDialog(item = null) {
     }
     page.dialogTitle.textContent = editingItemId ? "Edit Owner Scope Item" : "Add Owner Scope Item";
     page.saveButton.textContent = editingItemId ? "Save Changes" : "Save Item";
+    page.saveButton.disabled = !editingItemId && !createRequestIdReady;
+    if (!editingItemId && !createRequestIdReady) {
+        page.formError.textContent = createRequestIdError;
+        page.formError.hidden = false;
+    }
     if (!item) page.paymentDate.value = localDateInputValue();
     if (item) {
         page.itemName.value = item.name || "";
@@ -337,7 +404,14 @@ page.form.addEventListener("submit", async event => {
                     "Idempotency-Key": ownerScopeCreateRequestId(payload)
                 }
             });
-            sessionStorage.removeItem(createRequestStorageKey);
+            closeItemDialog();
+            await loadOwnerScope();
+            try {
+                initializeOwnerScopeCreateRequestId({ forceNew: true });
+            } catch (error) {
+                showStatus(error.message, "error");
+            }
+            return;
         }
         closeItemDialog();
         await loadOwnerScope();
@@ -345,8 +419,16 @@ page.form.addEventListener("submit", async event => {
         page.formError.textContent = error.message;
         page.formError.hidden = false;
     } finally {
-        page.saveButton.disabled = false;
+        page.saveButton.disabled = !editingItemId && !createRequestIdReady;
     }
 });
+
+page.saveButton.disabled = true;
+try {
+    initializeOwnerScopeCreateRequestId();
+    page.saveButton.disabled = false;
+} catch (error) {
+    showStatus(error.message, "error");
+}
 
 loadOwnerScope();

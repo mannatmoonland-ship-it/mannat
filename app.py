@@ -8,8 +8,10 @@ import os
 import re
 import secrets
 import socket
+import ssl
 import threading
 import time
+import traceback
 import uuid
 from html import escape
 from collections import deque
@@ -20,6 +22,8 @@ from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 import requests
+from google.api_core.exceptions import DeadlineExceeded, GoogleAPICallError
+from google.api_core.retry import Retry
 from dotenv import load_dotenv
 from flask import (
     Flask,
@@ -60,11 +64,112 @@ IS_PRODUCTION_ENVIRONMENT = (
 try:
     import firebase_admin
     from firebase_admin import auth as firebase_auth, credentials, firestore
+    import google.auth
+    import google.auth.credentials
+    import google.auth.transport.grpc
+    import google.auth.transport.urllib3
+    import grpc
+    from google.cloud.firestore_v1 import FieldFilter
+    from google.cloud.firestore_v1 import client as firestore_client_module
+    from google.cloud.firestore_v1.services.firestore import client as firestore_gapic_client_module
+    from google.cloud.firestore_v1.services.firestore.transports.grpc import FirestoreGrpcTransport
+    import urllib3
 except ImportError:  # pragma: no cover - optional for local/dev fallback
     firebase_admin = None
     firebase_auth = None
     credentials = None
     firestore = None
+    FieldFilter = None
+    google = None
+    grpc = None
+    firestore_client_module = None
+    firestore_gapic_client_module = None
+    FirestoreGrpcTransport = None
+    urllib3 = None
+
+
+_FIRESTORE_AUTH_REQUEST = None
+_FIRESTORE_AUTH_POOL = None
+_FIRESTORE_AUTH_REQUEST_LOCK = threading.Lock()
+
+
+def _get_firestore_auth_request():
+    global _FIRESTORE_AUTH_POOL, _FIRESTORE_AUTH_REQUEST
+    if _FIRESTORE_AUTH_REQUEST is None:
+        with _FIRESTORE_AUTH_REQUEST_LOCK:
+            if _FIRESTORE_AUTH_REQUEST is None:
+                tls_context = ssl.create_default_context()
+                tls_context.check_hostname = True
+                tls_context.verify_mode = ssl.CERT_REQUIRED
+                _FIRESTORE_AUTH_POOL = urllib3.PoolManager(
+                    ssl_context=tls_context,
+                    retries=False,
+                    timeout=urllib3.Timeout(connect=5, read=5),
+                )
+                _FIRESTORE_AUTH_REQUEST = google.auth.transport.urllib3.Request(
+                    _FIRESTORE_AUTH_POOL
+                )
+    return _FIRESTORE_AUTH_REQUEST
+
+
+if FirestoreGrpcTransport is not None:
+    class _Urllib3FirestoreGrpcTransport(FirestoreGrpcTransport):
+        @classmethod
+        def create_channel(
+            cls,
+            host="firestore.googleapis.com",
+            credentials=None,
+            credentials_file=None,
+            scopes=None,
+            quota_project_id=None,
+            **kwargs,
+        ):
+            if credentials_file is not None:
+                if credentials is not None:
+                    raise ValueError("'credentials' and 'credentials_file' are mutually exclusive.")
+                credentials, _ = google.auth.load_credentials_from_file(
+                    credentials_file,
+                    scopes=scopes,
+                    default_scopes=cls.AUTH_SCOPES,
+                )
+            elif credentials is None:
+                credentials, _ = google.auth.default(
+                    scopes=scopes,
+                    default_scopes=cls.AUTH_SCOPES,
+                )
+            else:
+                credentials = google.auth.credentials.with_scopes_if_required(
+                    credentials,
+                    scopes=scopes,
+                    default_scopes=cls.AUTH_SCOPES,
+                )
+
+            if quota_project_id and isinstance(
+                credentials, google.auth.credentials.CredentialsWithQuotaProject
+            ):
+                credentials = credentials.with_quota_project(quota_project_id)
+
+            ssl_credentials = kwargs.pop("ssl_credentials", None)
+            return google.auth.transport.grpc.secure_authorized_channel(
+                credentials,
+                _get_firestore_auth_request(),
+                host,
+                ssl_credentials=ssl_credentials,
+                **kwargs,
+            )
+
+
+    class _Urllib3FirestoreClient(firestore.Client):
+        @property
+        def _firestore_api(self):
+            return self._firestore_api_helper(
+                _Urllib3FirestoreGrpcTransport,
+                firestore_gapic_client_module.FirestoreClient,
+                firestore_gapic_client_module,
+            )
+else:  # pragma: no cover - Firebase dependencies are optional
+    _Urllib3FirestoreGrpcTransport = None
+    _Urllib3FirestoreClient = None
 
 
 def find_firebase_service_account_path():
@@ -198,25 +303,15 @@ PASSWORD_RESET_WINDOW_SECONDS = 3600
 PASSWORD_RESET_IP_LIMIT = 10
 PASSWORD_RESET_USER_LIMIT = 3
 PASSWORD_RESET_RESPONSE = "If an eligible account was found, reset instructions will be sent to its saved email address."
-LEGACY_SHARED_TEMP_PASSWORD = "password"
 
-if not os.environ.get("FIREBASE_PROJECT_ID"):
+if not os.environ.get("FIREBASE_PROJECT_ID") and not IS_PRODUCTION_ENVIRONMENT:
     os.environ["FIREBASE_PROJECT_ID"] = "mannat-moon-construction"
 
-if not os.environ.get("FIREBASE_SERVICE_ACCOUNT"):
+if not os.environ.get("FIREBASE_SERVICE_ACCOUNT") and not IS_PRODUCTION_ENVIRONMENT:
     detected_path = find_firebase_service_account_path()
     if detected_path:
         os.environ["FIREBASE_SERVICE_ACCOUNT"] = detected_path
 
-DEFAULT_FIREBASE_WEB_CONFIG = {
-    "apiKey": "AIzaSyC45yuUwsyI4VF_UNGcZoMbf9lIXmDqbUA",
-    "authDomain": "mannat-moon-construction.firebaseapp.com",
-    "projectId": "mannat-moon-construction",
-    "storageBucket": "mannat-moon-construction.firebasestorage.app",
-    "messagingSenderId": "688328149099",
-    "appId": "1:688328149099:web:0eb1e0df82c7e51e10092e",
-    "measurementId": "G-215RJCKKGR",
-}
 ACTIVE_FIREBASE_CONFIG_PATH = Path(app.instance_path) / "firebase_active_project.json"
 FIREBASE_WEB_CONFIG_REQUIRED_FIELDS = frozenset({"apiKey", "authDomain", "projectId", "appId"})
 FIREBASE_WEB_CONFIG_OPTIONAL_FIELDS = frozenset({
@@ -245,7 +340,34 @@ def _validate_firebase_web_config(web_config, project_id):
     return web_config
 
 
+def _validate_firebase_service_account_path(service_account_path, project_id):
+    path = Path(service_account_path)
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parent / path
+    try:
+        with path.open("r", encoding="utf-8") as credential_file:
+            service_account = json.load(credential_file)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise RuntimeError("Firebase Admin service-account credentials could not be read.") from error
+    if (
+        not isinstance(service_account, dict)
+        or service_account.get("type") != "service_account"
+        or not all(
+            isinstance(service_account.get(field), str) and service_account[field]
+            for field in ("project_id", "client_email", "private_key")
+        )
+    ):
+        raise RuntimeError("Firebase Admin service-account credentials are invalid.")
+    if service_account["project_id"] != project_id:
+        raise RuntimeError("Firebase Admin credentials do not match FIREBASE_PROJECT_ID.")
+    return str(path)
+
+
 def get_active_firebase_config():
+    configured_project_id = os.environ.get("FIREBASE_PROJECT_ID")
+    if IS_PRODUCTION_ENVIRONMENT and not configured_project_id:
+        raise RuntimeError("FIREBASE_PROJECT_ID must be explicitly configured in deployed environments.")
+
     if ACTIVE_FIREBASE_CONFIG_PATH.is_file():
         try:
             with ACTIVE_FIREBASE_CONFIG_PATH.open("r", encoding="utf-8") as config_file:
@@ -253,10 +375,18 @@ def get_active_firebase_config():
             if not isinstance(config, dict) or not isinstance(config.get("web_config"), dict):
                 raise ValueError("Invalid active Firebase project configuration.")
             _validate_firebase_web_config(config["web_config"], config.get("project_id"))
+            if IS_PRODUCTION_ENVIRONMENT:
+                service_account_path = config.get("service_account_path")
+                if not service_account_path:
+                    raise ValueError("Firebase Admin credentials are not configured.")
+                config["service_account_path"] = _validate_firebase_service_account_path(
+                    service_account_path,
+                    config["project_id"],
+                )
             return config
         except (OSError, json.JSONDecodeError, ValueError) as error:
             raise RuntimeError("The active Firebase project configuration could not be read.") from error
-    project_id = os.environ.get("FIREBASE_PROJECT_ID") or "mannat-moon-construction"
+    project_id = configured_project_id or "mannat-moon-construction"
     web_config_json = os.environ.get("FIREBASE_WEB_CONFIG")
     if web_config_json is not None:
         try:
@@ -266,14 +396,25 @@ def get_active_firebase_config():
         if not isinstance(web_config, dict):
             raise RuntimeError("FIREBASE_WEB_CONFIG must contain a JSON object.")
     else:
-        web_config = dict(DEFAULT_FIREBASE_WEB_CONFIG)
+        raise RuntimeError("FIREBASE_WEB_CONFIG must be explicitly configured.")
     try:
         _validate_firebase_web_config(web_config, project_id)
     except ValueError as error:
         raise RuntimeError(str(error)) from error
+    service_account_path = os.environ.get("FIREBASE_SERVICE_ACCOUNT") or find_firebase_service_account_path()
+    if IS_PRODUCTION_ENVIRONMENT:
+        if not any(os.environ.get(name) for name in (
+            "FIREBASE_SERVICE_ACCOUNT",
+            "FIREBASE_SERVICE_ACCOUNT_JSON",
+            "FIREBASE_SERVICE_ACCOUNT_BASE64",
+        )):
+            raise RuntimeError("Firebase Admin credentials must be explicitly configured in deployed environments.")
+        if not service_account_path:
+            raise RuntimeError("Firebase Admin credentials must be explicitly configured in deployed environments.")
+        service_account_path = _validate_firebase_service_account_path(service_account_path, project_id)
     return {
         "project_id": project_id,
-        "service_account_path": os.environ.get("FIREBASE_SERVICE_ACCOUNT") or find_firebase_service_account_path(),
+        "service_account_path": service_account_path,
         "web_config": web_config,
     }
 
@@ -461,21 +602,107 @@ browser_pool = BrowserPool(max_browsers=2)
 # =========================================================
 
 _url_cache = {}
-_cache_lock = threading.Lock()
+_url_failure_cache = {}
+_url_inflight = {}
+_cache_lock = threading.RLock()
 MAX_CACHE_SIZE = 1000
+GOOGLE_PHOTOS_URL_CACHE_TTL_SECONDS = 6 * 60 * 60
+GOOGLE_PHOTOS_FAILURE_CACHE_TTL_SECONDS = 20
+GOOGLE_PHOTOS_INFLIGHT_WAIT_SECONDS = 5
 
 
 def get_cached_url(photos_url):
     with _cache_lock:
-        return _url_cache.get(photos_url)
+        cached = _url_cache.get(photos_url)
+        if cached is None:
+            return None
+        direct_url, expires_at = cached
+        if time.monotonic() >= expires_at:
+            del _url_cache[photos_url]
+            return None
+        return direct_url
 
 
 def cache_url(photos_url, direct_url):
+    if not direct_url:
+        return
     with _cache_lock:
-        if len(_url_cache) >= MAX_CACHE_SIZE:
+        now = time.monotonic()
+        expired_keys = [
+            key for key, (_url, expires_at) in _url_cache.items()
+            if expires_at <= now
+        ]
+        for key in expired_keys:
+            del _url_cache[key]
+        if photos_url not in _url_cache and len(_url_cache) >= MAX_CACHE_SIZE:
             oldest_key = next(iter(_url_cache))
             del _url_cache[oldest_key]
-        _url_cache[photos_url] = direct_url
+        _url_cache[photos_url] = (
+            direct_url,
+            now + GOOGLE_PHOTOS_URL_CACHE_TTL_SECONDS,
+        )
+        _url_failure_cache.pop(photos_url, None)
+
+
+def get_or_extract_google_photos_url(photos_url, *, force_refresh=False):
+    while True:
+        with _cache_lock:
+            if not force_refresh:
+                cached = get_cached_url(photos_url)
+                if cached:
+                    return cached, "hit"
+                failure_expires_at = _url_failure_cache.get(photos_url, 0)
+                if failure_expires_at > time.monotonic():
+                    return None, "failure_hit"
+            else:
+                _url_cache.pop(photos_url, None)
+            _url_failure_cache.pop(photos_url, None)
+            event = _url_inflight.get(photos_url)
+            if event is None:
+                event = threading.Event()
+                _url_inflight[photos_url] = event
+                is_owner = True
+            else:
+                is_owner = False
+
+        if not is_owner:
+            if not event.wait(GOOGLE_PHOTOS_INFLIGHT_WAIT_SECONDS):
+                return None, "wait_timeout"
+            force_refresh = False
+            continue
+
+        direct_url = None
+        try:
+            direct_url = _extract_google_photos_image(photos_url)
+            if direct_url:
+                cache_url(photos_url, direct_url)
+            return direct_url, "miss"
+        except Exception as error:
+            app.logger.warning(
+                "Google Photos extraction failed (%s).",
+                type(error).__name__,
+            )
+            return None, "miss"
+        finally:
+            with _cache_lock:
+                if not direct_url:
+                    now = time.monotonic()
+                    expired_failures = [
+                        key for key, expires_at in _url_failure_cache.items()
+                        if expires_at <= now
+                    ]
+                    for key in expired_failures:
+                        del _url_failure_cache[key]
+                    if (
+                        photos_url not in _url_failure_cache
+                        and len(_url_failure_cache) >= MAX_CACHE_SIZE
+                    ):
+                        _url_failure_cache.pop(next(iter(_url_failure_cache)))
+                    _url_failure_cache[photos_url] = (
+                        now + GOOGLE_PHOTOS_FAILURE_CACHE_TTL_SECONDS
+                    )
+                _url_inflight.pop(photos_url, None)
+                event.set()
 
 
 # =========================================================
@@ -844,6 +1071,12 @@ class InMemoryFirestoreStore:
         self.users[user["id"]] = self._normalize_user(user)
         return self.users[user["id"]]
 
+    def delete_user(self, user_id):
+        if user_id not in self.users:
+            return False
+        del self.users[user_id]
+        return True
+
     def create_trade(self, trade_id, payload):
         with self._trade_mutation_lock:
             existing = self.trades.get(trade_id)
@@ -1076,10 +1309,39 @@ class InMemoryFirestoreStore:
         return True
 
 
+def _transaction_get_document_snapshot(transaction, reference):
+    return next(transaction.get(reference))
+
+
+def _transaction_get_collection_snapshots(transaction, collection):
+    return list(transaction.get(collection.order_by("__name__")))
+
+
 class FirebaseFirestoreStore:
     def __init__(self, client=None, project_id=None, service_account_path=None, app_name=None):
-        self.project_id = project_id or os.environ.get("FIREBASE_PROJECT_ID") or "mannat-moon-construction"
-        self.service_account_path = service_account_path or os.environ.get("FIREBASE_SERVICE_ACCOUNT") or find_firebase_service_account_path()
+        configured_project_id = project_id or os.environ.get("FIREBASE_PROJECT_ID")
+        has_explicit_service_account = bool(
+            service_account_path
+            or os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+            or os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+            or os.environ.get("FIREBASE_SERVICE_ACCOUNT_BASE64")
+        )
+        configured_service_account = (
+            service_account_path
+            or os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+            or find_firebase_service_account_path()
+        )
+        if client is None and IS_PRODUCTION_ENVIRONMENT:
+            if not configured_project_id:
+                raise RuntimeError("FIREBASE_PROJECT_ID must be explicitly configured in deployed environments.")
+            if not has_explicit_service_account or not configured_service_account:
+                raise RuntimeError("Firebase Admin credentials must be explicitly configured in deployed environments.")
+            configured_service_account = _validate_firebase_service_account_path(
+                configured_service_account,
+                configured_project_id,
+            )
+        self.project_id = configured_project_id or "mannat-moon-construction"
+        self.service_account_path = configured_service_account
         self.firebase_app = None
         self.db = client
         if self.db is None:
@@ -1110,7 +1372,19 @@ class FirebaseFirestoreStore:
                 {"projectId": self.project_id},
                 name=app_name or f"mannat-{self.project_id}-{uuid.uuid4().hex[:10]}",
             )
-        return firebase_app, firestore.client(app=firebase_app)
+        auth_transport = os.environ.get("FIRESTORE_GRPC_AUTH_TRANSPORT", "").strip().lower()
+        if auth_transport not in {"", "urllib3"}:
+            raise RuntimeError("FIRESTORE_GRPC_AUTH_TRANSPORT must be 'urllib3' when set.")
+        if auth_transport == "urllib3":
+            if _Urllib3FirestoreClient is None:
+                raise RuntimeError("The urllib3 Firestore authentication transport is unavailable.")
+            db = _Urllib3FirestoreClient(
+                credentials=firebase_app.credential.get_credential(),
+                project=firebase_app.project_id,
+            )
+        else:
+            db = firestore.client(app=firebase_app)
+        return firebase_app, db
 
     def _collection(self, name):
         return self.db.collection(name)
@@ -1132,19 +1406,21 @@ class FirebaseFirestoreStore:
 
         @firestore.transactional
         def mutate(transaction):
-            snapshot = transaction.get(reference)
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
             if action == "delete":
                 if not snapshot.exists:
                     return None
                 material_snapshots = list(
-                    transaction.get(materials.where("categoryId", "==", category_id))
+                    transaction.get(materials.where(filter=FieldFilter("categoryId", "==", category_id)))
                 )
-                supplier_snapshots = list(transaction.get(suppliers))
+                supplier_snapshots = _transaction_get_collection_snapshots(
+                    transaction, suppliers
+                )
                 purchase_snapshots = list(
-                    transaction.get(purchases.where("categoryId", "==", category_id))
+                    transaction.get(purchases.where(filter=FieldFilter("categoryId", "==", category_id)))
                 )
                 consumption_snapshots = list(
-                    transaction.get(consumptions.where("categoryId", "==", category_id))
+                    transaction.get(consumptions.where(filter=FieldFilter("categoryId", "==", category_id)))
                 )
                 _ensure_material_category_deletable(
                     category_id,
@@ -1169,7 +1445,9 @@ class FirebaseFirestoreStore:
             if action == "edit" and existing is None:
                 return None
 
-            category_snapshots = list(transaction.get(categories))
+            category_snapshots = _transaction_get_collection_snapshots(
+                transaction, categories
+            )
             if any(
                 item.id != category_id
                 and normalized_material_name((item.to_dict() or {}).get("name"))
@@ -1182,22 +1460,22 @@ class FirebaseFirestoreStore:
 
             if action == "edit":
                 material_snapshots = list(
-                    transaction.get(materials.where("categoryId", "==", category_id))
+                    transaction.get(materials.where(filter=FieldFilter("categoryId", "==", category_id)))
                 )
                 has_history = bool(
-                    list(transaction.get(purchases.where("categoryId", "==", category_id)))
-                    or list(transaction.get(consumptions.where("categoryId", "==", category_id)))
+                    list(transaction.get(purchases.where(filter=FieldFilter("categoryId", "==", category_id))))
+                    or list(transaction.get(consumptions.where(filter=FieldFilter("categoryId", "==", category_id))))
                 )
                 for material_snapshot in material_snapshots:
                     has_history = has_history or bool(
                         list(
                             transaction.get(
-                                purchases.where("materialId", "==", material_snapshot.id)
+                                purchases.where(filter=FieldFilter("materialId", "==", material_snapshot.id))
                             )
                         )
                         or list(
                             transaction.get(
-                                consumptions.where("materialId", "==", material_snapshot.id)
+                                consumptions.where(filter=FieldFilter("materialId", "==", material_snapshot.id))
                             )
                         )
                     )
@@ -1229,12 +1507,12 @@ class FirebaseFirestoreStore:
 
         @firestore.transactional
         def mutate(transaction):
-            snapshot = transaction.get(reference)
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
             existing = snapshot.to_dict() or {} if snapshot.exists else None
             if action == "delete":
                 if existing is None:
                     return None
-                if list(transaction.get(purchases.where("supplierId", "==", supplier_id))):
+                if list(transaction.get(purchases.where(filter=FieldFilter("supplierId", "==", supplier_id)))):
                     raise MaterialMasterDataError(
                         "This supplier is referenced by saved purchases.", 409
                     )
@@ -1251,7 +1529,9 @@ class FirebaseFirestoreStore:
 
             category_values = {}
             for category_id in payload["categoryIds"]:
-                category_snapshot = transaction.get(categories.document(category_id))
+                category_snapshot = _transaction_get_document_snapshot(
+                    transaction, categories.document(category_id)
+                )
                 if not category_snapshot.exists:
                     raise MaterialMasterDataError("Select a valid material category.")
                 category_values[category_id] = {
@@ -1266,7 +1546,7 @@ class FirebaseFirestoreStore:
                 if isinstance(category.get("brands"), list):
                     continue
                 material_snapshots = list(
-                    transaction.get(materials.where("categoryId", "==", category_id))
+                    transaction.get(materials.where(filter=FieldFilter("categoryId", "==", category_id)))
                 )
                 materials_by_category[category_id] = [
                     {"id": item.id, **(item.to_dict() or {})}
@@ -1279,7 +1559,7 @@ class FirebaseFirestoreStore:
                             **(item.to_dict() or {}),
                         }
                         for item in transaction.get(
-                            brands.where("materialId", "==", material_snapshot.id)
+                            brands.where(filter=FieldFilter("materialId", "==", material_snapshot.id))
                         )
                     )
                     purchase_values.extend(
@@ -1288,13 +1568,13 @@ class FirebaseFirestoreStore:
                             **(item.to_dict() or {}),
                         }
                         for item in transaction.get(
-                            purchases.where("materialId", "==", material_snapshot.id)
+                            purchases.where(filter=FieldFilter("materialId", "==", material_snapshot.id))
                         )
                     )
                 purchase_values.extend(
                     {"id": item.id, **(item.to_dict() or {})}
                     for item in transaction.get(
-                        purchases.where("categoryId", "==", category_id)
+                        purchases.where(filter=FieldFilter("categoryId", "==", category_id))
                     )
                 )
             _validate_material_supplier_relationships(
@@ -1325,12 +1605,14 @@ class FirebaseFirestoreStore:
 
         @firestore.transactional
         def create(transaction):
-            existing = transaction.get(reference)
+            existing = _transaction_get_document_snapshot(transaction, reference)
             if existing.exists:
                 if (existing.to_dict() or {}).get("name") == name:
                     return {"id": category_id, "duplicate": True}
                 raise DrawingMutationError("This category request ID has already been used.", 409)
-            category_snapshots = list(transaction.get(categories))
+            category_snapshots = _transaction_get_collection_snapshots(
+                transaction, categories
+            )
             if any(
                 str((snapshot.to_dict() or {}).get("name", "")).strip().casefold()
                 == name.casefold()
@@ -1361,16 +1643,22 @@ class FirebaseFirestoreStore:
 
     def update_drawing_category(self, category_id, name):
         category_reference = self._collection("drawings_categories").document(category_id)
-        drawing_query = self._collection("drawings").where("categoryId", "==", category_id)
+        drawing_query = self._collection("drawings").where(
+            filter=FieldFilter("categoryId", "==", category_id)
+        )
         categories = self._collection("drawings_categories")
         firestore_transaction = self.db.transaction()
 
         @firestore.transactional
         def update(transaction):
-            category_snapshot = transaction.get(category_reference)
+            category_snapshot = _transaction_get_document_snapshot(
+                transaction, category_reference
+            )
             if not category_snapshot.exists:
                 return None
-            category_snapshots = list(transaction.get(categories))
+            category_snapshots = _transaction_get_collection_snapshots(
+                transaction, categories
+            )
             if any(
                 snapshot.id != category_id
                 and str((snapshot.to_dict() or {}).get("name", "")).strip().casefold()
@@ -1396,12 +1684,16 @@ class FirebaseFirestoreStore:
 
     def delete_drawing_category(self, category_id):
         category_reference = self._collection("drawings_categories").document(category_id)
-        drawing_query = self._collection("drawings").where("categoryId", "==", category_id)
+        drawing_query = self._collection("drawings").where(
+            filter=FieldFilter("categoryId", "==", category_id)
+        )
         firestore_transaction = self.db.transaction()
 
         @firestore.transactional
         def delete(transaction):
-            category_snapshot = transaction.get(category_reference)
+            category_snapshot = _transaction_get_document_snapshot(
+                transaction, category_reference
+            )
             if not category_snapshot.exists:
                 return False
             if list(transaction.get(drawing_query)):
@@ -1419,7 +1711,7 @@ class FirebaseFirestoreStore:
 
         @firestore.transactional
         def reorder(transaction):
-            snapshots = list(transaction.get(categories))
+            snapshots = _transaction_get_collection_snapshots(transaction, categories)
             by_id = {snapshot.id: snapshot for snapshot in snapshots}
             if set(category_ids) != set(by_id) or len(category_ids) != len(by_id):
                 raise DrawingMutationError(
@@ -1445,8 +1737,12 @@ class FirebaseFirestoreStore:
 
         @firestore.transactional
         def create(transaction):
-            existing_snapshot = transaction.get(drawing_reference)
-            category_snapshot = transaction.get(category_reference)
+            existing_snapshot = _transaction_get_document_snapshot(
+                transaction, drawing_reference
+            )
+            category_snapshot = _transaction_get_document_snapshot(
+                transaction, category_reference
+            )
             if not category_snapshot.exists:
                 raise DrawingMutationError("Select an existing drawing category.", 400)
             category = category_snapshot.to_dict() or {}
@@ -1456,7 +1752,7 @@ class FirebaseFirestoreStore:
                     return {"id": drawing_id, "duplicate": True}
                 raise DrawingMutationError("This drawing request ID has already been used.", 409)
             category_drawings = list(
-                transaction.get(drawings.where("categoryId", "==", payload["categoryId"]))
+                transaction.get(drawings.where(filter=FieldFilter("categoryId", "==", payload["categoryId"])))
             )
             normalized = _drawing_create_fields(payload, category, category_drawings)
             now = iso_now()
@@ -1479,16 +1775,20 @@ class FirebaseFirestoreStore:
 
         @firestore.transactional
         def update(transaction):
-            drawing_snapshot = transaction.get(drawing_reference)
+            drawing_snapshot = _transaction_get_document_snapshot(
+                transaction, drawing_reference
+            )
             if not drawing_snapshot.exists:
                 return None
-            category_snapshot = transaction.get(category_reference)
+            category_snapshot = _transaction_get_document_snapshot(
+                transaction, category_reference
+            )
             if not category_snapshot.exists:
                 raise DrawingMutationError("Select an existing drawing category.", 400)
             existing = drawing_snapshot.to_dict() or {}
             category = category_snapshot.to_dict() or {}
             category_drawings = list(
-                transaction.get(drawings.where("categoryId", "==", payload["categoryId"]))
+                transaction.get(drawings.where(filter=FieldFilter("categoryId", "==", payload["categoryId"])))
             )
             normalized = _drawing_update_fields(
                 payload, category, existing, category_drawings, drawing_id
@@ -1504,7 +1804,7 @@ class FirebaseFirestoreStore:
 
         @firestore.transactional
         def delete(transaction):
-            snapshot = transaction.get(reference)
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
             if not snapshot.exists:
                 return False
             transaction.delete(reference)
@@ -1514,7 +1814,7 @@ class FirebaseFirestoreStore:
 
     def reorder_drawings(self, category_id, drawing_ids):
         drawings = self._collection("drawings")
-        query = drawings.where("categoryId", "==", category_id)
+        query = drawings.where(filter=FieldFilter("categoryId", "==", category_id))
         firestore_transaction = self.db.transaction()
 
         @firestore.transactional
@@ -1665,7 +1965,9 @@ class FirebaseFirestoreStore:
 
         @firestore.transactional
         def mutate(transaction):
-            existing_snapshot = transaction.get(target_reference)
+            existing_snapshot = _transaction_get_document_snapshot(
+                transaction, target_reference
+            )
             if action == "delete":
                 if not existing_snapshot.exists:
                     return None
@@ -1683,7 +1985,9 @@ class FirebaseFirestoreStore:
             if not _valid_material_id(category_id):
                 raise MaterialTransactionError("Select a valid material category.")
             category_reference = self._collection("material_categories").document(category_id)
-            category_snapshot = transaction.get(category_reference)
+            category_snapshot = _transaction_get_document_snapshot(
+                transaction, category_reference
+            )
             category = (
                 {"id": category_id, **(category_snapshot.to_dict() or {})}
                 if category_snapshot.exists else None
@@ -1697,14 +2001,18 @@ class FirebaseFirestoreStore:
             if supplier_id:
                 if not _valid_material_id(supplier_id):
                     raise MaterialTransactionError("Select a valid supplier.")
-                supplier_snapshot = transaction.get(self._collection("suppliers").document(supplier_id))
+                supplier_snapshot = _transaction_get_document_snapshot(
+                    transaction, self._collection("suppliers").document(supplier_id)
+                )
                 supplier = (
                     {"id": supplier_id, **(supplier_snapshot.to_dict() or {})}
                     if supplier_snapshot.exists else None
                 )
 
             material_snapshots = list(transaction.get(
-                self._collection("materials").where("categoryId", "==", category_id)
+                self._collection("materials").where(
+                    filter=FieldFilter("categoryId", "==", category_id)
+                )
             )) if category else []
             category_materials = [
                 {"id": snapshot.id, **(snapshot.to_dict() or {})}
@@ -1713,7 +2021,9 @@ class FirebaseFirestoreStore:
             legacy_brands = []
             for material in category_materials:
                 brand_snapshots = transaction.get(
-                    self._collection("material_brands").where("materialId", "==", material["id"])
+                    self._collection("material_brands").where(
+                        filter=FieldFilter("materialId", "==", material["id"])
+                    )
                 )
                 legacy_brands.extend(
                     {"id": snapshot.id, **(snapshot.to_dict() or {})}
@@ -1725,12 +2035,16 @@ class FirebaseFirestoreStore:
                 purchase_snapshots.update({
                     snapshot.id: snapshot
                     for snapshot in transaction.get(
-                        self._collection("material_purchases").where("categoryId", "==", category_id)
+                        self._collection("material_purchases").where(
+                            filter=FieldFilter("categoryId", "==", category_id)
+                        )
                     )
                 })
                 for material in category_materials:
                     for snapshot in transaction.get(
-                        self._collection("material_purchases").where("materialId", "==", material["id"])
+                        self._collection("material_purchases").where(
+                            filter=FieldFilter("materialId", "==", material["id"])
+                        )
                     ):
                         purchase_snapshots[snapshot.id] = snapshot
             category_purchases = list(purchase_snapshots.values())
@@ -1767,12 +2081,16 @@ class FirebaseFirestoreStore:
                 consumption_snapshots_by_id = {
                     snapshot.id: snapshot
                     for snapshot in transaction.get(
-                        self._collection("material_consumptions").where("categoryId", "==", category_id)
+                        self._collection("material_consumptions").where(
+                            filter=FieldFilter("categoryId", "==", category_id)
+                        )
                     )
                 }
                 for material in category_materials:
                     for snapshot in transaction.get(
-                        self._collection("material_consumptions").where("materialId", "==", material["id"])
+                        self._collection("material_consumptions").where(
+                            filter=FieldFilter("materialId", "==", material["id"])
+                        )
                     ):
                         consumption_snapshots_by_id[snapshot.id] = snapshot
                 consumption_records = [
@@ -1809,7 +2127,9 @@ class FirebaseFirestoreStore:
 
     def get_user_by_username(self, username):
         username = (username or "").strip().lower()
-        docs = self._collection("users").where("username_lower", "==", username).limit(1).stream()
+        docs = self._collection("users").where(
+            filter=FieldFilter("username_lower", "==", username)
+        ).limit(1).stream(retry=Retry(deadline=5), timeout=5)
         for doc in docs:
             user = doc.to_dict()
             user["id"] = doc.id
@@ -1848,6 +2168,13 @@ class FirebaseFirestoreStore:
         payload["is_active"] = payload["status"] == "active"
         self._collection("users").document(user_id).set(payload, merge=True)
         return self.get_user(user_id)
+
+    def delete_user(self, user_id):
+        reference = self._collection("users").document(user_id)
+        if not reference.get().exists:
+            return False
+        reference.delete()
+        return True
 
     def update_user_profile(self, user_id, full_name, email, recovery_email):
         reference = self._collection("users").document(user_id)
@@ -2076,7 +2403,6 @@ def _validate_material_supplier_payload(payload):
             not _valid_material_id(category_id)
             or category_id in assignment_categories
             or not isinstance(brand_ids, list)
-            or not brand_ids
             or len(brand_ids) > 200
             or any(not _valid_material_id(item) for item in brand_ids)
             or len(set(brand_ids)) != len(brand_ids)
@@ -2238,6 +2564,10 @@ def _validate_material_supplier_relationships(
                 )
             ],
         )
+        if options and not assignment["brandIds"]:
+            raise MaterialMasterDataError(
+                "Select at least one valid brand or quarry for each assigned category."
+            )
         if any(brand_id not in options for brand_id in assignment["brandIds"]):
             raise MaterialMasterDataError(
                 "Select at least one valid brand or quarry for each assigned category."
@@ -3185,25 +3515,6 @@ def favicon():
     )
 
 
-@app.after_request
-def inject_office_connection_monitor(response):
-    if response.status_code >= 300 or response.mimetype != "text/html":
-        return response
-
-    page = response.get_data(as_text=True)
-    if "office-connection-monitor.js" in page:
-        return response
-
-    stylesheet = f'<link rel="stylesheet" href="{url_for("static", filename="office_connection.css")}">'
-    script = f'<script defer src="{url_for("static", filename="office_connection.js")}"></script>'
-    if "</head>" in page:
-        page = page.replace("</head>", f"    {stylesheet}\n</head>", 1)
-    if "</body>" in page:
-        page = page.replace("</body>", f"    {script}\n</body>", 1)
-    response.set_data(page)
-    return response
-
-
 @app.route("/")
 @require_login
 def dashboard():
@@ -3337,15 +3648,40 @@ def login_asset(filename):
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
     if request.method == "POST":
+        app.logger.info("Login POST received")
         username = normalize_username(request.form.get("username"))
         password = request.form.get("password", "")
+        lookup_started = time.monotonic()
         try:
             store = get_user_store()
             user = store.get_user_by_username(username)
-        except RuntimeError:
-            app.logger.exception("Unable to access account information during sign-in")
+        except DeadlineExceeded:
+            app.logger.warning(
+                "Firestore user lookup timed out during sign-in after %.3f seconds",
+                time.monotonic() - lookup_started,
+            )
+            flash("Sign-in is temporarily unavailable. Please try again shortly.", "error")
+            return render_template("login.html"), 503
+        except GoogleAPICallError as error:
+            app.logger.warning(
+                "Firestore user lookup failed during sign-in (%s) after %.3f seconds",
+                type(error).__name__,
+                time.monotonic() - lookup_started,
+            )
+            flash("Sign-in is temporarily unavailable. Please try again shortly.", "error")
+            return render_template("login.html"), 503
+        except RuntimeError as error:
+            app.logger.warning(
+                "User store unavailable during sign-in (%s) after %.3f seconds",
+                type(error).__name__,
+                time.monotonic() - lookup_started,
+            )
             flash("Sign-in is temporarily unavailable. Please contact your administrator.", "error")
-            return render_template("login.html")
+            return render_template("login.html"), 503
+        app.logger.info(
+            "Login account lookup completed in %.3f seconds",
+            time.monotonic() - lookup_started,
+        )
 
         if (
             not isinstance(user, dict)
@@ -3363,17 +3699,18 @@ def login_page():
             flash("Invalid username or password.", "error")
             return redirect(url_for("login_page"))
 
-        if user.get("must_change_password") and check_password_hash(
-            user.get("password_hash", ""),
-            LEGACY_SHARED_TEMP_PASSWORD,
-        ):
+        if validate_password_policy(password):
             add_audit_log(
                 user.get("id"),
-                "legacy_shared_password_retired",
-                "Blocked a legacy shared temporary password; a private password reset is required",
+                "weak_password_login_blocked",
+                "Blocked sign-in with a password that does not meet the current password policy",
                 user.get("id"),
             )
-            flash("This legacy temporary password can no longer be used. Use Forgot Password to set a private password.", "warning")
+            flash(
+                "This password no longer meets current security requirements. "
+                "Use Forgot Password to set a new password.",
+                "warning",
+            )
             return redirect(url_for("login_page"))
 
         set_session_for_user(user)
@@ -4290,6 +4627,61 @@ def user_management_reset_password(user_id):
     return redirect(url_for("user_management_page"))
 
 
+@app.route("/user-management/<user_id>/delete", methods=["POST"])
+@require_authenticated_form_csrf
+@require_login
+@require_role("super_admin")
+def user_management_delete_user(user_id):
+    store = get_user_store()
+    target = store.get_user(user_id)
+    actor = get_current_user()
+    if not target:
+        flash("User not found.", "error")
+        return redirect(url_for("user_management_page"))
+
+    actor_id = str(actor.get("id") or "") if actor else ""
+    target_id = str(target.get("id") or "")
+    if target_id == actor_id:
+        flash("You cannot delete your own account while signed in.", "error")
+        return redirect(url_for("user_management_page"))
+
+    if str(target.get("role", "")).lower() == "super_admin":
+        remaining_super_admins = [
+            user for user in store.list_users()
+            if str(user.get("id")) != target_id
+            and str(user.get("role", "")).lower() == "super_admin"
+            and bool(user.get("is_active", True))
+        ]
+        if not remaining_super_admins:
+            flash("At least one active Super Admin account must remain in the system.", "error")
+            return redirect(url_for("user_management_page"))
+
+    if target.get("is_active") and str(target.get("role", "")).lower() == "super_admin":
+        active_super_admins = [
+            user for user in store.list_users()
+            if str(user.get("role", "")).lower() == "super_admin"
+            and bool(user.get("is_active", True))
+        ]
+        if len(active_super_admins) <= 1:
+            flash("The last active Super Admin account cannot be deleted.", "error")
+            return redirect(url_for("user_management_page"))
+
+    destroyed_user = dict(target)
+    try:
+        deleted = store.delete_user(target_id)
+    except Exception as error:
+        app.logger.error("User account deletion failed (%s).", type(error).__name__)
+        flash("User could not be deleted. Please try again.", "error")
+        return redirect(url_for("user_management_page"))
+    if not deleted:
+        flash("User could not be deleted. Please try again.", "error")
+        return redirect(url_for("user_management_page"))
+
+    add_audit_log(actor_id, "user_deleted", f"Deleted user account {destroyed_user.get('username') or destroyed_user.get('full_name') or target_id}", target_id)
+    flash(f"User account '{destroyed_user.get('username') or destroyed_user.get('full_name') or 'Unknown'}' was removed.", "success")
+    return redirect(url_for("user_management_page"))
+
+
 @app.route("/user-management/<user_id>")
 @require_login
 @require_role("super_admin")
@@ -4328,6 +4720,7 @@ def trade_builder():
         current_user=get_current_user(),
         contract_values_csrf=csrf_token,
         trade_builder_csrf=trade_builder_csrf,
+        can_edit_contract_values=True,
     )
 
 
@@ -4590,7 +4983,15 @@ def _drawings_mutation_result(operation, *args):
     except DrawingMutationError as error:
         return None, _drawings_api_response({"error": str(error)}, error.status)
     except Exception as error:
-        app.logger.error("Drawings mutation failed (%s).", type(error).__name__)
+        try:
+            safe_error = type(error)()
+        except Exception:
+            safe_error = Exception()
+        app.logger.error(
+            "Drawings mutation failed (%s).",
+            type(error).__name__,
+            exc_info=(type(error), safe_error, error.__traceback__),
+        )
         return None, _drawings_api_response(
             {"error": "Unable to save the Drawings Library change."}, 503
         )
@@ -4809,7 +5210,16 @@ def _material_transactions_api_authorize(permission):
 def _material_master_api_error(error, action):
     if isinstance(error, MaterialMasterDataError):
         return _material_transactions_api_response({"error": str(error)}, error.status)
-    app.logger.error("Material master-data %s failed (%s).", action, type(error).__name__)
+    try:
+        safe_error = type(error)()
+    except Exception:
+        safe_error = Exception()
+    app.logger.error(
+        "Material master-data %s failed (%s).",
+        action,
+        type(error).__name__,
+        exc_info=(type(error), safe_error, error.__traceback__),
+    )
     return _material_transactions_api_response(
         {"error": f"Unable to {action} material master data. Please try again."}, 503
     )
@@ -4957,7 +5367,15 @@ def material_transaction_create_api(kind):
     except MaterialTransactionError as error:
         return _material_transactions_api_response({"error": str(error)}, error.status)
     except Exception as error:
-        app.logger.error("Material transaction creation failed (%s).", type(error).__name__)
+        try:
+            safe_error = type(error)()
+        except Exception:
+            safe_error = Exception()
+        app.logger.error(
+            "Material transaction creation failed (%s).",
+            type(error).__name__,
+            exc_info=(type(error), safe_error, error.__traceback__),
+        )
         return _material_transactions_api_response(
             {"error": "Unable to save the material transaction. Please try again."}, 503
         )
@@ -5010,14 +5428,39 @@ def building_cost_summary():
 @app.route("/labour-payments")
 @require_login
 def labour_payments():
+    user = get_current_user()
+    try:
+        can_edit_contract_values = _user_has_compiled_permission(
+            user, "contract_values.edit"
+        )
+    except Exception as error:
+        app.logger.error(
+            "Labour Payments contract authorization failed (%s).",
+            type(error).__name__,
+        )
+        return Response(
+            "Unable to verify contract permissions.",
+            status=503,
+            mimetype="text/plain",
+        )
+
+    contract_values_csrf = ""
+    if can_edit_contract_values:
+        contract_values_csrf = session.get("contract_values_csrf")
+        if not contract_values_csrf:
+            contract_values_csrf = secrets.token_urlsafe(32)
+            session["contract_values_csrf"] = contract_values_csrf
+
     csrf_token = session.get("labour_payments_csrf")
     if not csrf_token:
         csrf_token = secrets.token_urlsafe(32)
         session["labour_payments_csrf"] = csrf_token
     return render_template(
         "labour_payments.html",
-        current_user=get_current_user(),
+        current_user=user,
         labour_payments_csrf=csrf_token,
+        contract_values_csrf=contract_values_csrf,
+        can_edit_contract_values=can_edit_contract_values,
     )
 
 
@@ -5479,9 +5922,10 @@ def trade_item_api(trade_id):
     except TradeMutationError as error:
         return _trade_api_response({"error": str(error)}, error.status)
     except Exception as error:
-        app.logger.error("Trade mutation failed (%s).", type(error).__name__)
+        operation = "delete" if request.method == "DELETE" else "update"
+        app.logger.error("Trade %s failed (%s).", operation, type(error).__name__)
         return _trade_api_response(
-            {"error": "Unable to update the trade. Please try again."}, 503
+            {"error": f"Unable to {operation} the trade. Please try again."}, 503
         )
     if updated is None:
         return _trade_api_response({"error": "Trade not found."}, 404)
@@ -5819,6 +6263,61 @@ def _payment_advance_balance(transactions):
     return max(0.0, balance)
 
 
+def _payment_transaction_has_outstanding_inputs(transaction):
+    has_inputs = all(
+        field in transaction and transaction.get(field) not in (None, "")
+        for field in ("labourEarned", "advanceAdjustment", "amount")
+    )
+    if not has_inputs:
+        return False
+    try:
+        has_opening_balance = (
+            all(
+                _finite_stored_payment_number(transaction.get(field)) == 0
+                for field in ("labourEarned", "advanceAdjustment", "amount")
+            )
+            and _finite_stored_payment_number(transaction.get("outstandingBalance")) > 0
+        )
+    except PaymentMutationError:
+        return True
+    return not has_opening_balance
+
+
+def _recalculate_payment_outstanding_balances(transactions):
+    running_outstanding = 0.0
+    updated_transactions = list(transactions)
+    ordered_indices = sorted(
+        range(len(updated_transactions)),
+        key=lambda index: (
+            str(updated_transactions[index].get("date") or ""),
+            str(updated_transactions[index].get("createdAt") or ""),
+            index,
+        ),
+    )
+    for index in ordered_indices:
+        transaction = updated_transactions[index]
+        if transaction.get("type") != "labour_settlement":
+            continue
+        stored_outstanding = transaction.get("outstandingBalance")
+        if (
+            not _payment_transaction_has_outstanding_inputs(transaction)
+            and stored_outstanding not in (None, "")
+        ):
+            try:
+                running_outstanding = _finite_stored_payment_number(stored_outstanding)
+                continue
+            except PaymentMutationError:
+                pass
+        earned = _finite_stored_payment_number(transaction.get("labourEarned"))
+        adjustment = _finite_stored_payment_number(transaction.get("advanceAdjustment"))
+        paid = _finite_stored_payment_number(transaction.get("amount"))
+        running_outstanding = max(0.0, running_outstanding + earned - adjustment - paid)
+        updated_transaction = dict(transaction)
+        updated_transaction["outstandingBalance"] = running_outstanding
+        updated_transactions[index] = updated_transaction
+    return updated_transactions, running_outstanding
+
+
 def _payment_outstanding_balance(transactions):
     running_outstanding = 0.0
     for transaction in sorted(transactions, key=lambda item: str(item.get("date") or "")):
@@ -5879,6 +6378,7 @@ def _apply_payment_transaction_mutation(trade, action, transaction_id, payment_d
         if existing_index is None:
             raise PaymentMutationError("Payment transaction not found.", 404)
         removed = updated_transactions.pop(existing_index)
+        updated_transactions, _ = _recalculate_payment_outstanding_balances(updated_transactions)
         updated_trade = dict(trade)
         updated_trade["paymentTransactions"] = updated_transactions
         return updated_trade, updated_transactions, removed
@@ -5978,6 +6478,14 @@ def _apply_payment_transaction_mutation(trade, action, transaction_id, payment_d
         if any(item.get("id") == transaction_id for item in updated_transactions):
             raise PaymentMutationError("Unable to create a unique payment transaction.", 409)
         updated_transactions.append(updated_payment)
+
+    updated_transactions, _ = _recalculate_payment_outstanding_balances(updated_transactions)
+    if action == "edit":
+        updated_payment = updated_transactions[existing_index]
+    else:
+        updated_payment = next(
+            item for item in updated_transactions if item.get("id") == transaction_id
+        )
 
     updated_trade = dict(trade)
     updated_trade["paymentTransactions"] = updated_transactions
@@ -6184,7 +6692,9 @@ def _get_daily_record_for_date(date_value):
         return None
 
     try:
-        docs = get_daily_records_collection().where("date", "==", normalized_date).limit(1).stream()
+        docs = get_daily_records_collection().where(
+            filter=FieldFilter("date", "==", normalized_date)
+        ).limit(1).stream()
     except RuntimeError:
         return None
     for doc in docs:
@@ -6220,7 +6730,7 @@ def _build_daily_report_share_image_svg(date_value, report=None):
       <text x='90' y='240' fill='#facc15' font-family='Arial, Helvetica, sans-serif' font-size='28' font-weight='600' letter-spacing='2'>DAILY REPORT</text>
       <text x='90' y='320' fill='#f8fafc' font-family='Arial, Helvetica, sans-serif' font-size='70' font-weight='700'>{safe_date}</text>
       <text x='90' y='390' fill='#cbd5e1' font-family='Arial, Helvetica, sans-serif' font-size='34' font-weight='500'>{safe_activity}</text>
-      <text x='90' y='500' fill='#94a3b8' font-family='Arial, Helvetica, sans-serif' font-size='24'>Private-LAN daily report viewer</text>
+      <text x='90' y='500' fill='#94a3b8' font-family='Arial, Helvetica, sans-serif' font-size='24'>DAILY REPORT</text>
     </svg>"""
     return Response(svg, mimetype="image/svg+xml")
 
@@ -6292,12 +6802,20 @@ def _fetch_google_photos_page(url):
     headers = {"User-Agent": "MannatMoonEvidencePreview/1.0"}
     for redirect_number in range(GOOGLE_PHOTOS_MAX_REDIRECTS + 1):
         _validate_google_photos_url(current_url)
+        request_started_at = time.monotonic()
         response = requests.get(
             current_url,
             headers=headers,
             timeout=GOOGLE_PHOTOS_TIMEOUT,
             allow_redirects=False,
             stream=True,
+        )
+        response_status = getattr(response, "status_code", None)
+        app.logger.info(
+            "Google Photos extraction stage=html_http outcome=response elapsed_ms=%d status=%s redirect=%d",
+            round((time.monotonic() - request_started_at) * 1000),
+            response_status if isinstance(response_status, int) else "unavailable",
+            redirect_number,
         )
         try:
             if response.is_redirect or response.is_permanent_redirect:
@@ -6383,25 +6901,60 @@ def _is_allowed_photos_browser_url(url):
 
 
 def _extract_google_photos_image(url):
+    extraction_started_at = time.monotonic()
+    outcome = "no_image"
+    html_stage = "html_fetch"
     try:
+        html_started_at = time.monotonic()
         page_html = _fetch_google_photos_page(url)
+        app.logger.info(
+            "Google Photos extraction stage=html_fetch outcome=success elapsed_ms=%d",
+            round((time.monotonic() - html_started_at) * 1000),
+        )
+        html_stage = "html_parse"
         matches = re.findall(
             r"https://lh\d+\.googleusercontent\.com/pw/[A-Za-z0-9_-]+",
             page_html,
         )
         if matches:
-            direct_url = matches[0] + "=s0"
+            direct_url = matches[0] + "=w1200"
             _validate_google_photos_url(direct_url.split("=", 1)[0], image=True)
+            outcome = "success"
+            app.logger.info(
+                "Google Photos extraction stage=html_parse outcome=image_found match_count=%d",
+                len(matches),
+            )
+            app.logger.info(
+                "Google Photos extraction stage=complete outcome=success elapsed_ms=%d",
+                round((time.monotonic() - extraction_started_at) * 1000),
+            )
             return direct_url
-    except (requests.RequestException, ValueError, OSError):
-        pass
+        app.logger.info("Google Photos extraction stage=html_parse outcome=no_image match_count=0")
+    except (requests.RequestException, ValueError, OSError) as error:
+        response = getattr(error, "response", None)
+        status_code = getattr(response, "status_code", None)
+        app.logger.warning(
+            "Google Photos extraction stage=%s outcome=error elapsed_ms=%d status=%s error_type=%s",
+            html_stage,
+            round((time.monotonic() - locals().get("html_started_at", extraction_started_at)) * 1000),
+            status_code if isinstance(status_code, int) else "unavailable",
+            type(error).__name__,
+        )
 
     browser = None
     page = None
+    browser_stage = "browser_acquire"
+    browser_stage_started_at = time.monotonic()
     try:
         browser = browser_pool.get_browser()
         if not browser:
             raise RuntimeError("Google Photos preview service is busy.")
+        app.logger.info(
+            "Google Photos extraction stage=browser_acquire outcome=success elapsed_ms=%d",
+            round((time.monotonic() - browser_stage_started_at) * 1000),
+        )
+        browser_stage = "browser_navigation"
+        browser_stage_started_at = time.monotonic()
         page = browser.new_page()
         page.route(
             "**/*",
@@ -6421,11 +6974,31 @@ def _extract_google_photos_image(url):
             captured.append(image_url)
 
         page.on("response", response_handler)
-        page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        navigation_response = page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        status_code = getattr(navigation_response, "status", None)
+        app.logger.info(
+            "Google Photos extraction stage=browser_navigation outcome=complete elapsed_ms=%d status=%s",
+            round((time.monotonic() - browser_stage_started_at) * 1000),
+            status_code if isinstance(status_code, int) else "unavailable",
+        )
+        browser_stage = "browser_capture"
+        browser_stage_started_at = time.monotonic()
         page.wait_for_timeout(2000)
-        return f"{captured[-1]}=s0" if captured else None
+        outcome = "success" if captured else "no_image"
+        app.logger.info(
+            "Google Photos extraction stage=browser_capture outcome=%s elapsed_ms=%d image_count=%d",
+            outcome,
+            round((time.monotonic() - browser_stage_started_at) * 1000),
+            len(captured),
+        )
+        return f"{captured[-1]}=w1200" if captured else None
     except Exception as error:
-        app.logger.warning("Google Photos preview extraction failed (%s).", type(error).__name__)
+        app.logger.warning(
+            "Google Photos extraction stage=%s outcome=error elapsed_ms=%d error_type=%s",
+            browser_stage,
+            round((time.monotonic() - browser_stage_started_at) * 1000),
+            type(error).__name__,
+        )
         return None
     finally:
         try:
@@ -6434,6 +7007,11 @@ def _extract_google_photos_image(url):
         finally:
             if browser:
                 browser_pool.return_browser(browser)
+            app.logger.info(
+                "Google Photos extraction stage=complete outcome=%s elapsed_ms=%d",
+                outcome,
+                round((time.monotonic() - extraction_started_at) * 1000),
+            )
 
 
 def _google_photos_permission_denial(permission):
@@ -6569,7 +7147,11 @@ def get_daily_record_dates():
         return jsonify(error="A valid start and end date are required."), 400
 
     try:
-        records = get_daily_records_collection().where("date", ">=", start_date).where("date", "<=", end_date).stream()
+        records = get_daily_records_collection().where(
+            filter=FieldFilter("date", ">=", start_date)
+        ).where(
+            filter=FieldFilter("date", "<=", end_date)
+        ).stream()
         dates = {
             data.get("date")
             for record in records
@@ -6811,6 +7393,7 @@ def google_photos():
 @app.route("/extract-google-photos-url")
 @require_login
 def extract_google_photos_url():
+    request_started_at = time.monotonic()
     denied = _google_photos_permission_denial("google_photos.use")
     if denied:
         return denied
@@ -6818,16 +7401,48 @@ def extract_google_photos_url():
     try:
         _validate_google_photos_url(url)
     except ValueError as error:
-        return Response(str(error), status=400, mimetype="text/plain")
+        app.logger.warning(
+            "Google Photos extraction request status=400 elapsed_ms=%d",
+            round((time.monotonic() - request_started_at) * 1000),
+        )
+        response = jsonify(error=str(error))
+        response.status_code = 400
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
 
-    cached = get_cached_url(url)
-    if cached:
-        return Response(cached, mimetype="text/plain", headers={"Cache-Control": "private, no-store"})
-    direct_url = _extract_google_photos_image(url)
-    if not direct_url:
-        return Response("No Google Photos image found in the shared page.", status=502, mimetype="text/plain")
-    cache_url(url, direct_url)
-    return Response(direct_url, mimetype="text/plain", headers={"Cache-Control": "private, no-store"})
+    direct_url, cache_status = get_or_extract_google_photos_url(
+        url,
+        force_refresh=request.args.get("retry") == "1",
+    )
+    if direct_url:
+        app.logger.info(
+            "Google Photos extraction request status=200 cache=%s elapsed_ms=%d",
+            cache_status,
+            round((time.monotonic() - request_started_at) * 1000),
+        )
+        response = jsonify(url=direct_url)
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+    if cache_status == "wait_timeout":
+        app.logger.warning(
+            "Google Photos extraction request status=503 cache=wait_timeout elapsed_ms=%d",
+            round((time.monotonic() - request_started_at) * 1000),
+        )
+        response = jsonify(error="Google Photos preview extraction is still in progress. Retry shortly.")
+        response.status_code = 503
+        response.headers["Retry-After"] = "5"
+        response.headers["Cache-Control"] = "private, no-store"
+        return response
+
+    app.logger.warning(
+        "Google Photos extraction request status=502 cache=%s elapsed_ms=%d",
+        cache_status,
+        round((time.monotonic() - request_started_at) * 1000),
+    )
+    response = jsonify(error="No Google Photos image preview was found in the shared page.")
+    response.status_code = 502
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @app.route("/image")

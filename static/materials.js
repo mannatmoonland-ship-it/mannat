@@ -141,6 +141,14 @@ function supplierProvidesCategory(supplier, categoryId) {
   return categoryBrandAssignments(supplier).some(assignment => assignment.categoryId === categoryId);
 }
 
+function supplierCategoryAssignmentLabel(assignment) {
+  const names = assignment.brandIds
+    .map(brandId => categoryBrands(categories.find(category => category.id === assignment.categoryId) || { id: assignment.categoryId })
+      .find(brand => brand.id === brandId)?.name)
+    .filter(Boolean);
+  return `${categoryName(assignment.categoryId)}: ${names.join(", ") || "Category only (no brand or quarry restriction)"}`;
+}
+
 function transactionCategoryId(transaction) {
   if (transaction.categoryId) return transaction.categoryId;
   return materials.find(material => material.id === transaction.materialId)?.categoryId || "";
@@ -302,7 +310,7 @@ function renderSuppliers() {
           <button type="button" class="drawings-action small danger" data-action="delete-supplier" data-id="${escapeAttribute(supplier.id)}">Delete</button>
         </div>
       </div>
-      <div class="material-summary"><span>Contact: ${escapeHtml(supplier.contactPerson || "-")}</span><span>Phone: ${escapeHtml(supplier.primaryPhone)}</span><span>Email: ${escapeHtml(supplier.email || "-")}</span><span>Categories / Brands: ${escapeHtml(categoryBrandAssignments(supplier).map(assignment => `${categoryName(assignment.categoryId)}: ${assignment.brandIds.map(brandId => categoryBrands(categories.find(category => category.id === assignment.categoryId) || { id: assignment.categoryId }).find(brand => brand.id === brandId)?.name).filter(Boolean).join(", ")}`).join("; ") || "None assigned")}</span></div>
+      <div class="material-summary"><span>Contact: ${escapeHtml(supplier.contactPerson || "-")}</span><span>Phone: ${escapeHtml(supplier.primaryPhone)}</span><span>Email: ${escapeHtml(supplier.email || "-")}</span><span>Categories / Brands: ${escapeHtml(categoryBrandAssignments(supplier).map(supplierCategoryAssignmentLabel).join("; ") || "None assigned")}</span></div>
     </article>`).join("");
 }
 
@@ -611,7 +619,6 @@ async function savePurchase(event) {
     const payload = {
       date: fields.date,
       categoryId: category.id,
-      categoryName: category.name,
       brandId: brand?.id || (priorPurchase && transactionCategoryId(priorPurchase) === category.id ? priorPurchase.brandId || "" : ""),
       brand: brand?.name || (priorPurchase && transactionCategoryId(priorPurchase) === category.id ? priorPurchase.brand || "" : ""),
       supplierId: supplier?.id || "",
@@ -676,7 +683,6 @@ async function saveConsumption(event) {
     const payload = {
       date: fields.date,
       categoryId: category.id,
-      categoryName: category.name,
       quantity,
       unit: categoryUnit(category),
       workLocation: fields.workLocation.trim(),
@@ -793,7 +799,9 @@ async function sendMaterialMasterMutation(path, method, payload) {
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(result.error || `Material master-data request failed (${response.status}).`);
+    const error = new Error(result.error || `Material master-data request failed (${response.status}).`);
+    error.safeApiMessage = true;
+    throw error;
   }
   return result;
 }
@@ -880,7 +888,12 @@ async function deleteCategory(category) {
     await loadData();
   } catch (error) {
     console.error("Unable to delete material category:", error);
-    setStatus("Unable to delete category. Check the connection and try again.", true);
+    setStatus(
+      error.safeApiMessage
+        ? error.message
+        : "Unable to delete category. Check the connection and try again.",
+      true
+    );
   }
 }
 
@@ -905,8 +918,11 @@ async function saveSupplier(event) {
     setStatus("Assign at least one valid material category to this supplier.", true);
     return;
   }
-  if (categoryBrandAssignments.some(assignment => !assignment.brandIds.length
-    || assignment.brandIds.some(brandId => !categoryBrands(categories.find(category => category.id === assignment.categoryId)).some(brand => brand.id === brandId)))) {
+  if (categoryBrandAssignments.some(assignment => {
+    const options = categoryBrands(categories.find(category => category.id === assignment.categoryId));
+    return (options.length > 0 && !assignment.brandIds.length)
+      || assignment.brandIds.some(brandId => !options.some(brand => brand.id === brandId));
+  })) {
     setStatus("Select at least one valid brand or quarry for each assigned category.", true);
     return;
   }
@@ -955,7 +971,7 @@ async function saveSupplier(event) {
     await loadData();
   } catch (error) {
     console.error("Unable to save supplier:", error);
-    setStatus("Unable to save supplier. Check the connection and try again.", true);
+    setStatus(error?.safeApiMessage ? error.message : "Unable to save supplier. Check the connection and try again.", true);
   } finally {
     saving = false;
   }
@@ -964,10 +980,7 @@ async function saveSupplier(event) {
 async function viewSupplier(supplier) {
   $("materialDetailsTitle").textContent = supplier.name;
   const details = [
-    ["Categories and Brands / Quarries", categoryBrandAssignments(supplier).map(assignment => {
-      const names = assignment.brandIds.map(brandId => categoryBrands(categories.find(category => category.id === assignment.categoryId) || { id: assignment.categoryId }).find(brand => brand.id === brandId)?.name).filter(Boolean);
-      return `${categoryName(assignment.categoryId)}: ${names.join(", ")}`;
-    }).join("; ")],
+    ["Categories and Brands / Quarries", categoryBrandAssignments(supplier).map(supplierCategoryAssignmentLabel).join("; ")],
     ["Contact Person", supplier.contactPerson], ["Shop / Business Address", supplier.address],
     ["City", supplier.city], ["State", supplier.state], ["PIN Code", supplier.pinCode],
     ["Primary Phone", supplier.primaryPhone], ["Secondary Phone", supplier.secondaryPhone],

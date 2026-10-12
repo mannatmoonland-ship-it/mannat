@@ -83,9 +83,15 @@ const DailyReports = (function() {
   // Debounce timer for URL input
   let previewDebounceTimer = null;
   const PREVIEW_DEBOUNCE_MS = 800;
-  
-  // Track pending requests to cancel them when URL changes
-  const pendingRequests = new Map();
+  const GOOGLE_PHOTOS_EXTRACTION_TIMEOUT_MS = 15000;
+  const GOOGLE_PHOTOS_PREVIEW_WAIT_TIMEOUT_MS = 15000;
+  const GOOGLE_PHOTOS_SUCCESS_CACHE_MS = 6 * 60 * 60 * 1000;
+  const GOOGLE_PHOTOS_FAILURE_CACHE_MS = 30000;
+  const GOOGLE_PHOTOS_MAX_CONCURRENT_EXTRACTIONS = 3;
+  const googlePhotosExtractionCache = new Map();
+  const googlePhotosExtractionQueue = [];
+  let activeGooglePhotosExtractions = 0;
+  let googlePhotosPreviewObserver = null;
 
   $("dr-date").value = selectedDate;
   $("dr-selectedDateLabel").textContent = formatSelectedDate(selectedDate);
@@ -557,9 +563,12 @@ const DailyReports = (function() {
   function getDriveImageCandidates(url) {
     const id = driveId(String(url || ""));
     if (!id) return [];
+    const encoded = encodeURIComponent(id);
     return [
-      `https://drive.google.com/thumbnail?id=${encodeURIComponent(id)}&sz=w1600`,
-      `https://drive.google.com/uc?export=view&id=${encodeURIComponent(id)}`
+      `https://lh3.googleusercontent.com/d/${encoded}=w1600`,
+      `https://lh3.googleusercontent.com/d/${encoded}`,
+      `https://drive.google.com/thumbnail?id=${encoded}&sz=w1600`,
+      `https://drive.google.com/uc?export=view&id=${encoded}`
     ];
   }
 
@@ -576,46 +585,177 @@ const DailyReports = (function() {
     }
   }
 
-  function getGooglePhotosDirectUrl(photosUrl, signal = null) {
-    const fetchOptions = {};
-    if (signal) {
-      fetchOptions.signal = signal;
+  function isGooglePhotosPreviewUrl(value) {
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:"
+        && /^lh\d+\.googleusercontent\.com$/i.test(url.hostname)
+        && url.pathname.startsWith("/pw/");
+    } catch (error) {
+      return false;
     }
-    
-    return fetch(`/extract-google-photos-url?url=${encodeURIComponent(photosUrl)}`, fetchOptions)
-      .then(response => {
-        if (response.ok) {
-          return response.text();
-        } else if (response.status === 500) {
-          // Playwright error - return null to show fallback
-          console.error("Google Photos extraction returned 500 error");
-          return null;
-        } else {
-          console.error("Google Photos extraction returned status:", response.status);
-          return null;
-        }
-      })
-      .then(text => {
-        // Validate the returned URL
-        if (text && text.startsWith("http")) {
-          // Fix protocol if malformed
-          if (text.startsWith("https:/") && !text.startsWith("https://")) {
-            text = text.replace("https:/", "https://", 1);
-          }
-          console.log("Google Photos direct URL obtained:", text.substring(0, 80) + "...");
-          return text;
-        }
-        console.error("Invalid Google Photos URL returned:", text);
-        return null;
-      })
-      .catch(e => {
-        if (e.name === 'AbortError') {
-          console.log("Google Photos extraction request cancelled");
-          throw e; // Re-throw AbortError to handle it properly
-        }
-        console.error("Failed to extract Google Photos URL:", e);
-        return null;
+  }
+
+  async function requestGooglePhotosDirectUrl(photosUrl, retry = false) {
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, GOOGLE_PHOTOS_EXTRACTION_TIMEOUT_MS);
+
+    try {
+      const retryQuery = retry ? "&retry=1" : "";
+      const response = await fetch(`/extract-google-photos-url?url=${encodeURIComponent(photosUrl)}${retryQuery}`, {
+        signal: controller.signal
       });
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        console.error("Google Photos extraction returned an invalid response.");
+        return null;
+      }
+      if (!response.ok) {
+        console.warn("Google Photos extraction returned status:", response.status);
+        return null;
+      }
+      if (!isGooglePhotosPreviewUrl(payload?.url)) {
+        console.warn("Google Photos extraction did not return a supported image preview.");
+        return null;
+      }
+      return payload.url;
+    } catch (error) {
+      if (error.name === "AbortError" && timedOut) {
+        console.warn("Google Photos extraction timed out.");
+        return null;
+      }
+      console.error("Google Photos extraction request failed:", error.name || "unknown error");
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  function startQueuedGooglePhotosExtractions() {
+    while (
+      activeGooglePhotosExtractions < GOOGLE_PHOTOS_MAX_CONCURRENT_EXTRACTIONS
+      && googlePhotosExtractionQueue.length
+    ) {
+      const { photosUrl, retry, cacheEntry, resolve } = googlePhotosExtractionQueue.shift();
+      activeGooglePhotosExtractions += 1;
+      requestGooglePhotosDirectUrl(photosUrl, retry).then(directUrl => {
+        if (googlePhotosExtractionCache.get(photosUrl) === cacheEntry) {
+          cacheEntry.promise = null;
+          cacheEntry.directUrl = directUrl;
+          cacheEntry.expiresAt = directUrl
+            ? Date.now() + GOOGLE_PHOTOS_SUCCESS_CACHE_MS
+            : Date.now() + GOOGLE_PHOTOS_FAILURE_CACHE_MS;
+        }
+        resolve(directUrl);
+      }).finally(() => {
+        activeGooglePhotosExtractions -= 1;
+        startQueuedGooglePhotosExtractions();
+      });
+    }
+  }
+
+  function getGooglePhotosDirectUrl(photosUrl, { retry = false } = {}) {
+    const cached = googlePhotosExtractionCache.get(photosUrl);
+    if (cached?.promise) return cached.promise;
+    if (!retry && cached?.directUrl && Date.now() < cached.expiresAt) {
+      return Promise.resolve(cached.directUrl);
+    }
+    if (!retry && cached && Date.now() < cached.expiresAt) return Promise.resolve(null);
+    if (cached) googlePhotosExtractionCache.delete(photosUrl);
+
+    let resolveRequest;
+    const promise = new Promise(resolve => {
+      resolveRequest = resolve;
+    });
+    const cacheEntry = { promise, directUrl: null, expiresAt: 0 };
+    googlePhotosExtractionCache.set(photosUrl, cacheEntry);
+    googlePhotosExtractionQueue.push({ photosUrl, retry, cacheEntry, resolve: resolveRequest });
+    startQueuedGooglePhotosExtractions();
+    return promise;
+  }
+
+  function showGooglePhotosPreviewError(loadingEl) {
+    const photosUrl = loadingEl.dataset.photosUrl;
+    loadingEl.dataset.previewState = "failed";
+    loadingEl.innerHTML = `<div class="dr-preview-error">Google Photos preview unavailable. Retry or open the original.
+      <button type="button" class="dr-google-photos-retry">Retry preview</button>
+      <a href="${escapeHtml(photosUrl)}" target="_blank" rel="noopener">Open original</a>
+    </div>`;
+  }
+
+  function renderGooglePhotosPreview(loadingEl, directUrl) {
+    const image = document.createElement("img");
+    image.alt = "Photo preview";
+    image.className = "dr-ev-img";
+    image.loading = "lazy";
+    image.decoding = "async";
+    image.referrerPolicy = "no-referrer";
+    image.addEventListener("error", () => {
+      const cached = googlePhotosExtractionCache.get(loadingEl.dataset.photosUrl);
+      if (cached && !cached.promise) {
+        cached.directUrl = null;
+        cached.expiresAt = Date.now() + GOOGLE_PHOTOS_FAILURE_CACHE_MS;
+      }
+      showGooglePhotosPreviewError(loadingEl);
+    }, { once: true });
+    loadingEl.dataset.previewState = "loaded";
+    loadingEl.replaceChildren(image);
+    image.src = directUrl;
+  }
+
+  function loadGooglePhotosPreview(loadingEl, { retry = false } = {}) {
+    if (!loadingEl.isConnected || loadingEl.dataset.previewState === "loading") return;
+    loadingEl.dataset.previewState = "loading";
+    loadingEl.textContent = retry ? "Retrying Google Photos preview..." : "Loading Google Photos preview...";
+    const waitTimeout = setTimeout(() => {
+      if (loadingEl.isConnected && loadingEl.dataset.previewState === "loading") {
+        showGooglePhotosPreviewError(loadingEl);
+      }
+    }, GOOGLE_PHOTOS_PREVIEW_WAIT_TIMEOUT_MS);
+    getGooglePhotosDirectUrl(loadingEl.dataset.photosUrl, { retry }).then(directUrl => {
+      clearTimeout(waitTimeout);
+      if (!loadingEl.isConnected || loadingEl.dataset.previewState !== "loading") return;
+      if (directUrl) {
+        renderGooglePhotosPreview(loadingEl, directUrl);
+      } else {
+        showGooglePhotosPreviewError(loadingEl);
+      }
+    });
+  }
+
+  function observeGooglePhotosPreviews(root) {
+    const loadingElements = root.querySelectorAll(".dr-ev-preview-loading");
+    if (!("IntersectionObserver" in window)) {
+      loadingElements.forEach(loadingEl => loadGooglePhotosPreview(loadingEl));
+      return;
+    }
+    if (!googlePhotosPreviewObserver) {
+      googlePhotosPreviewObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (!entry.isIntersecting) {
+            if (!entry.target.isConnected) googlePhotosPreviewObserver.unobserve(entry.target);
+            return;
+          }
+          googlePhotosPreviewObserver.unobserve(entry.target);
+          loadGooglePhotosPreview(entry.target);
+        });
+      }, { rootMargin: "400px 0px" });
+    }
+    loadingElements.forEach(loadingEl => googlePhotosPreviewObserver.observe(loadingEl));
+  }
+
+  function retryGooglePhotosPreview(event) {
+    const button = event.target.closest(".dr-google-photos-retry");
+    const loadingEl = button?.closest(".dr-ev-preview-loading");
+    if (!loadingEl) return;
+
+    loadGooglePhotosPreview(loadingEl, { retry: true });
   }
 
   function youtubePreviewHtml(videoId){
@@ -633,18 +773,30 @@ const DailyReports = (function() {
     const y = youtubeId(url);
     if(y) return youtubePreviewHtml(y);
     const d = driveId(url);
-    if(d && type==="Photo") return `<iframe src="https://drive.google.com/file/d/${d}/preview"></iframe>`;
+    if(d && type==="Photo"){
+      const candidates = getDriveImageCandidates(url);
+      const primaryUrl = candidates[0] || url;
+      const fallbackUrls = candidates.slice(1);
+      return `<img src="${escapeHtml(primaryUrl)}"
+        data-fallbacks="${escapeHtml(fallbackUrls.join(','))}"
+        referrerpolicy="no-referrer"
+        alt="Photo preview"
+        class="dr-ev-img"
+        loading="lazy"
+        onerror="if(this.dataset.fallbacks){const f=this.dataset.fallbacks.split(',');this.src=f.shift();this.dataset.fallbacks=f.join(',');}else{this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='block';}">
+        <div class="dr-preview-error" style="display:none;">Photo preview unavailable. Make sure link sharing is set to &quot;Anyone with the link&quot;. <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open in Google Drive</a></div>`;
+    }
     if(d) return `<iframe src="https://drive.google.com/file/d/${d}/preview"></iframe>`;
     
     // Google Photos handling - return placeholder that will be updated asynchronously
     if(type==="Photo" && isGooglePhotosUrl(url)){
-      return `<div class="dr-ev-preview-loading" data-photos-url="${escapeHtml(url)}">Loading Google Photos preview...</div>`;
+      return `<div class="dr-ev-preview-loading" data-photos-url="${escapeHtml(url)}" aria-live="polite">Loading Google Photos preview...</div>`;
     }
     
     // For other photos, try direct image display
     if(type==="Photo"){
-      return `<img src="${escapeHtml(url)}" alt="Photo preview" class="dr-ev-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-              <div class="dr-preview-error" style="display:none;">Photo preview unavailable</div>`;
+      return `<img src="${escapeHtml(url)}" referrerpolicy="no-referrer" alt="Photo preview" class="dr-ev-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+              <div class="dr-preview-error" style="display:none;">Photo preview unavailable. <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open original</a></div>`;
     }
 
     if(String(type || "").toLowerCase() === "video"){
@@ -776,43 +928,7 @@ const DailyReports = (function() {
       ));
       
       $("dr-livePreview").innerHTML = previews.join("");
-      
-      // Cancel any pending requests for this preview update
-      pendingRequests.forEach((controller, key) => {
-        controller.abort();
-        pendingRequests.delete(key);
-      });
-      
-      // Load Google Photos previews asynchronously
-      document.querySelectorAll("#dr-livePreview .dr-ev-preview-loading").forEach(loadingEl => {
-        const photosUrl = loadingEl.dataset.photosUrl;
-        const requestId = `preview-${photosUrl}`;
-        
-        // Create AbortController for this request
-        const controller = new AbortController();
-        pendingRequests.set(requestId, controller);
-        
-        getGooglePhotosDirectUrl(photosUrl, controller.signal).then(directUrl => {
-          // Check if request wasn't cancelled
-          if (!controller.signal.aborted) {
-            pendingRequests.delete(requestId);
-            if(directUrl){
-              loadingEl.innerHTML = `<img src="${escapeHtml(directUrl)}" alt="Photo preview" class="dr-ev-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-              <div class="dr-preview-error" style="display:none;">Photo preview unavailable</div>`;
-            } else {
-              loadingEl.innerHTML = `<div class="dr-preview-error">Unable to load Google Photos preview</div>`;
-            }
-          }
-        }).catch(err => {
-          if (err.name !== 'AbortError') {
-            console.error("Google Photos preview error:", err);
-            pendingRequests.delete(requestId);
-            if (!controller.signal.aborted) {
-              loadingEl.innerHTML = `<div class="dr-preview-error">Unable to load Google Photos preview</div>`;
-            }
-          }
-        });
-      });
+      observeGooglePhotosPreviews($("dr-livePreview"));
     } else {
       $("dr-livePreview").innerHTML = "Paste a YouTube, Google Drive, or Google Photos link above.";
     }
@@ -1125,6 +1241,7 @@ const DailyReports = (function() {
 
     const googleDriveId = driveId(url);
     if (googleDriveId) {
+      candidates.push(`https://lh3.googleusercontent.com/d/${encodeURIComponent(googleDriveId)}`);
       candidates.push(`https://drive.google.com/thumbnail?id=${encodeURIComponent(googleDriveId)}&sz=w1000`);
     }
 
@@ -1196,6 +1313,7 @@ const DailyReports = (function() {
         resolve(loaded);
       };
       const timeout = setTimeout(() => finish(false), 10000);
+      img.referrerPolicy = "no-referrer";
       img.onload = () => finish(true);
       img.onerror = () => finish(false);
       img.src = source;
@@ -1270,10 +1388,13 @@ const DailyReports = (function() {
           const label = item.title || item.type || "Evidence";
             const evidenceIndex = index + itemIndex;
             const videoLabel = isVideoEvidence(item) ? "VIDEO" : "";
-            const initialThumbnail = isVideoEvidence(item) ? getVideoThumbnailUrl(item) : imgUrl;
+            const driveCandidates = item.type === "Photo" ? getDriveImageCandidates(imgUrl) : [];
+            const initialThumbnail = isVideoEvidence(item)
+              ? getVideoThumbnailUrl(item)
+              : (driveCandidates.length ? driveCandidates[0] : imgUrl);
           return `<figure class="dr-print-evidence-item">
             <div class="dr-print-evidence-thumb">
-                <img src="${escapeHtml(initialThumbnail || "")}" data-evidence-index="${evidenceIndex}" data-evidence-type="${escapeHtml(item.type || "")}" alt="${escapeHtml(label)}" />
+                <img src="${escapeHtml(initialThumbnail || "")}" referrerpolicy="no-referrer" data-evidence-index="${evidenceIndex}" data-evidence-type="${escapeHtml(item.type || "")}" alt="${escapeHtml(label)}" />
                 <div class="dr-print-evidence-fallback" style="display:none;">${isVideoEvidence(item) ? "Video thumbnail unavailable" : "Image unavailable"}</div>
             </div>
               <figcaption>${escapeHtml(label)}${videoLabel ? ` <span class="dr-print-video-label">${videoLabel}</span>` : ""}</figcaption>
@@ -1724,21 +1845,7 @@ const DailyReports = (function() {
     $("dr-evidenceCount").textContent=evidenceCount;
     setDataStatus(recordCount ? `Loaded ${recordCount} Daily Report${recordCount === 1 ? "" : "s"} for this date.` : "Data loaded successfully. No Daily Reports exist for this date.");
 
-    // Load async previews after HTML is rendered
-    document.querySelectorAll(".dr-ev-preview-loading").forEach(loadingEl => {
-      const photosUrl = loadingEl.dataset.photosUrl;
-      getGooglePhotosDirectUrl(photosUrl).then(directUrl => {
-        if(directUrl){
-          loadingEl.innerHTML = `<img src="${escapeHtml(directUrl)}" alt="Photo preview" class="dr-ev-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
-          <div class="dr-preview-error" style="display:none;">Photo preview unavailable</div>`;
-        } else {
-          loadingEl.innerHTML = `<div class="dr-preview-error">Unable to load Google Photos preview - <a href="${escapeHtml(photosUrl)}" target="_blank">Open original</a></div>`;
-        }
-      }).catch(err => {
-        console.error("Google Photos preview error in loadRecords:", err);
-        loadingEl.innerHTML = `<div class="dr-preview-error">Unable to load Google Photos preview - <a href="${escapeHtml(photosUrl)}" target="_blank">Open original</a></div>`;
-      });
-    });
+    observeGooglePhotosPreviews($("dr-records"));
   }
 
   // Initialize event listeners
@@ -1754,6 +1861,8 @@ const DailyReports = (function() {
     // Button listeners
     $("dr-records").addEventListener("click", activateYouTubePreview);
     $("dr-livePreview").addEventListener("click", activateYouTubePreview);
+    $("dr-records").addEventListener("click", retryGooglePhotosPreview);
+    $("dr-livePreview").addEventListener("click", retryGooglePhotosPreview);
     $("dr-addBtn").onclick = openAddModal;
     $("dr-prevDay").onclick = () => moveSelectedDate(-1);
     $("dr-nextDay").onclick = () => moveSelectedDate(1);

@@ -190,6 +190,10 @@
                                     <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
                                     <button type="submit" class="danger">Reset Password</button>
                                 </form>
+                                <form method="post" action="{{ url_for('user_management_delete_user', user_id=user.id) }}" data-confirm="Delete this user account? This action cannot be undone.">
+                                    <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
+                                    <button type="submit" class="danger">Delete</button>
+                                </form>
                             </td>
                         </tr>
                     {% endfor %}

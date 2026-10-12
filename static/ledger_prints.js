@@ -1,11 +1,15 @@
-import { downloadLedgerPDF, workerCategories } from "./ledger_pdf.js";
-import { calculateAdvanceBalance } from "./settlement_logic.mjs";
 import {
-  totalPaymentAmount,
-  uniquePaymentTransactions
-} from "./trade_payment_history.mjs";
-import { calculateContractPaymentSummary } from "./contract_payment_summary.mjs";
+  downloadLedgerPDF,
+  paymentLedgerSummary,
+  workerCategories
+} from "./ledger_pdf.js";
+import { uniquePaymentTransactions } from "./trade_payment_history.mjs";
+import { sortPaymentTransactions } from "./payment_sort.mjs";
 import { formatDate as formatDisplayDate, formatDateWithDay } from "./date_format.js";
+import {
+  calculateOutstandingBalanceAfterTransaction,
+  calculateOutstandingLabourBalance
+} from "./settlement_logic.mjs";
 import { LEGACY_OWNER_ACCOUNT_DOCUMENT_ID } from "./owner_scope_constants.mjs";
 import {
   describeFirebaseError,
@@ -13,6 +17,7 @@ import {
   getFirebaseApp,
   getFirebaseFirestoreSdk
 } from "./firebase_auth.js";
+import { registerEscClose, unregisterEscClose } from "./dialogs.js";
 
 let db = null;
 let firestoreSdk = null;
@@ -42,6 +47,7 @@ const modalTitle = document.getElementById("ledgerModalTitle");
 const preview = document.getElementById("ledgerPreview");
 let trades = [];
 let selectedTrade = null;
+let modalOpener = null;
 const canEditLedger = document.body.dataset.canEditLedger === "true";
 
 function escapeHtml(value) {
@@ -73,6 +79,14 @@ function showStatus(message, type = "normal") {
   status.className = `ledger-status ${type === "error" ? "error-state" : ""}`;
 }
 
+function closeLedgerModal() {
+  unregisterEscClose(modal);
+  modal.hidden = true;
+  const opener = modalOpener;
+  modalOpener = null;
+  if (opener?.isConnected) opener.focus();
+}
+
 function renderTrades() {
   const query = search.value.trim().toLowerCase();
   const visibleTrades = trades.filter(trade => String(trade.name || "").toLowerCase().includes(query));
@@ -94,11 +108,45 @@ function renderTrades() {
   }).join("");
 }
 
-function paymentHistoryTable(transactions) {
-  const rows = transactions.length
-    ? transactions.map(item => `<tr><td>${escapeHtml(formatDate(item.date))}</td><td>${escapeHtml(paymentTypeLabel(item.type))}</td><td>${escapeHtml(item.workerCategoryName || "")}</td><td class="number">${money(item.amount)}</td><td>${escapeHtml(item.paymentMode)}</td><td>${escapeHtml(item.remarks)}</td></tr>`).join("")
-    : `<tr><td colspan="6">No payment transactions recorded.</td></tr>`;
-  return `<h3>Payment History</h3><table class="preview-table"><thead><tr><th>Date</th><th>Payment Type</th><th>Worker Category</th><th class="number">Amount</th><th>Payment Mode</th><th>Remarks</th></tr></thead><tbody>${rows}</tbody></table>`;
+function paymentHistoryTable(transactions, tradeName) {
+  const orderedTransactions = sortPaymentTransactions(transactions);
+  const chronologicalTransactions = [...orderedTransactions].reverse();
+  const rows = orderedTransactions.length
+    ? orderedTransactions.map(item => {
+      let pendingLabourPayment = "-";
+      if (item.type === "labour_settlement") {
+        const outstandingBalance = item.id
+          ? calculateOutstandingBalanceAfterTransaction(transactions, item.id)
+          : calculateOutstandingLabourBalance(
+            chronologicalTransactions.slice(
+              0,
+              chronologicalTransactions.indexOf(item) + 1
+            )
+          );
+        pendingLabourPayment = money(outstandingBalance);
+      }
+
+      const tradeAndCategory = [tradeName, item.workerCategoryName]
+        .filter(value => String(value || "").trim())
+        .map(escapeHtml)
+        .join("<br>");
+      const paymentModeAndReference = [item.paymentMode, item.remarks]
+        .filter(value => String(value || "").trim())
+        .map(escapeHtml)
+        .join("<br>");
+
+      return `<tr>
+        <td>${escapeHtml(formatDate(item.date))}<br>${escapeHtml(paymentTypeLabel(item.type))}</td>
+        <td>${tradeAndCategory}</td>
+        <td class="number">${item.type === "labour_settlement" ? money(item.labourEarned) : "-"}</td>
+        <td class="number">${item.type === "labour_settlement" ? money(item.advanceAdjustment) : "-"}</td>
+        <td class="number">${money(item.amount)}</td>
+        <td class="number">${pendingLabourPayment}</td>
+        <td>${paymentModeAndReference}</td>
+      </tr>`;
+    }).join("")
+    : `<tr><td colspan="7">No payment transactions recorded.</td></tr>`;
+  return `<h3>Payment History</h3><div class="payment-history-table-wrap"><table class="preview-table payment-history-table"><thead><tr><th>Date / Type</th><th>Trade / Worker Category</th><th class="number">Labour Earned</th><th class="number">Advance Deduction</th><th class="number">Amount Paid</th><th class="number">Pending Labour Payment</th><th>Payment Mode / Reference</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function renderPreview(trade) {
@@ -106,22 +154,35 @@ function renderPreview(trade) {
   const workers = workerCategories(trade);
   const contracts = Array.isArray(trade.contractItems) ? trade.contractItems : [];
   const transactions = uniquePaymentTransactions(trade.paymentTransactions);
-  const { contractTotal: contractValue, contractPayments: paid } = calculateContractPaymentSummary(contracts, transactions);
-  const lumpPaid = transactions.filter(item => item.type === "lump_sum_payment").reduce((total, item) => total + Number(item.amount || 0), 0);
+  const summary = paymentLedgerSummary(trade);
   modalTitle.textContent = `${trade.name || "Trade"} Ledger`;
   preview.innerHTML = `<div class="preview-meta">
     <div><strong>Trade</strong>${escapeHtml(trade.name || "Unnamed trade")}</div>
-    <div><strong>Contract Value</strong>${money(contractValue)}</div>
-    <div><strong>Payments Against Contract</strong>${money(paid)}</div>
-    <div><strong>Total Paid</strong>${money(totalPaymentAmount(transactions))}</div>
-    <div><strong>Lump-Sum Payments</strong>${money(lumpPaid)}</div>
-    <div><strong>Advance Balance</strong>${money(calculateAdvanceBalance(transactions))}</div>
+  </div>
+  <h3>Contract Account</h3>
+  <div class="preview-meta">
+    <div><strong>Total Contract Value</strong>${money(summary.contractValue)}</div>
+    <div><strong>Total Payments Counted Against Contract</strong>${money(summary.contractPayments)}</div>
+    <div><strong>Remaining Contract Value</strong>${money(summary.balanceContractValue)}</div>
+    <div><strong>Contract Paid</strong>${summary.paidPercentage.toFixed(2)}%</div>
+    <div><strong>Contract Remaining</strong>${summary.remainingPercentage.toFixed(2)}%</div>
+  </div>
+  <div class="preview-meta contract-payment-breakdown" aria-label="Contract payment breakdown">
+    ${summary.contractPaymentBreakdown.map(category => `<div><strong>${escapeHtml(category.label)}</strong>${money(category.amount)}</div>`).join("")}
+  </div>
+  <h3>Labour Account</h3>
+  <div class="preview-meta">
+    <div><strong>Total Labour Earned</strong>${money(summary.labourEarned)}</div>
+    <div><strong>Total Advances Issued (Lifetime)</strong>${money(summary.labourAdvances)}</div>
+    <div><strong>Less: Total Advance Recovered</strong>${money(summary.advanceDeductions)}</div>
+    <div><strong>Current Advance Balance to Recover</strong>${money(summary.advanceBalance)}</div>
   </div>
   <h3>Worker Categories</h3>
   ${workers.length ? `<table class="preview-table"><thead><tr><th>Category</th><th>Payment Type</th><th>Amount</th><th>Total Paid</th><th>Remaining</th><th>Effective From</th><th>Work Description</th></tr></thead><tbody>${workers.map(worker => { const totals = worker.payment_type === "lump_sum" ? lumpSumTotals(worker, transactions) : null; return `<tr><td>${escapeHtml(worker.name)}</td><td>${worker.payment_type === "lump_sum" ? "Lump Sum" : "Daily Wage"}</td><td class="number">${money(worker.payment_type === "lump_sum" ? worker.lump_sum_amount : worker.currentWage)}${worker.payment_type === "daily_wage" ? " / day" : ""}</td><td>${totals ? money(totals.totalPaid) : "-"}</td><td>${totals ? money(totals.remainingBalance) : "-"}</td><td>${escapeHtml(formatDateWithDay(worker.effective_from || worker.effectiveFrom || "-"))}</td><td>${escapeHtml(worker.work_description || "")}</td></tr>`; }).join("")}</tbody></table>` : `<div class="empty-state">No worker categories recorded.</div>`}
   ${contracts.length ? `<h3>Work Contracts / Capping</h3><table class="preview-table"><thead><tr><th>Contract Item</th><th class="number">Amount</th></tr></thead><tbody>${contracts.map(item => `<tr><td>${escapeHtml(item.name)}</td><td class="number">${money(item.amount)}</td></tr>`).join("")}</tbody></table>` : ""}
-  ${paymentHistoryTable(transactions)}`;
+  ${paymentHistoryTable(transactions, trade.name || "")}`;
   modal.hidden = false;
+  registerEscClose(modal, closeLedgerModal);
 }
 
 function renderEditForm(trade) {
@@ -186,7 +247,9 @@ async function saveLedgerEdits(event) {
     );
     const contractResult = await contractResponse.json();
     if (!contractResponse.ok) {
-      throw new Error(contractResult.error || "Unable to save contract values.");
+      const error = new Error(contractResult.error || "Unable to save contract values.");
+      error.safeApiMessage = true;
+      throw error;
     }
     if (!Array.isArray(contractResult.contractItems)) {
       throw new Error("The server returned an invalid contract update.");
@@ -205,7 +268,9 @@ async function saveLedgerEdits(event) {
     );
     const nameResult = await nameResponse.json();
     if (!nameResponse.ok) {
-      throw new Error(nameResult.error || "Unable to update the trade name.");
+      const error = new Error(nameResult.error || "Unable to update the trade name.");
+      error.safeApiMessage = true;
+      throw error;
     }
     const updatedTrade = {
       ...selectedTrade,
@@ -215,11 +280,13 @@ async function saveLedgerEdits(event) {
     };
     trades = trades.map(trade => trade.id === updatedTrade.id ? updatedTrade : trade).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
     renderTrades();
+    modalOpener = [...tradeList.querySelectorAll('button[data-action="view"]')]
+      .find(button => button.dataset.id === updatedTrade.id) || modalOpener;
     renderPreview(updatedTrade);
     showStatus("Ledger updated successfully.");
   } catch (error) {
     console.error(error);
-    showStatus("Unable to save the ledger. Please try again.", "error");
+    showStatus(error?.safeApiMessage ? error.message : "Unable to save the ledger. Please try again.", "error");
   }
 }
 
@@ -247,6 +314,7 @@ tradeList.addEventListener("click", async event => {
   const trade = trades.find(item => item.id === button.dataset.id);
   if (!trade) return;
   if (button.dataset.action === "view") {
+    modalOpener = button;
     renderPreview(trade);
     return;
   }
@@ -285,6 +353,6 @@ document.getElementById("downloadModalPdf").addEventListener("click", async even
   button.disabled = true;
   try { await downloadLedgerPDF(selectedTrade); } catch (error) { console.error(error); showStatus("Unable to create the PDF. Please try again.", "error"); } finally { button.disabled = false; }
 });
-document.getElementById("closeLedger").addEventListener("click", () => { modal.hidden = true; });
-modal.addEventListener("click", event => { if (event.target === modal) modal.hidden = true; });
+document.getElementById("closeLedger").addEventListener("click", closeLedgerModal);
+modal.addEventListener("click", event => { if (event.target === modal) closeLedgerModal(); });
 loadTrades();

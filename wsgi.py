@@ -1,6 +1,6 @@
 import os
 
-from app import app
+from app import IS_PRODUCTION_ENVIRONMENT, app, get_active_firebase_config
 
 if app.debug or app.config.get("DEBUG"):
 	raise RuntimeError("Flask debug mode must be disabled for WSGI startup.")
@@ -15,6 +15,9 @@ if (
 	or secret_key == "mannat-moon-dev-secret-change-me"
 ):
 	raise RuntimeError("Set SECRET_KEY to a unique random value of at least 32 bytes before WSGI startup.")
+
+if IS_PRODUCTION_ENVIRONMENT:
+	get_active_firebase_config()
 
 
 def serve():

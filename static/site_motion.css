@@ -940,6 +940,41 @@ body.financial-module:has(#paymentModal.show) { overflow: hidden; }
 .financial-module #tradeList .contract-section [style*="color:#64748b"] {
     color: #b4c8ba !important;
 }
+/* The ledger modal is shared by Trade Builder and Labour Payments. */
+#tradeLedgerModal .modal-panel {
+    color: #edf8f2;
+    border: 1px solid rgba(123,224,182,.2);
+    background: linear-gradient(145deg, rgba(18,34,26,.97), rgba(8,16,12,.98));
+}
+#tradeLedgerModal h2,
+#tradeLedgerModal h3 { color: #edf8f2; }
+#tradeLedgerModal h3 { border-bottom-color: rgba(123,224,182,.18); }
+#tradeLedgerModal .ledger-modal-meta div,
+#tradeLedgerModal .ledger-modal-financials span {
+    color: #dcebe2;
+    border-color: rgba(123,224,182,.17);
+    background: rgba(255,255,255,.035);
+}
+#tradeLedgerModal .ledger-modal-meta strong { color: #b4c8ba; }
+#tradeLedgerModal .ledger-modal-table th {
+    color: #83dfbb;
+    border-color: rgba(123,224,182,.14);
+    background: rgba(72,148,108,.14);
+}
+#tradeLedgerModal .ledger-modal-table td {
+    color: #dcebe2;
+    border-color: rgba(123,224,182,.14);
+}
+#tradeLedgerModal .ledger-modal-table tbody tr:nth-child(even) {
+    background: rgba(255,255,255,.025);
+}
+#tradeLedgerModal .ledger-modal-empty {
+    color: #b4c8ba;
+    border-color: rgba(123,224,182,.2);
+}
+body:not(.login-page) .materials-main .investment-category-total > strong {
+    color: #83dfbb;
+}
 @media (max-width: 840px) {
     .financial-module .main-grid > div {
         min-width: 0;

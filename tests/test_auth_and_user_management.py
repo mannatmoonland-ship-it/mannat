@@ -1,86 +1,1239 @@
-import pytest
+from pathlib import Path
 
-from app import InMemoryFirestoreStore, app
+import pytest
+from google.api_core.exceptions import DeadlineExceeded
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from app import FirebaseFirestoreStore, app
+
+BOOTSTRAP_TEST_PASSWORD = "Test-Only-Admin-2026!"
+
+
+class FakeFirestoreStore:
+    def __init__(self):
+        self.users = {}
+        self.custom_staff_types = {}
+        self.audit_log = []
+        self.fail_user_deletion = False
+
+    def get_user_by_username(self, username):
+        for user in self.users.values():
+            if user.get("username", "").lower() == str(username).lower():
+                return user
+        return None
+
+    def get_user(self, user_id):
+        return self.users.get(user_id)
+
+    def list_users(self):
+        return list(self.users.values())
+
+    def save_user(self, user):
+        self.users[user["id"]] = user
+        return self.users[user["id"]]
+
+    def list_custom_staff_types(self):
+        return list(self.custom_staff_types.values())
+
+    def save_custom_staff_type(self, staff_type):
+        self.custom_staff_types[staff_type["id"]] = staff_type
+
+    def delete_custom_staff_type(self, staff_type_id):
+        self.custom_staff_types.pop(staff_type_id, None)
+
+    def delete_user(self, user_id):
+        if self.fail_user_deletion:
+            raise RuntimeError("simulated Firestore delete failure")
+        return self.users.pop(user_id, None) is not None
+
+    def append_audit(self, action):
+        self.audit_log.append(action)
 
 
 @pytest.fixture
-def daily_report_client(monkeypatch):
-    store = InMemoryFirestoreStore()
-    monkeypatch.setitem(app.config, "TESTING", True)
-    monkeypatch.setitem(app.config, "SECRET_KEY", "daily-reports-test-secret")
-    monkeypatch.setitem(app.config, "FIRESTORE_STORE", store)
-    return store, app.test_client()
+def client(monkeypatch):
+    monkeypatch.setenv("INITIAL_SUPER_ADMIN_PASSWORD", BOOTSTRAP_TEST_PASSWORD)
+    app.config.update(TESTING=True, SECRET_KEY="test-secret", FIRESTORE_STORE=FakeFirestoreStore())
+    with app.test_client() as c:
+        original_post = c.post
+
+        def post_with_authenticated_form_csrf(*args, **kwargs):
+            path = str(args[0]) if args else str(kwargs.get("path", ""))
+            if path.startswith((
+                "/logout",
+                "/test-email",
+                "/change-password",
+                "/forgot-password",
+                "/user-management/",
+            )) or path == "/user-management/custom-type":
+                c.get("/user-management")
+                with c.session_transaction() as flask_session:
+                    csrf_token = flask_session.get("authenticated_form_csrf", "")
+                form_data = kwargs.get("data")
+                if isinstance(form_data, dict):
+                    kwargs["data"] = {**form_data, "csrf_token": csrf_token}
+                else:
+                    kwargs["data"] = {"csrf_token": csrf_token}
+            return original_post(*args, **kwargs)
+
+        monkeypatch.setattr(c, "post", post_with_authenticated_form_csrf)
+        yield c
 
 
-def _add_active_user(store, *, user_id, role, session_id, custom_staff_type=""):
+def test_ensure_initial_super_admin_is_a_noop_without_bootstrap_secret(client, monkeypatch):
+    from app import ensure_initial_super_admin
+
+    monkeypatch.delenv("INITIAL_SUPER_ADMIN_PASSWORD", raising=False)
+    store = app.config["FIRESTORE_STORE"]
+    before = {key: dict(value) for key, value in store.users.items()}
+
+    ensure_initial_super_admin()
+
+    assert store.users == before
+    assert store.get_user_by_username("Rahim") is None
+
+
+def test_initial_super_admin_bootstrap_requires_explicit_strong_password(client, monkeypatch):
+    from app import ensure_initial_super_admin
+
+    store = app.config["FIRESTORE_STORE"]
+    monkeypatch.setenv("INITIAL_SUPER_ADMIN_PASSWORD", "Secure-bootstrap-2026!")
+
+    user = ensure_initial_super_admin()
+
+    assert user["role"] == "super_admin"
+    assert user["must_change_password"] is True
+    assert user["password_hash"] != BOOTSTRAP_TEST_PASSWORD
+    assert store.get_user_by_username("Rahim")["id"] == user["id"]
+
+
+def test_initial_super_admin_bootstrap_rejects_weak_password(client, monkeypatch):
+    from app import ensure_initial_super_admin
+
+    store = app.config["FIRESTORE_STORE"]
+    monkeypatch.setenv("INITIAL_SUPER_ADMIN_PASSWORD", "weak")
+
+    assert ensure_initial_super_admin() is None
+    assert store.users == {}
+
+
+def test_user_deletion_does_not_recreate_deleted_account(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post(
+        "/login",
+        data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+
+    store = app.config["FIRESTORE_STORE"]
     store.save_user({
-        "id": user_id,
-        "username": user_id,
-        "role": role,
-        "custom_staff_type": custom_staff_type,
-        "status": "active",
+        "id": "deleted-user",
+        "username": "deleted-user",
+        "full_name": "Deleted User",
+        "role": "office_staff",
         "is_active": True,
-        "active_sessions": [session_id],
+        "active_sessions": ["deleted-user-session"],
+        "authorization_version": 1,
+        "password_hash": generate_password_hash("User-test-password-42!"),
+    })
+
+    response = client.post(
+        "/user-management/deleted-user/delete",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert store.get_user("deleted-user") is None
+    assert all(user["id"] != "deleted-user" for user in store.list_users())
+    assert b"was removed." in response.data
+
+    reopened = client.get("/user-management")
+    assert reopened.status_code == 200
+    assert b"<td>deleted-user</td>" not in reopened.data
+    assert all(user["id"] != "deleted-user" for user in store.list_users())
+    assert any(
+        entry.get("action") == "user_deleted"
+        and entry.get("target_user_id") == "deleted-user"
+        for entry in store.audit_log
+    )
+    with app.test_client() as deleted_user_client:
+        with deleted_user_client.session_transaction() as deleted_session:
+            deleted_session["user_id"] = "deleted-user"
+            deleted_session["session_id"] = "deleted-user-session"
+        session_response = deleted_user_client.get("/", follow_redirects=False)
+    assert session_response.status_code == 302
+    assert "/login" in session_response.headers["Location"]
+
+
+def test_user_deletion_failure_shows_error_without_audit_or_removing_user(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post(
+        "/login",
+        data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+
+    store = app.config["FIRESTORE_STORE"]
+    target = store.save_user({
+        "id": "undeleted-user",
+        "username": "undeleted-user",
+        "full_name": "Undeleted User",
+        "role": "office_staff",
+        "is_active": True,
+        "active_sessions": [],
+        "authorization_version": 1,
+        "password_hash": generate_password_hash("User-test-password-42!"),
+    })
+    store.fail_user_deletion = True
+
+    response = client.post(
+        "/user-management/undeleted-user/delete",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"User could not be deleted. Please try again." in response.data
+    assert b"was removed." not in response.data
+    assert store.get_user(target["id"]) is not None
+    assert not any(entry.get("action") == "user_deleted" for entry in store.audit_log)
+
+
+def test_user_deletion_preserves_self_deletion_protection(client):
+    from app import ensure_initial_super_admin
+
+    admin = ensure_initial_super_admin()
+    login_response = client.post(
+        "/login",
+        data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+
+    response = client.post(
+        f"/user-management/{admin['id']}/delete",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"You cannot delete your own account while signed in." in response.data
+    assert app.config["FIRESTORE_STORE"].get_user(admin["id"]) is not None
+
+
+def test_user_deletion_requires_super_admin_authorization(client):
+    store = app.config["FIRESTORE_STORE"]
+    target = store.save_user({
+        "id": "protected-user",
+        "username": "protected-user",
+        "full_name": "Protected User",
+        "role": "office_staff",
+        "is_active": True,
+        "active_sessions": [],
+        "authorization_version": 1,
+        "password_hash": generate_password_hash("User-test-password-42!"),
+    })
+    actor = store.save_user({
+        "id": "staff-actor",
+        "username": "staff-actor",
+        "full_name": "Staff Actor",
+        "role": "office_staff",
+        "is_active": True,
+        "active_sessions": ["staff-session"],
+        "authorization_version": 1,
+        "password_hash": generate_password_hash("Actor-test-password-42!"),
+    })
+    with client.session_transaction() as flask_session:
+        flask_session["user_id"] = actor["id"]
+        flask_session["session_id"] = "staff-session"
+        flask_session["authenticated_form_csrf"] = "staff-session-csrf"
+        flask_session["authenticated_form_csrf_binding"] = "staff-actor:staff-session"
+
+    response = client.post(
+        f"/user-management/{target['id']}/delete",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"You do not have permission to access that page." in response.data
+    assert store.get_user(target["id"]) is not None
+
+
+def test_firestore_user_deletion_targets_users_collection_and_is_visible_on_refetch():
+    class Snapshot:
+        def __init__(self, reference):
+            self.exists = reference.document_id in reference.collection.records
+            self._reference = reference
+
+        def to_dict(self):
+            return self._reference.collection.records.get(self._reference.document_id)
+
+    class DocumentReference:
+        def __init__(self, collection, document_id):
+            self.collection = collection
+            self.document_id = document_id
+
+        def get(self):
+            return Snapshot(self)
+
+        def delete(self):
+            self.collection.records.pop(self.document_id, None)
+
+    class CollectionReference:
+        def __init__(self, records):
+            self.records = records
+            self.requested_document_ids = []
+
+        def document(self, document_id):
+            self.requested_document_ids.append(document_id)
+            return DocumentReference(self, document_id)
+
+        def stream(self):
+            return [
+                type("UserSnapshot", (), {
+                    "id": document_id,
+                    "to_dict": lambda self, document=document: document,
+                })()
+                for document_id, document in self.records.items()
+            ]
+
+    class FirestoreClient:
+        def __init__(self):
+            self.users = CollectionReference({
+                "deleted-test-user": {"username": "deleted-test-user"},
+                "kept-test-user": {"username": "kept-test-user"},
+            })
+            self.collection_names = []
+
+        def collection(self, name):
+            self.collection_names.append(name)
+            assert name == "users"
+            return self.users
+
+    from app import FirebaseFirestoreStore
+
+    firestore_client = FirestoreClient()
+    store = FirebaseFirestoreStore(client=firestore_client, project_id="isolated-test-project")
+
+    assert store.delete_user("deleted-test-user") is True
+    assert firestore_client.users.requested_document_ids == ["deleted-test-user"]
+    assert [user["id"] for user in store.list_users()] == ["kept-test-user"]
+    assert "deleted-test-user" not in firestore_client.users.records
+
+
+def test_user_deletion_rejects_missing_csrf_token(client):
+    store = app.config["FIRESTORE_STORE"]
+    target = store.save_user({
+        "id": "csrf-protected-user",
+        "username": "csrf-protected-user",
+        "full_name": "CSRF Protected User",
+        "role": "office_staff",
+        "is_active": True,
+        "active_sessions": [],
+        "authorization_version": 1,
+        "password_hash": generate_password_hash("User-test-password-42!"),
+    })
+    admin = store.save_user({
+        "id": "csrf-test-admin",
+        "username": "csrf-test-admin",
+        "full_name": "CSRF Test Admin",
+        "role": "super_admin",
+        "is_active": True,
+        "active_sessions": ["csrf-test-session"],
+        "authorization_version": 1,
+        "password_hash": generate_password_hash("Admin-test-password-42!"),
+    })
+    with app.test_client() as csrf_client:
+        with csrf_client.session_transaction() as flask_session:
+            flask_session["user_id"] = admin["id"]
+            flask_session["session_id"] = "csrf-test-session"
+        response = csrf_client.post(f"/user-management/{target['id']}/delete")
+
+    assert response.status_code == 400
+    assert store.get_user(target["id"]) is not None
+
+
+def test_firebase_service_account_can_be_discovered_from_launch_directory(tmp_path, monkeypatch):
+    from app import find_firebase_service_account_path
+
+    credential_file = tmp_path / "mannat-moon-construction-firebase-adminsdk-test.json"
+    credential_file.touch()
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    assert find_firebase_service_account_path() == str(credential_file)
+
+
+def test_office_staff_and_supervisor_share_full_operational_permissions(client):
+    from app import ROLE_PERMISSIONS
+
+    assert ROLE_PERMISSIONS["office_staff"] == ROLE_PERMISSIONS["supervisor"]
+    assert "dashboard" in ROLE_PERMISSIONS["office_staff"]
+    assert "daily_reports" in ROLE_PERMISSIONS["office_staff"]
+    assert "trade_builder" in ROLE_PERMISSIONS["office_staff"]
+    assert "drawings" in ROLE_PERMISSIONS["office_staff"]
+    assert "labour_payments" in ROLE_PERMISSIONS["office_staff"]
+    assert "ledger_prints" in ROLE_PERMISSIONS["office_staff"]
+    assert "materials" in ROLE_PERMISSIONS["office_staff"]
+    assert "labour_muster" in ROLE_PERMISSIONS["office_staff"]
+    assert "camera_upload" not in ROLE_PERMISSIONS["office_staff"]
+    assert "camera_upload" not in ROLE_PERMISSIONS["supervisor"]
+    assert "camera_upload" not in ROLE_PERMISSIONS["super_admin"]
+    assert "user_management" not in ROLE_PERMISSIONS["office_staff"]
+    assert "super_admin_recovery" not in ROLE_PERMISSIONS["office_staff"]
+    assert "user_management" not in ROLE_PERMISSIONS["supervisor"]
+    assert "super_admin_recovery" not in ROLE_PERMISSIONS["supervisor"]
+
+
+def test_dashboard_redirects_to_login_when_firestore_not_configured(client):
+    import app as app_module
+
+    original = app_module.get_user_store
+    app_module.get_user_store = lambda: (_ for _ in ()).throw(RuntimeError("Firebase Admin SDK is not installed or Firestore is not configured."))
+
+    try:
+        with client.session_transaction() as sess:
+            sess["user_id"] = "missing-user"
+            sess["session_id"] = "missing-session"
+
+        response = client.get("/", follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers["Location"] == "/login"
+    finally:
+        app_module.get_user_store = original
+
+
+def test_initial_super_admin_setup(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    user = app.config["FIRESTORE_STORE"].get_user_by_username("Rahim")
+
+    assert user is not None
+    assert user["role"] == "super_admin"
+    assert user["must_change_password"] is True
+    assert user["username"] == "Rahim"
+    assert user["password_hash"]
+
+
+def test_super_admin_login_requires_password_change(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/change-password"
+
+
+def test_ensure_initial_super_admin_preserves_existing_users(client):
+    from app import ensure_initial_super_admin
+
+    store = app.config["FIRESTORE_STORE"]
+    store.save_user({
+        "id": "existing-user",
+        "username": "Alice",
+        "full_name": "Alice Existing",
+        "email": "alice@example.com",
+        "recovery_email": "",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "password_hash": "hash-alice",
+        "must_change_password": False,
+        "is_active": True,
+        "active_sessions": [],
+        "created_at": "now",
+        "updated_at": "now",
+        "permissions": ["dashboard"],
+    })
+
+    ensure_initial_super_admin()
+
+    preserved = store.get_user("existing-user")
+    assert preserved["username"] == "Alice"
+    assert preserved["role"] == "office_staff"
+    assert preserved["email"] == "alice@example.com"
+
+
+def test_user_creation_prevents_duplicate_username(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+
+    with client.session_transaction() as sess:
+        sess["user_id"] = app.config["FIRESTORE_STORE"].get_user_by_username("Rahim")["id"]
+        sess["role"] = "super_admin"
+
+    response = client.post(
+        "/user-management/create",
+        data={
+            "username": "rahim",
+            "full_name": "Rahim Duplicate",
+            "role": "office_staff",
+            "custom_staff_type": "",
+            "email": "rahim@example.com",
+            "recovery_email": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+
+
+def test_new_user_receives_unique_password_setup_link_instead_of_shared_password(client, monkeypatch):
+    store = app.config["FIRESTORE_STORE"]
+    store.save_user({
+        "id": "admin-id",
+        "username": "Admin",
+        "full_name": "Admin",
+        "role": "super_admin",
+        "is_active": True,
+        "active_sessions": ["admin-session"],
+    })
+    with client.session_transaction() as session:
+        session["user_id"] = "admin-id"
+        session["session_id"] = "admin-session"
+    sent = []
+    monkeypatch.setattr("app.send_email", lambda *args, **kwargs: sent.append((args, kwargs)) or True)
+
+    response = client.post("/user-management/create", data={
+        "username": "new-staff",
+        "full_name": "New Staff",
+        "email": "new-staff@example.com",
+        "role": "office_staff",
+        "custom_staff_type": "",
+    }, follow_redirects=True)
+
+    user = store.get_user_by_username("new-staff")
+    assert response.status_code == 200
+    assert user["must_change_password"] is True
+    assert not check_password_hash(user["password_hash"], "weak")
+    assert user["password_reset_token_hash"]
+    assert len(sent) == 1
+    assert sent[0][0][0] == "new-staff@example.com"
+    assert "one-time password setup link" in response.get_data(as_text=True).lower()
+
+
+@pytest.mark.parametrize("must_change_password", [True, False])
+def test_password_below_current_policy_cannot_authenticate_and_reset_remains_available(
+    client, monkeypatch, must_change_password
+):
+    store = app.config["FIRESTORE_STORE"]
+    user = {
+        "id": "weak-password-user",
+        "username": "WeakPasswordUser",
+        "full_name": "Weak Password User",
+        "email": "legacy@example.com",
+        "role": "office_staff",
+        "password_hash": generate_password_hash("weak"),
+        "must_change_password": must_change_password,
+        "is_active": True,
+        "active_sessions": [],
+    }
+    store.save_user(user)
+    monkeypatch.setattr("app.send_email", lambda *args, **kwargs: pytest.fail("Login must not send reset emails."))
+
+    response = client.post(
+        "/login",
+        data={"username": "WeakPasswordUser", "password": "weak"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert user["must_change_password"] is must_change_password
+    assert check_password_hash(user["password_hash"], "weak")
+    assert not user.get("password_reset_token_hash")
+    assert user["active_sessions"] == []
+    assert "no longer meets current security requirements" in response.get_data(as_text=True).lower()
+    assert "Forgot Password" in response.get_data(as_text=True)
+
+
+def _save_login_test_user(store, username, password, is_active=True):
+    store.save_user({
+        "id": username.lower(),
+        "username": username,
+        "full_name": username,
+        "email": f"{username.lower()}@example.com",
+        "role": "office_staff",
+        "password_hash": generate_password_hash(password),
+        "must_change_password": False,
+        "is_active": is_active,
+        "active_sessions": [],
     })
 
 
-def _authenticate(client, user_id, session_id):
-    with client.session_transaction() as flask_session:
-        flask_session["user_id"] = user_id
-        flask_session["session_id"] = session_id
+def test_account_specific_password_login_succeeds(client):
+    store = app.config["FIRESTORE_STORE"]
+    _save_login_test_user(store, "AccountLogin", "Account-specific-Test-42!")
+
+    response = client.post(
+        "/login",
+        data={"username": "AccountLogin", "password": "Account-specific-Test-42!"},
+    )
+
+    assert response.status_code == 302
+    with client.session_transaction() as session:
+        assert session["user_id"] == "accountlogin"
 
 
-def test_daily_report_routes_reject_anonymous_access_before_reading_data(daily_report_client, monkeypatch):
-    _store, client = daily_report_client
+def test_incorrect_account_password_is_rejected(client):
+    store = app.config["FIRESTORE_STORE"]
+    _save_login_test_user(store, "WrongPassword", "Account-specific-Test-42!")
+
+    response = client.post(
+        "/login",
+        data={"username": "WrongPassword", "password": "Wrong-test-value-43!"},
+    )
+
+    assert response.status_code == 302
+    with client.session_transaction() as session:
+        assert "user_id" not in session
+
+
+def test_login_firestore_timeout_returns_temporary_error_without_logging_credentials(client, monkeypatch, caplog):
+    store = app.config["FIRESTORE_STORE"]
+
+    def timeout_lookup(_username):
+        raise DeadlineExceeded("Firestore request timed out")
+
+    monkeypatch.setattr(store, "get_user_by_username", timeout_lookup)
+    caplog.set_level("INFO", logger="app")
+
+    response = client.post(
+        "/login",
+        data={"username": "private-test-user", "password": "private-test-password"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 503
+    assert b"Sign-in is temporarily unavailable" in response.data
+    assert b"Invalid username or password" not in response.data
+    assert "Login POST received" in caplog.text
+    assert "timed out during sign-in" in caplog.text
+    assert "private-test-user" not in caplog.text
+    assert "private-test-password" not in caplog.text
+
+
+def test_firestore_login_lookup_uses_a_five_second_retry_deadline():
+    class FakeQuery:
+        def where(self, *, filter):
+            assert (filter.field_path, filter.op_string) == ("username_lower", "==")
+            return self
+
+        def limit(self, count):
+            assert count == 1
+            return self
+
+        def stream(self, *, retry, timeout):
+            assert retry.timeout == 5
+            assert timeout == 5
+            return iter(())
+
+    class FakeCollection:
+        def where(self, **_kwargs):
+            return FakeQuery()
+
+    class FakeClient:
+        def collection(self, name):
+            assert name == "users"
+            return FakeCollection()
+
+    store = FirebaseFirestoreStore(client=FakeClient())
+
+    assert store.get_user_by_username("nobody") is None
+
+
+def test_inactive_user_cannot_log_in_with_correct_password(client):
+    store = app.config["FIRESTORE_STORE"]
+    _save_login_test_user(store, "InactiveLogin", "account-specific-test-value", is_active=False)
+
+    response = client.post(
+        "/login",
+        data={"username": "InactiveLogin", "password": "account-specific-test-value"},
+    )
+
+    assert response.status_code == 302
+    with client.session_transaction() as session:
+        assert "user_id" not in session
+
+
+def test_custom_staff_type_edit_updates_name(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+
+    client.post("/user-management/custom-type", data={"type_name": " Driver "}, follow_redirects=False)
+    custom_type = app.config["FIRESTORE_STORE"].list_custom_staff_types()[0]
+
+    response = client.post(
+        f"/user-management/custom-type/{custom_type['id']}/edit",
+        data={"type_name": " Logistics Staff "},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    updated_type = app.config["FIRESTORE_STORE"].list_custom_staff_types()[0]
+    assert updated_type["name"] == "Logistics Staff"
+
+
+def test_custom_staff_type_edit_rejects_duplicate_name_ignoring_case_and_spaces(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+
+    client.post("/user-management/custom-type", data={"type_name": "Store Team"}, follow_redirects=False)
+    client.post("/user-management/custom-type", data={"type_name": "Warehouse Team"}, follow_redirects=False)
+    target = app.config["FIRESTORE_STORE"].list_custom_staff_types()[1]
+
+    response = client.post(
+        f"/user-management/custom-type/{target['id']}/edit",
+        data={"type_name": "  store   team  "},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    names = [item["name"] for item in app.config["FIRESTORE_STORE"].list_custom_staff_types()]
+    assert "Warehouse Team" in names
+    assert "Store Team" in names
+
+
+def test_custom_staff_type_delete_removes_unassigned_type(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+
+    client.post("/user-management/custom-type", data={"type_name": "Cleaner"}, follow_redirects=False)
+    custom_type = app.config["FIRESTORE_STORE"].list_custom_staff_types()[0]
+
+    response = client.post(
+        f"/user-management/custom-type/{custom_type['id']}/delete",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert app.config["FIRESTORE_STORE"].list_custom_staff_types() == []
+
+
+def test_custom_staff_type_delete_blocked_when_users_are_assigned(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+
+    client.post("/user-management/custom-type", data={"type_name": "Mechanic"}, follow_redirects=False)
+    custom_type = app.config["FIRESTORE_STORE"].list_custom_staff_types()[0]
+
+    app.config["FIRESTORE_STORE"].save_user({
+        "id": "u-1",
+        "username": "mechanic_user",
+        "full_name": "Mechanic User",
+        "role": "Mechanic",
+        "custom_staff_type": "Mechanic",
+        "password_hash": "hash",
+        "must_change_password": False,
+        "is_active": True,
+        "active_sessions": [],
+        "created_at": "now",
+        "updated_at": "now",
+    })
+
+    response = client.post(
+        f"/user-management/custom-type/{custom_type['id']}/delete",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert len(app.config["FIRESTORE_STORE"].list_custom_staff_types()) == 1
+
+
+def test_dashboard_uses_four_column_grid(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 200
+    html = response.get_data(as_text=True)
+    assert "cards-grid" in html
+    assert "repeat(4, minmax(0, 1fr))" in html
+
+
+def test_super_admin_can_edit_user_details(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+
+    target_user = {
+        "id": "user-1",
+        "username": "Alpha",
+        "full_name": "Alpha User",
+        "email": "alpha@example.com",
+        "recovery_email": "alpha.recovery@example.com",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "password_hash": "hash-alpha",
+        "must_change_password": False,
+        "is_active": True,
+        "active_sessions": [],
+        "created_at": "now",
+        "updated_at": "now",
+        "permissions": ["dashboard"],
+    }
+    app.config["FIRESTORE_STORE"].save_user(target_user)
+
+    response = client.post(
+        "/user-management/user-1/edit",
+        data={
+            "username": " alpha ",
+            "full_name": "Alpha Smith",
+            "email": "alpha.smith@example.com",
+            "recovery_email": "alpha.recovery+updated@example.com",
+            "role": "supervisor",
+            "custom_staff_type": "",
+            "is_active": "true",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    updated = app.config["FIRESTORE_STORE"].get_user("user-1")
+    assert updated["full_name"] == "Alpha Smith"
+    assert updated["email"] == "alpha.smith@example.com"
+    assert updated["recovery_email"] == "alpha.recovery+updated@example.com"
+    assert updated["role"] == "supervisor"
+    assert updated["username"] == "alpha"
+
+
+def test_super_admin_can_grant_and_revoke_camera_upload(client):
+    store = app.config["FIRESTORE_STORE"]
+    store.save_user({
+        "id": "admin-user",
+        "username": "Admin",
+        "full_name": "Test Admin",
+        "email": "admin@example.com",
+        "recovery_email": "",
+        "role": "super_admin",
+        "custom_staff_type": "",
+        "password_hash": generate_password_hash("Admin-test-password-42!"),
+        "must_change_password": False,
+        "status": "active",
+        "is_active": True,
+        "active_sessions": [],
+        "permissions": [],
+    })
+    login_response = client.post(
+        "/login",
+        data={"username": "Admin", "password": "Admin-test-password-42!"},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+    app.config["FIRESTORE_STORE"].save_user({
+        "id": "camera-user",
+        "username": "CameraUser",
+        "full_name": "Camera User",
+        "email": "camera@example.com",
+        "recovery_email": "",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "password_hash": "hash-camera-user",
+        "must_change_password": False,
+        "is_active": True,
+        "active_sessions": [],
+        "created_at": "now",
+        "updated_at": "now",
+        "permissions": ["dashboard"],
+    })
+
+    details = client.get("/user-management/camera-user")
+    assert b'name="camera_upload"' in details.data
+
+    update = {
+        "username": "CameraUser",
+        "full_name": "Camera User",
+        "email": "camera@example.com",
+        "recovery_email": "",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "is_active": "true",
+    }
+    response = client.post(
+        "/user-management/camera-user/edit",
+        data={**update, "camera_upload": "true"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert "camera_upload" in app.config["FIRESTORE_STORE"].get_user("camera-user")["permissions"]
+    granted_details = client.get("/user-management/camera-user")
+    assert b'name="camera_upload" type="checkbox" value="true" checked>' in granted_details.data
+
+    response = client.post(
+        "/user-management/camera-user/edit",
+        data=update,
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert "camera_upload" not in app.config["FIRESTORE_STORE"].get_user("camera-user")["permissions"]
+
+
+def test_user_edit_rejects_duplicate_username(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+
+    app.config["FIRESTORE_STORE"].save_user({
+        "id": "u-1",
+        "username": "Alpha",
+        "full_name": "Alpha User",
+        "email": "alpha@example.com",
+        "recovery_email": "",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "password_hash": "hash-alpha",
+        "must_change_password": False,
+        "is_active": True,
+        "active_sessions": [],
+        "created_at": "now",
+        "updated_at": "now",
+        "permissions": ["dashboard"],
+    })
+    app.config["FIRESTORE_STORE"].save_user({
+        "id": "u-2",
+        "username": "Bravo",
+        "full_name": "Bravo User",
+        "email": "bravo@example.com",
+        "recovery_email": "",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "password_hash": "hash-bravo",
+        "must_change_password": False,
+        "is_active": True,
+        "active_sessions": [],
+        "created_at": "now",
+        "updated_at": "now",
+        "permissions": ["dashboard"],
+    })
+
+    response = client.post(
+        "/user-management/u-2/edit",
+        data={
+            "username": " alpha ",
+            "full_name": "Bravo User",
+            "email": "bravo@example.com",
+            "recovery_email": "",
+            "role": "office_staff",
+            "custom_staff_type": "",
+            "is_active": "true",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert app.config["FIRESTORE_STORE"].get_user("u-2")["username"] == "Bravo"
+
+
+def test_user_edit_rejects_invalid_role_and_custom_type(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+
+    app.config["FIRESTORE_STORE"].save_user({
+        "id": "u-4",
+        "username": "Delta",
+        "full_name": "Delta User",
+        "email": "delta@example.com",
+        "recovery_email": "",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "password_hash": "hash-delta",
+        "must_change_password": False,
+        "is_active": True,
+        "active_sessions": [],
+        "created_at": "now",
+        "updated_at": "now",
+        "permissions": ["dashboard"],
+    })
+
+    response = client.post(
+        "/user-management/u-4/edit",
+        data={
+            "username": "Delta",
+            "full_name": "Delta User",
+            "email": "delta@example.com",
+            "recovery_email": "",
+            "role": "not_a_real_role",
+            "custom_staff_type": "Unknown Type",
+            "is_active": "true",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert app.config["FIRESTORE_STORE"].get_user("u-4")["role"] == "office_staff"
+
+
+def test_ordinary_user_cannot_edit_user_details(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    app.config["FIRESTORE_STORE"].save_user({
+        "id": "u-3",
+        "username": "Charlie",
+        "full_name": "Charlie User",
+        "email": "charlie@example.com",
+        "recovery_email": "",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "password_hash": "hash-charlie",
+        "must_change_password": False,
+        "is_active": True,
+        "active_sessions": [],
+        "created_at": "now",
+        "updated_at": "now",
+        "permissions": ["dashboard"],
+    })
+
+    login_response = client.post("/login", data={"username": "Charlie", "password": "invalid-test-password"}, follow_redirects=False)
+    assert login_response.status_code == 302
+
+    response = client.post(
+        "/user-management/u-3/edit",
+        data={
+            "username": "Charlie",
+            "full_name": "Charlie Updated",
+            "email": "charlie@updated.com",
+            "recovery_email": "",
+            "role": "office_staff",
+            "custom_staff_type": "",
+            "is_active": "true",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert app.config["FIRESTORE_STORE"].get_user("u-3")["full_name"] == "Charlie User"
+
+
+def test_super_admin_cannot_remove_own_privileges(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    rahim = app.config["FIRESTORE_STORE"].get_user_by_username("Rahim")
+    client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+
+    response = client.post(
+        f"/user-management/{rahim['id']}/edit",
+        data={
+            "username": "Rahim",
+            "full_name": "Rahim",
+            "email": "rahim@example.com",
+            "recovery_email": "",
+            "role": "office_staff",
+            "custom_staff_type": "",
+            "is_active": "true",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert app.config["FIRESTORE_STORE"].get_user(rahim["id"])["role"] == "super_admin"
+
+
+def test_user_edit_generates_audit_log_and_preserves_password(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+
+    target = {
+        "id": "audit-user",
+        "username": "Echo",
+        "full_name": "Echo User",
+        "email": "echo@example.com",
+        "recovery_email": "echo.recovery@example.com",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "password_hash": "hash-echo",
+        "must_change_password": False,
+        "is_active": True,
+        "active_sessions": [],
+        "created_at": "now",
+        "updated_at": "now",
+        "permissions": ["dashboard"],
+    }
+    app.config["FIRESTORE_STORE"].save_user(target)
+
+    response = client.post(
+        "/user-management/audit-user/edit",
+        data={
+            "username": "echo",
+            "full_name": "Echo Updated",
+            "email": "echo.updated@example.com",
+            "recovery_email": "echo.recovery+new@example.com",
+            "role": "office_staff",
+            "custom_staff_type": "",
+            "is_active": "true",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert app.config["FIRESTORE_STORE"].get_user("audit-user")["password_hash"] == "hash-echo"
+    log = app.config["FIRESTORE_STORE"].audit_log[-1]
+    assert log["action"] == "user_updated"
+    assert "full_name" in log["details"]
+
+
+def test_user_management_requires_super_admin(client):
+    response = client.get("/user-management", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/login"
+
+
+def test_user_management_renders_saved_avatar_id_next_to_full_name(client):
+    store = app.config["FIRESTORE_STORE"]
+    store.save_user({
+        "id": "admin-user",
+        "username": "admin",
+        "full_name": "Admin User",
+        "role": "super_admin",
+        "is_active": True,
+        "active_sessions": ["test-session"],
+        "avatarId": "panda",
+    })
+    store.save_user({
+        "id": "staff-user",
+        "username": "staff",
+        "full_name": "Staff User",
+        "role": "office_staff",
+        "is_active": True,
+        "avatarId": "fox",
+    })
+    with client.session_transaction() as sess:
+        sess["user_id"] = "admin-user"
+        sess["session_id"] = "test-session"
+        sess["role"] = "super_admin"
+
+    response = client.get("/user-management")
+
+    assert response.status_code == 200
+    assert b'data-animal-avatar="fox"' in response.data
+    assert b'data-animal-avatar="panda"' in response.data
+    assert b'<span>Staff User</span>' in response.data
+    assert "–" in response.get_data(as_text=True)
+    assert "<td>–</td>" in response.get_data(as_text=True)
+    assert "\u00e2\u20ac\u201c" not in response.get_data(as_text=True)
+    html = response.get_data(as_text=True)
+    assert 'getAnimalAvatar, renderAnimalAvatar' in html
+    for asset in (
+        "dialogs.css",
+        "dialogs.js",
+        "design_system.css",
+        "site_motion.css",
+    ):
+        assert f"/static/{asset}?v=" in html
+    assert "office_connection.css" not in html
+    assert "office_connection.js" not in html
+    assert "OFFICE WI-FI DISCONNECTED" not in html
+    assert "You appear to be outside the range of the Mannat Moon office Wi-Fi" not in html
+    assert "Office connection restored." not in html
+    assert "website-dark-surface-20261002-1" not in html
+
+
+def test_shared_confirmation_dialog_uses_green_theme():
+    dialog_css = (
+        Path(__file__).resolve().parents[1] / "static" / "dialogs.css"
+    ).read_text(encoding="utf-8")
+
+    assert "background: #111b17;" in dialog_css
+    assert "border: 1px solid #263c31;" in dialog_css
+    assert "background: #a9e4bc;" in dialog_css
+    assert "outline: 3px solid #a9e4bc;" in dialog_css
+    assert "background: rgba(4, 8, 15, .72);" in dialog_css
+
+
+def test_daily_report_routes_require_authentication_and_do_not_return_report_data(client, monkeypatch):
+    store = app.config["FIRESTORE_STORE"]
+    store.daily_records = {
+        "daily-record-1": {
+            "date": "2026-10-03",
+            "activity": "Private report data",
+        }
+    }
     monkeypatch.setattr(
         "app._get_daily_record_for_date",
-        lambda _date: pytest.fail("Anonymous requests must not read Daily Reports."),
+        lambda _date: pytest.fail("Unauthenticated requests must not read Daily Reports."),
     )
 
     for path in ("/daily-reports?date=2026-10-03", "/daily-reports/share-image?date=2026-10-03"):
         response = client.get(path, environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+
         assert response.status_code == 401
-        assert "<svg" not in response.get_data(as_text=True)
+        body = response.get_data(as_text=True)
+        assert "Private report data" not in body
+        assert "<svg" not in body
 
 
-def test_daily_report_routes_deny_authenticated_users_without_read_permission(daily_report_client, monkeypatch):
-    store, client = daily_report_client
-    _add_active_user(
-        store,
-        user_id="report-user",
-        role="Report Viewer",
-        custom_staff_type="Report Viewer",
-        session_id="report-session",
-    )
+def test_daily_report_routes_require_daily_reports_read_permission(client):
+    store = app.config["FIRESTORE_STORE"]
+    store.save_user({
+        "id": "report-user",
+        "username": "report-user",
+        "role": "Report Viewer",
+        "custom_staff_type": "Report Viewer",
+        "status": "active",
+        "is_active": True,
+        "active_sessions": ["report-session"],
+    })
     store.save_custom_staff_type({
         "id": "report-viewer",
         "name": "Report Viewer",
         "permissions": [],
     })
-    _authenticate(client, "report-user", "report-session")
-    monkeypatch.setattr(
-        "app._get_daily_record_for_date",
-        lambda _date: pytest.fail("Unauthorized requests must not read Daily Reports."),
-    )
+    with client.session_transaction() as flask_session:
+        flask_session["user_id"] = "report-user"
+        flask_session["session_id"] = "report-session"
 
     for path in ("/daily-reports", "/daily-reports/share-image"):
         response = client.get(path)
         assert response.status_code == 403
 
 
-def test_daily_report_reader_can_open_page_and_share_image(daily_report_client, monkeypatch):
-    store, client = daily_report_client
-    _add_active_user(
-        store,
-        user_id="report-user",
-        role="super_admin",
-        session_id="report-session",
-    )
+def test_authenticated_daily_report_reader_can_open_page_and_share_image(client, monkeypatch):
+    store = app.config["FIRESTORE_STORE"]
+    store.save_user({
+        "id": "report-user",
+        "username": "report-user",
+        "role": "super_admin",
+        "status": "active",
+        "is_active": True,
+        "active_sessions": ["report-session"],
+    })
     monkeypatch.setattr(
         "app._get_daily_record_for_date",
         lambda _date: {"date": "2026-10-03", "activity": "Authorized report data"},
     )
-    _authenticate(client, "report-user", "report-session")
+    with client.session_transaction() as flask_session:
+        flask_session["user_id"] = "report-user"
+        flask_session["session_id"] = "report-session"
 
     page_response = client.get("/daily-reports")
     image_response = client.get("/daily-reports/share-image?date=2026-10-03")
@@ -93,3 +1246,21 @@ def test_daily_report_reader_can_open_page_and_share_image(daily_report_client, 
     assert image_response.mimetype == "image/svg+xml"
     assert "Authorized report data" in image_response.get_data(as_text=True)
     assert image_response.headers["Cache-Control"] == "private, no-store"
+
+
+def test_anonymous_users_cannot_mutate_daily_reports(client):
+    response = client.post(
+        "/api/daily-records",
+        json={
+            "date": "2026-10-03",
+            "activity": "Concrete pour",
+            "floor": "Ground Floor",
+            "tradeName": "Masonry",
+            "weatherCondition": "Sunny",
+            "materials": "Cement bags",
+            "notes": "Created anonymously",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.get_json()["error"] == "Authentication required."

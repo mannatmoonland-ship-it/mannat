@@ -6,3 +6,5 @@ playwright
 requests
 packaging>=23.2
 firebase-admin>=6.5.0,<8.0
+google-api-python-client>=2.160,<3.0
+google-auth-oauthlib>=1.2,<2.0

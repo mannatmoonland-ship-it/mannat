@@ -195,7 +195,13 @@
 
                 <h3>Visual Evidence</h3>
 
-                <button type="button" id="dr-addEvidence" class="dr-secondary">+ Add Evidence</button>
+                <div class="dr-evidence-controls">
+                    <span id="dr-driveStatus" role="status" aria-live="polite"></span>
+                    {% if current_user.role == 'super_admin' %}
+                    <button type="button" id="dr-connectDrive" class="dr-secondary">Connect Google Drive</button>
+                    {% endif %}
+                    <button type="button" id="dr-addEvidence" class="dr-secondary">+ Add Evidence</button>
+                </div>
 
             </div>
 

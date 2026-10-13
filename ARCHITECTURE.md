@@ -42,7 +42,7 @@ flowchart TB
         FirebaseAuth["Firebase Authentication"]
         SMTP["SMTP mail service"]
         Photos["Google Photos"]
-        Drive["Google Drive / Docs links"]
+        Drive["Google Drive<br/>OAuth drive.file"]
         LocalFiles[("Local instance/ and backups/ files")]
     end
 
@@ -52,6 +52,7 @@ flowchart TB
     Flask -->|"Admin SDK reads/writes"| Firestore
     Flask -->|"Email delivery"| SMTP
     Flask -->|"Playwright-assisted URL extraction"| Photos
+    Flask -->|"OAuth token + private photo uploads"| Drive
     Modules -. "validated drawing links; opened by user" .-> Drive
     SnapshotRoutes --> LocalFiles
     SnapshotService --> Firestore
@@ -104,7 +105,7 @@ from data access in the workflows below.
 |---|---|---|---|
 | Dashboard | `templates/dashboard.html` | Inline module, shared navigation and page assets | Flask-rendered page; supporting APIs/read paths as implemented |
 | Trade Builder | `templates/index.html` | `static/app.js`, `static/contract_payment_summary.mjs`, `static/trade_payment_history.mjs`, `static/payment_sort.mjs` | Firebase Web reads; Flask trade/contract/payment mutations |
-| Daily Reports | `templates/daily_reports.html` | `static/daily_reports.js`, `static/daily_report_sharing.js` | Firestore reads; Flask Daily Records APIs for mutations and helper data |
+| Daily Reports | `templates/daily_reports.html` | `static/daily_reports.js`, `static/daily_report_sharing.js` | Firestore reads; authenticated Flask Daily Records and Google Drive APIs |
 | Daily Report viewer template | `templates/daily_reports_viewer.html` | `static/daily_report_sharing.js` | Currently not rendered by any Flask route; the active share link targets the authenticated Daily Reports page |
 | Drawings | `templates/drawings.html` | `static/drawings.js` | Firestore reads; Flask category/drawing mutations |
 | Materials | `templates/materials.html` | `static/materials.js`, `static/materials_logic.mjs` | Firestore reads; Flask master-data and transaction mutations |

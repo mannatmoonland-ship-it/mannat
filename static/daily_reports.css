@@ -751,6 +751,29 @@ textarea {
     margin-top: 20px;
 }
 
+.dr-evidence-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+#dr-driveStatus {
+    color: #667085;
+    font-size: 12px;
+}
+
+.dr-evupload {
+    background: #d1fadf;
+    color: #05603a;
+}
+
+.dr-evupload:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
 .dr-secondary {
     background: #e9eef5;
     color: #18212b;
@@ -758,7 +781,7 @@ textarea {
 
 .dr-evrow {
     display: grid;
-    grid-template-columns: 110px 1fr 2fr 40px;
+    grid-template-columns: 110px minmax(120px, 1fr) minmax(180px, 2fr) auto 40px;
     gap: 7px;
     margin: 8px 0;
 }

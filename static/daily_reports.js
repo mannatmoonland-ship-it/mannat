@@ -82,6 +82,7 @@ const DailyReports = (function() {
   
   // Debounce timer for URL input
   let previewDebounceTimer = null;
+  let driveConnected = false;
   const PREVIEW_DEBOUNCE_MS = 800;
   const GOOGLE_PHOTOS_EXTRACTION_TIMEOUT_MS = 15000;
   const GOOGLE_PHOTOS_PREVIEW_WAIT_TIMEOUT_MS = 15000;
@@ -789,7 +790,7 @@ const DailyReports = (function() {
         class="dr-ev-img"
         loading="lazy"
         onerror="if(this.dataset.fallbacks){const f=this.dataset.fallbacks.split(',');this.src=f.shift();this.dataset.fallbacks=f.join(',');}else{this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='block';}">
-        <div class="dr-preview-error" style="display:none;">Photo preview unavailable. Make sure link sharing is set to &quot;Anyone with the link&quot;. <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open in Google Drive</a></div>`;
+        <div class="dr-preview-error" style="display:none;">Photo preview unavailable. Sign in to a Google account with access to this file. <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open in Google Drive</a></div>`;
     }
     if(d) return `<iframe src="https://drive.google.com/file/d/${d}/preview"></iframe>`;
     
@@ -901,6 +902,8 @@ const DailyReports = (function() {
         class="dr-evurl"
         placeholder="YouTube, Google Drive, or Google Photos link"
         value="${escapeHtml(data.url || "")}">
+      <input class="dr-evupload-input" type="file" accept="image/*" capture="environment" hidden>
+      <button type="button" class="dr-evupload">Take / Upload Photo</button>
       <button type="button" class="dr-remove">×</button>
     `;
 
@@ -913,6 +916,50 @@ const DailyReports = (function() {
       updatePreview();
     };
 
+    const uploadInput = row.querySelector(".dr-evupload-input");
+    const uploadButton = row.querySelector(".dr-evupload");
+    uploadButton.disabled = !driveConnected;
+    uploadButton.addEventListener("click", () => {
+      uploadInput.click();
+    });
+    uploadInput.addEventListener("change", async () => {
+      const photo = uploadInput.files?.[0];
+      if (!photo) return;
+      uploadButton.disabled = true;
+      uploadButton.textContent = "Uploading...";
+      try {
+        const formData = new FormData();
+        formData.append("photo", photo, photo.name);
+        const response = await fetch("/api/daily-reports/evidence/upload", {
+          method: "POST",
+          headers: { "X-CSRF-Token": document.body.dataset.dailyReportsCsrf || "" },
+          body: formData,
+          cache: "no-store",
+          credentials: "same-origin"
+        });
+        let payload = {};
+        try {
+          payload = await response.json();
+        } catch (error) {
+          throw new Error("The photo upload service returned an invalid response.");
+        }
+        if (!response.ok) {
+          throw new Error(payload.error || "Unable to upload the photo.");
+        }
+        row.querySelector(".dr-evtype").value = "Photo";
+        row.querySelector(".dr-evtitle").value = payload.title || "Site photo";
+        row.querySelector(".dr-evurl").value = payload.url;
+        updatePreview();
+        showToast("Photo uploaded to Google Drive and added to evidence.", "success", 4000);
+      } catch (error) {
+        showToast(error.message || "Unable to upload the photo.", "error", 5000);
+      } finally {
+        uploadInput.value = "";
+        uploadButton.disabled = false;
+        uploadButton.textContent = "Take / Upload Photo";
+      }
+    });
+
     // Debounced URL input to avoid excessive extraction requests
     row.querySelector(".dr-evurl").oninput = () => {
       clearTimeout(previewDebounceTimer);
@@ -922,6 +969,62 @@ const DailyReports = (function() {
 
     $("dr-evidenceRows").appendChild(row);
     updatePreview();
+  }
+
+  async function initializeDailyReportsDrive() {
+    const statusElement = $("dr-driveStatus");
+    const connectButton = $("dr-connectDrive");
+    if (!statusElement) return;
+    try {
+      const response = await fetch("/api/daily-reports/google-drive/status", {
+        cache: "no-store",
+        credentials: "same-origin"
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Google Drive status is unavailable.");
+      if (payload.message) {
+        statusElement.textContent = payload.message;
+      } else if (payload.connected) {
+        statusElement.textContent = "Google Drive connected";
+      } else {
+        statusElement.textContent = payload.configured
+          ? "Google Drive not connected"
+          : "Google Drive needs administrator setup";
+      }
+      if (connectButton) {
+        connectButton.hidden = !payload.can_connect;
+        connectButton.disabled = !payload.configured;
+      }
+      driveConnected = Boolean(payload.connected);
+      document.querySelectorAll(".dr-evupload").forEach(button => {
+        button.disabled = !driveConnected;
+      });
+      if (connectButton && !connectButton.dataset.bound) {
+        connectButton.dataset.bound = "true";
+        connectButton.addEventListener("click", async () => {
+          connectButton.disabled = true;
+          try {
+            const csrfToken = document.body.dataset.dailyReportsCsrf || "";
+            const connectResponse = await fetch("/api/daily-reports/google-drive/connect", {
+              method: "POST",
+              headers: { "X-CSRF-Token": csrfToken },
+              cache: "no-store",
+              credentials: "same-origin"
+            });
+            const connectPayload = await connectResponse.json();
+            if (!connectResponse.ok) {
+              throw new Error(connectPayload.error || "Unable to connect Google Drive.");
+            }
+            window.location.assign(connectPayload.authorization_url);
+          } catch (error) {
+            statusElement.textContent = error.message || "Unable to connect Google Drive.";
+            connectButton.disabled = false;
+          }
+        });
+      }
+    } catch (error) {
+      statusElement.textContent = error.message || "Google Drive status is unavailable.";
+    }
   }
 
   function updatePreview(){
@@ -1855,6 +1958,7 @@ const DailyReports = (function() {
 
   // Initialize event listeners
   function init() {
+    initializeDailyReportsDrive();
     updateDateUrl(true);
     window.addEventListener("popstate", () => {
       const dateFromUrl = getDateFromUrl();

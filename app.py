@@ -7849,8 +7849,17 @@ def _daily_reports_drive_flow(*, state=None, code_verifier=None):
     return flow
 
 
-def _save_daily_reports_drive_credentials(credentials_value):
+def _daily_reports_drive_token_path(user_id):
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise ValueError("A signed-in user is required for Google Drive token storage.")
     _client_path, _redirect_uri, token_path = _daily_reports_drive_paths()
+    user_key = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:24]
+    token_suffix = token_path.suffix or ".json"
+    return token_path.with_name(f"{token_path.stem}-{user_key}{token_suffix}")
+
+
+def _save_daily_reports_drive_credentials(user_id, credentials_value):
+    token_path = _daily_reports_drive_token_path(user_id)
     token_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary_path = None
     try:
@@ -7876,9 +7885,9 @@ def _save_daily_reports_drive_credentials(credentials_value):
             temporary_path.unlink()
 
 
-def _daily_reports_drive_credentials():
+def _daily_reports_drive_credentials(user_id):
     with _DAILY_REPORTS_DRIVE_LOCK:
-        _client_path, _redirect_uri, token_path = _daily_reports_drive_paths()
+        token_path = _daily_reports_drive_token_path(user_id)
         if not token_path.is_file():
             return None
         credentials_value = Credentials.from_authorized_user_file(
@@ -7887,7 +7896,7 @@ def _daily_reports_drive_credentials():
         )
         if credentials_value.expired and credentials_value.refresh_token:
             credentials_value.refresh(GoogleAuthRequest())
-            _save_daily_reports_drive_credentials(credentials_value)
+            _save_daily_reports_drive_credentials(user_id, credentials_value)
         return credentials_value if credentials_value.valid else None
 
 
@@ -7898,8 +7907,8 @@ def _daily_reports_drive_api_response(payload, status=200):
     return response
 
 
-def _daily_reports_drive_admin_authorize(*, require_csrf=False):
-    user, denied = _daily_record_api_authorize("user_admin.manage")
+def _daily_reports_drive_authorize(*, require_csrf=False):
+    user, denied = _daily_record_api_authorize("daily_reports.read")
     if denied:
         return None, denied
     if require_csrf and not _daily_record_api_csrf_valid():
@@ -7937,31 +7946,23 @@ def daily_reports_google_drive_status():
     credentials_value = None
     if client_configured:
         try:
-            credentials_value = _daily_reports_drive_credentials()
+            credentials_value = _daily_reports_drive_credentials(user["id"])
         except Exception as error:
             app.logger.warning(
                 "Daily Reports Google Drive token check failed (%s).",
                 type(error).__name__,
             )
-    can_connect = False
-    try:
-        can_connect = _user_has_compiled_permission(user, "user_admin.manage")
-    except Exception as error:
-        app.logger.error(
-            "Daily Reports Google Drive administrator permission check failed (%s).",
-            type(error).__name__,
-        )
     return _daily_reports_drive_api_response({
         "connected": bool(credentials_value),
         "configured": client_configured,
-        "can_connect": can_connect,
+        "can_connect": True,
         "message": session.pop("daily_reports_drive_message", ""),
     })
 
 
 @app.route("/api/daily-reports/google-drive/connect", methods=["POST"])
 def daily_reports_google_drive_connect():
-    _user, denied = _daily_reports_drive_admin_authorize(require_csrf=True)
+    _user, denied = _daily_reports_drive_authorize(require_csrf=True)
     if denied:
         return denied
     try:
@@ -7990,7 +7991,7 @@ def daily_reports_google_drive_connect():
 
 @app.route("/api/daily-reports/google-drive/callback", methods=["GET"])
 def daily_reports_google_drive_callback():
-    _user, denied = _daily_reports_drive_admin_authorize()
+    user, denied = _daily_reports_drive_authorize()
     if denied:
         return redirect(url_for("daily_reports"))
     expected_state = session.pop("daily_reports_drive_oauth_state", "")
@@ -8012,14 +8013,23 @@ def daily_reports_google_drive_callback():
             code_verifier=code_verifier,
         )
         flow.fetch_token(code=request.args.get("code", ""))
-        _save_daily_reports_drive_credentials(flow.credentials)
+        _save_daily_reports_drive_credentials(user["id"], flow.credentials)
     except Exception as error:
+        failure_category = (
+            "token_storage_not_writable"
+            if isinstance(error, PermissionError)
+            else "oauth_callback_failed"
+        )
         app.logger.error(
-            "Daily Reports Google Drive OAuth callback failed (%s).",
+            "Daily Reports Google Drive OAuth callback failed (%s; category=%s).",
             type(error).__name__,
+            failure_category,
         )
         session["daily_reports_drive_message"] = (
-            "Google Drive could not be connected. Try again or contact your administrator."
+            "Google Drive authorization could not be saved. Ensure the configured token path "
+            "is on writable durable storage, then try again."
+            if isinstance(error, PermissionError)
+            else "Google Drive could not be connected. Try again or contact your administrator."
         )
     else:
         session["daily_reports_drive_message"] = "Google Drive is connected for Daily Reports."
@@ -8071,7 +8081,7 @@ def upload_daily_report_evidence():
             {"error": "Choose a supported image file."}, 400
         )
     try:
-        credentials_value = _daily_reports_drive_credentials()
+        credentials_value = _daily_reports_drive_credentials(current_user["id"])
         if credentials_value is None:
             return _daily_reports_drive_api_response(
                 {"error": "Google Drive is not connected. Ask a Super Admin to connect it."},

@@ -992,7 +992,7 @@ const DailyReports = (function() {
           : "Google Drive needs administrator setup";
       }
       if (connectButton) {
-        connectButton.hidden = !payload.can_connect;
+        connectButton.hidden = !payload.can_connect || Boolean(payload.connected);
         connectButton.disabled = !payload.configured;
       }
       driveConnected = Boolean(payload.connected);

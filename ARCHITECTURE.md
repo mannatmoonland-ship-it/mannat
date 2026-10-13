@@ -42,7 +42,7 @@ flowchart TB
         FirebaseAuth["Firebase Authentication"]
         SMTP["SMTP mail service"]
         Photos["Google Photos"]
-        Drive["Google Drive<br/>OAuth drive.file"]
+        Drive["Google Drive<br/>per-user OAuth drive.file"]
         LocalFiles[("Local instance/ and backups/ files")]
     end
 

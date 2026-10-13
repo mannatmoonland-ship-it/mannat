@@ -91,7 +91,7 @@ def test_google_drive_status_requires_login_and_reports_setup_state(
     assert unauthenticated.status_code == 401
 
 
-def test_only_super_admin_can_start_shared_drive_oauth(daily_drive_client, monkeypatch):
+def test_all_daily_report_users_can_start_their_own_drive_oauth(daily_drive_client, monkeypatch):
     store, client = daily_drive_client
     state = "oauth-state-for-test"
 
@@ -118,11 +118,18 @@ def test_only_super_admin_can_start_shared_drive_oauth(daily_drive_client, monke
         assert flask_session["daily_reports_drive_code_verifier"] == "pkce-code-verifier"
 
     set_role(store, client, "office_staff")
-    denied = client.post(
+    allowed = client.post(
         "/api/daily-reports/google-drive/connect",
         headers={"X-CSRF-Token": CSRF},
     )
-    assert denied.status_code == 403
+    assert allowed.status_code == 200
+
+    set_role(store, client, "Site Observer", ["daily_reports.read"])
+    read_only_allowed = client.post(
+        "/api/daily-reports/google-drive/connect",
+        headers={"X-CSRF-Token": CSRF},
+    )
+    assert read_only_allowed.status_code == 200
 
 
 def test_google_drive_callback_checks_oauth_state_before_saving(
@@ -146,7 +153,7 @@ def test_google_drive_callback_checks_oauth_state_before_saving(
     monkeypatch.setattr(
         app_module,
         "_save_daily_reports_drive_credentials",
-        saved_credentials.append,
+        lambda user_id, credentials: saved_credentials.append((user_id, credentials)),
     )
     with client.session_transaction() as flask_session:
         flask_session["daily_reports_drive_oauth_state"] = "expected-state"
@@ -167,7 +174,53 @@ def test_google_drive_callback_checks_oauth_state_before_saving(
     assert success.status_code == 302
     assert exchanged_codes == ["authorization-code"]
     assert len(saved_credentials) == 1
-    assert saved_credentials[0] is FakeFlow.credentials
+    assert saved_credentials[0] == (USER_ID, FakeFlow.credentials)
+
+
+def test_drive_token_files_are_isolated_per_user(monkeypatch, tmp_path):
+    configure_drive_oauth(monkeypatch, tmp_path)
+    first_user_path = app_module._daily_reports_drive_token_path("user-one")
+    second_user_path = app_module._daily_reports_drive_token_path("user-two")
+
+    assert first_user_path != second_user_path
+    assert first_user_path.parent == second_user_path.parent
+    assert "user-one" not in first_user_path.name
+    assert "user-two" not in second_user_path.name
+
+
+def test_callback_reports_writable_durable_storage_setup_for_permission_error(
+    daily_drive_client, monkeypatch, caplog
+):
+    _store, client = daily_drive_client
+
+    class FakeFlow:
+        credentials = object()
+
+        def fetch_token(self, *, code):
+            pass
+
+    def fail_to_save_credentials(user_id, credentials):
+        raise PermissionError("sensitive path and content")
+
+    monkeypatch.setattr(app_module, "_daily_reports_drive_flow", lambda **_kwargs: FakeFlow())
+    monkeypatch.setattr(
+        app_module,
+        "_save_daily_reports_drive_credentials",
+        fail_to_save_credentials,
+    )
+    with client.session_transaction() as flask_session:
+        flask_session["daily_reports_drive_oauth_state"] = "expected-state"
+        flask_session["daily_reports_drive_code_verifier"] = "stored-verifier"
+
+    response = client.get(
+        "/api/daily-reports/google-drive/callback?state=expected-state&code=authorization-code"
+    )
+
+    assert response.status_code == 302
+    assert "category=token_storage_not_writable" in caplog.text
+    assert "sensitive path and content" not in caplog.text
+    with client.session_transaction() as flask_session:
+        assert "writable durable storage" in flask_session["daily_reports_drive_message"]
 
 
 def test_upload_requires_daily_report_write_permission_and_csrf(daily_drive_client):
@@ -204,7 +257,11 @@ def test_upload_stores_photo_as_private_drive_file_and_returns_evidence_link(
 ):
     _store, client = daily_drive_client
     configure_drive_oauth(monkeypatch, tmp_path)
-    monkeypatch.setattr(app_module, "_daily_reports_drive_credentials", lambda: object())
+    monkeypatch.setattr(
+        app_module,
+        "_daily_reports_drive_credentials",
+        lambda user_id: object(),
+    )
     created_metadata = []
     created_media = []
 
@@ -266,7 +323,11 @@ def test_upload_enforces_size_limit_before_reading_file(daily_drive_client):
 def test_upload_is_disabled_until_drive_is_connected(daily_drive_client, monkeypatch, tmp_path):
     _store, client = daily_drive_client
     configure_drive_oauth(monkeypatch, tmp_path)
-    monkeypatch.setattr(app_module, "_daily_reports_drive_credentials", lambda: None)
+    monkeypatch.setattr(
+        app_module,
+        "_daily_reports_drive_credentials",
+        lambda user_id: None,
+    )
 
     response = client.post(
         "/api/daily-reports/evidence/upload",
@@ -285,7 +346,7 @@ def test_drive_upload_failure_does_not_log_or_return_sensitive_exception_details
     configure_drive_oauth(monkeypatch, tmp_path)
     sensitive_marker = "private-token-value-for-test-only"
 
-    def fail_to_load_credentials():
+    def fail_to_load_credentials(user_id):
         raise RuntimeError(sensitive_marker)
 
     monkeypatch.setattr(
@@ -322,4 +383,6 @@ def test_daily_reports_ui_integrates_camera_capture_with_existing_evidence():
     assert 'capture="environment"' in source
     assert '"/api/daily-reports/evidence/upload"' in source
     assert 'row.querySelector(".dr-evurl").value = payload.url;' in source
+    assert "connectButton.hidden = !payload.can_connect || Boolean(payload.connected);" in source
     assert 'id="dr-connectDrive"' in template
+    assert "{% if current_user.role == 'super_admin' %}" not in template

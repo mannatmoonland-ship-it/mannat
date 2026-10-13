@@ -690,6 +690,7 @@ class InMemoryFirestoreStore:
         self.trades = {}
         self.drawings_categories = {}
         self.drawings = {}
+        self.red_book_items = {}
         self.custom_staff_types = {}
         self.audit_log = []
         self.camera_auth_attempts = {}
@@ -697,6 +698,7 @@ class InMemoryFirestoreStore:
         self._payment_lock = threading.RLock()
         self._trade_mutation_lock = threading.RLock()
         self._drawings_mutation_lock = threading.RLock()
+        self._red_book_mutation_lock = threading.RLock()
         self._material_transaction_lock = threading.RLock()
         self.material_categories = {}
         self.materials = {}
@@ -944,6 +946,64 @@ class InMemoryFirestoreStore:
                 raise DrawingMutationError("The drawing list changed. Reload and try again.", 409)
             for sort_order, drawing_id in enumerate(drawing_ids):
                 category_drawings[drawing_id]["sortOrder"] = sort_order
+            return True
+
+    def list_red_book_items(self):
+        with self._red_book_mutation_lock:
+            return _sort_red_book_items(
+                [{"id": item_id, **item} for item_id, item in self.red_book_items.items()]
+            )
+
+    def create_red_book_item(self, item_id, text, actor_id):
+        with self._red_book_mutation_lock:
+            if item_id in self.red_book_items:
+                raise RedBookMutationError("This item request ID has already been used.", 409)
+            if len(self.red_book_items) >= RED_BOOK_MAX_ITEMS:
+                raise RedBookMutationError("The Red Book has reached its item limit.", 409)
+            now = iso_now()
+            self.red_book_items[item_id] = {
+                "text": text,
+                "sort_order": len(self.red_book_items),
+                "created_at": now,
+                "updated_at": now,
+                "created_by": actor_id,
+                "updated_by": actor_id,
+            }
+            return {"id": item_id}
+
+    def update_red_book_item(self, item_id, text, actor_id):
+        with self._red_book_mutation_lock:
+            item = self.red_book_items.get(item_id)
+            if item is None:
+                return False
+            item.update({"text": text, "updated_at": iso_now(), "updated_by": actor_id})
+            return True
+
+    def delete_red_book_item(self, item_id, actor_id):
+        with self._red_book_mutation_lock:
+            if item_id not in self.red_book_items:
+                return False
+            del self.red_book_items[item_id]
+            now = iso_now()
+            ordered_items = sorted(
+                self.red_book_items.items(),
+                key=lambda pair: (_red_book_sort_order(pair[1]), pair[0]),
+            )
+            for sort_order, (_item_id, item) in enumerate(ordered_items):
+                item.update(
+                    {"sort_order": sort_order, "updated_at": now, "updated_by": actor_id}
+                )
+            return True
+
+    def reorder_red_book_items(self, item_ids, actor_id):
+        with self._red_book_mutation_lock:
+            if set(item_ids) != set(self.red_book_items) or len(item_ids) != len(self.red_book_items):
+                raise RedBookMutationError("The Red Book changed. Reload and try again.", 409)
+            now = iso_now()
+            for sort_order, item_id in enumerate(item_ids):
+                self.red_book_items[item_id].update(
+                    {"sort_order": sort_order, "updated_at": now, "updated_by": actor_id}
+                )
             return True
 
     def _normalize_user(self, user):
@@ -1806,6 +1866,118 @@ class FirebaseFirestoreStore:
                 transaction.update(
                     drawings.document(drawing_id), {"sortOrder": sort_order}
                 )
+            return True
+
+        return reorder(firestore_transaction)
+
+    def list_red_book_items(self):
+        snapshots = self._collection("red_book_items").stream()
+        return _sort_red_book_items(
+            [{"id": snapshot.id, **(snapshot.to_dict() or {})} for snapshot in snapshots]
+        )
+
+    def create_red_book_item(self, item_id, text, actor_id):
+        items = self._collection("red_book_items")
+        reference = items.document(item_id)
+        firestore_transaction = self.db.transaction()
+
+        @firestore.transactional
+        def create(transaction):
+            existing = _transaction_get_document_snapshot(transaction, reference)
+            if existing.exists:
+                raise RedBookMutationError("This item request ID has already been used.", 409)
+            snapshots = _transaction_get_collection_snapshots(transaction, items)
+            if len(snapshots) >= RED_BOOK_MAX_ITEMS:
+                raise RedBookMutationError("The Red Book has reached its item limit.", 409)
+            next_order = max(
+                (
+                    order
+                    for order in (
+                        _red_book_sort_order(snapshot.to_dict() or {})
+                        for snapshot in snapshots
+                    )
+                    if order is not None
+                ),
+                default=-1,
+            ) + 1
+            now = iso_now()
+            transaction.create(reference, {
+                "text": text,
+                "sort_order": next_order,
+                "created_at": now,
+                "updated_at": now,
+                "created_by": actor_id,
+                "updated_by": actor_id,
+            })
+            return {"id": item_id}
+
+        return create(firestore_transaction)
+
+    def update_red_book_item(self, item_id, text, actor_id):
+        reference = self._collection("red_book_items").document(item_id)
+        firestore_transaction = self.db.transaction()
+
+        @firestore.transactional
+        def update(transaction):
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
+            if not snapshot.exists:
+                return False
+            transaction.update(reference, {
+                "text": text,
+                "updated_at": iso_now(),
+                "updated_by": actor_id,
+            })
+            return True
+
+        return update(firestore_transaction)
+
+    def delete_red_book_item(self, item_id, actor_id):
+        items = self._collection("red_book_items")
+        reference = items.document(item_id)
+        firestore_transaction = self.db.transaction()
+
+        @firestore.transactional
+        def delete(transaction):
+            snapshots = _transaction_get_collection_snapshots(transaction, items)
+            by_id = {snapshot.id: snapshot for snapshot in snapshots}
+            if item_id not in by_id:
+                return False
+            if len(snapshots) > RED_BOOK_MAX_ITEMS:
+                raise RedBookMutationError("The Red Book cannot be renumbered safely.", 409)
+            now = iso_now()
+            transaction.delete(reference)
+            remaining = [
+                snapshot for snapshot in snapshots if snapshot.id != item_id
+            ]
+            for sort_order, snapshot in enumerate(_sort_red_book_snapshots(remaining)):
+                transaction.update(items.document(snapshot.id), {
+                    "sort_order": sort_order,
+                    "updated_at": now,
+                    "updated_by": actor_id,
+                })
+            return True
+
+        return delete(firestore_transaction)
+
+    def reorder_red_book_items(self, item_ids, actor_id):
+        items = self._collection("red_book_items")
+        firestore_transaction = self.db.transaction()
+
+        @firestore.transactional
+        def reorder(transaction):
+            snapshots = _transaction_get_collection_snapshots(transaction, items)
+            by_id = {snapshot.id: snapshot for snapshot in snapshots}
+            if set(item_ids) != set(by_id) or len(item_ids) != len(by_id):
+                raise RedBookMutationError("The Red Book changed. Reload and try again.", 409)
+            if len(item_ids) > RED_BOOK_MAX_ITEMS:
+                raise RedBookMutationError("The Red Book has too many items to reorder safely.", 409)
+            now = iso_now()
+            for sort_order, item_id in enumerate(item_ids):
+                transaction.update(items.document(item_id), {
+                    "sort_order": sort_order,
+                    "updated_at": now,
+                    "updated_by": actor_id,
+                })
             return True
 
         return reorder(firestore_transaction)
@@ -5386,6 +5558,240 @@ def drawings_reorder_api(category_id):
     if error_response:
         return error_response
     return _drawings_api_response({"updated": True})
+
+
+RED_BOOK_MAX_ITEMS = 500
+RED_BOOK_MAX_TEXT_LENGTH = 500
+
+
+class RedBookMutationError(ValueError):
+    def __init__(self, message, status=400):
+        super().__init__(message)
+        self.status = status
+
+
+def _red_book_sort_order(item):
+    value = item.get("sort_order")
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if parsed >= 0 and str(value).strip() == str(parsed) else None
+
+
+def _red_book_order_key(item, item_id):
+    order = _red_book_sort_order(item)
+    return (order if order is not None else 2**31, str(item_id or ""))
+
+
+def _sort_red_book_items(items):
+    return sorted(
+        items,
+        key=lambda item: _red_book_order_key(item, item.get("id")),
+    )
+
+
+def _sort_red_book_snapshots(snapshots):
+    return sorted(
+        snapshots,
+        key=lambda snapshot: _red_book_order_key(snapshot.to_dict() or {}, snapshot.id),
+    )
+
+
+def _validate_red_book_text(value):
+    if not isinstance(value, str):
+        raise RedBookMutationError("Enter a valid construction instruction.")
+    normalized = value.strip()
+    if (
+        not normalized
+        or len(normalized) > RED_BOOK_MAX_TEXT_LENGTH
+        or any(ord(character) < 32 or ord(character) == 127 for character in normalized)
+    ):
+        raise RedBookMutationError(
+            f"Enter one instruction of 1 to {RED_BOOK_MAX_TEXT_LENGTH} characters."
+        )
+    return normalized
+
+
+def _valid_red_book_item_id(value):
+    try:
+        parsed = uuid.UUID(value) if isinstance(value, str) else None
+    except (AttributeError, ValueError):
+        parsed = None
+    return parsed is not None and str(parsed) == value.lower()
+
+
+def _red_book_api_response(payload, status=200):
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+def _red_book_api_authorize(permission, *, require_csrf=False):
+    user = get_current_user()
+    if not user:
+        return None, _red_book_api_response({"error": "Authentication required."}, 401)
+    if user.get("must_change_password"):
+        return None, _red_book_api_response(
+            {"error": "Change your password before continuing."}, 403
+        )
+    try:
+        permitted = _user_has_compiled_permission(user, permission)
+    except Exception as error:
+        app.logger.error("Red Book authorization failed (%s).", type(error).__name__)
+        return None, _red_book_api_response(
+            {"error": "Unable to verify Red Book permissions."}, 503
+        )
+    if not permitted:
+        return None, _red_book_api_response(
+            {"error": "You do not have permission to perform this Red Book action."}, 403
+        )
+    if require_csrf:
+        expected = session.get("red_book_csrf", "")
+        supplied = request.headers.get("X-CSRF-Token", "")
+        if not expected or not supplied or not hmac.compare_digest(expected, supplied):
+            return None, _red_book_api_response(
+                {"error": "Your session expired. Reload the page and try again."}, 403
+            )
+    return user, None
+
+
+@app.route("/red-book")
+def red_book_page():
+    user, denied = _red_book_api_authorize("red_book.read")
+    if denied:
+        return denied
+    csrf_token = session.get("red_book_csrf")
+    if not csrf_token:
+        csrf_token = secrets.token_urlsafe(32)
+        session["red_book_csrf"] = csrf_token
+    try:
+        can_edit = _user_has_compiled_permission(user, "red_book.edit")
+        can_create = _user_has_compiled_permission(user, "red_book.create")
+        can_delete = _user_has_compiled_permission(user, "red_book.delete")
+    except Exception as error:
+        app.logger.error("Red Book page permissions failed (%s).", type(error).__name__)
+        return _red_book_api_response(
+            {"error": "Unable to verify Red Book permissions."}, 503
+        )
+    response = app.make_response(render_template(
+        "red_book.html",
+        current_user=user,
+        red_book_csrf=csrf_token,
+        can_edit=can_edit,
+        can_create=can_create,
+        can_delete=can_delete,
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@app.route("/api/red-book/items", methods=["GET", "POST"])
+def red_book_items_api():
+    if request.method == "GET":
+        _user, denied = _red_book_api_authorize("red_book.read")
+        if denied:
+            return denied
+        try:
+            items = get_user_store().list_red_book_items()
+        except Exception as error:
+            app.logger.error("Red Book items could not be loaded (%s).", type(error).__name__)
+            return _red_book_api_response(
+                {"error": "Red Book items are temporarily unavailable."}, 503
+            )
+        public_items = [
+            {
+                field: item.get(field)
+                for field in ("id", "text", "sort_order", "created_at", "updated_at")
+            }
+            for item in items
+        ]
+        return _red_book_api_response({"items": public_items})
+
+    user, denied = _red_book_api_authorize("red_book.create", require_csrf=True)
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"text"}:
+        return _red_book_api_response(
+            {"error": "Provide only the construction instruction."}, 400
+        )
+    try:
+        text = _validate_red_book_text(payload["text"])
+        result = get_user_store().create_red_book_item(
+            str(uuid.uuid4()), text, user.get("id")
+        )
+    except RedBookMutationError as error:
+        return _red_book_api_response({"error": str(error)}, error.status)
+    except Exception as error:
+        app.logger.error("Red Book item creation failed (%s).", type(error).__name__)
+        return _red_book_api_response(
+            {"error": "Unable to save the Red Book item."}, 503
+        )
+    return _red_book_api_response({"id": result["id"]}, 201)
+
+
+@app.route("/api/red-book/items/<item_id>", methods=["PATCH", "DELETE"])
+def red_book_item_api(item_id):
+    permission = "red_book.delete" if request.method == "DELETE" else "red_book.edit"
+    user, denied = _red_book_api_authorize(permission, require_csrf=True)
+    if denied:
+        return denied
+    if not _valid_red_book_item_id(item_id):
+        return _red_book_api_response({"error": "Invalid Red Book item identifier."}, 400)
+    try:
+        store = get_user_store()
+        if request.method == "PATCH":
+            payload = request.get_json(silent=True)
+            if not isinstance(payload, dict) or set(payload) != {"text"}:
+                return _red_book_api_response(
+                    {"error": "Provide only the construction instruction."}, 400
+                )
+            text = _validate_red_book_text(payload["text"])
+            updated = store.update_red_book_item(item_id, text, user.get("id"))
+            if not updated:
+                return _red_book_api_response({"error": "Red Book item not found."}, 404)
+            return _red_book_api_response({"id": item_id})
+        deleted = store.delete_red_book_item(item_id, user.get("id"))
+        if not deleted:
+            return _red_book_api_response({"error": "Red Book item not found."}, 404)
+        return _red_book_api_response({"deleted": True})
+    except RedBookMutationError as error:
+        return _red_book_api_response({"error": str(error)}, error.status)
+    except Exception as error:
+        app.logger.error("Red Book item mutation failed (%s).", type(error).__name__)
+        return _red_book_api_response(
+            {"error": "Unable to update the Red Book item."}, 503
+        )
+
+
+@app.route("/api/red-book/order", methods=["POST"])
+def red_book_order_api():
+    user, denied = _red_book_api_authorize("red_book.edit", require_csrf=True)
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    item_ids = payload.get("ids") if isinstance(payload, dict) and set(payload) == {"ids"} else None
+    if (
+        not isinstance(item_ids, list)
+        or len(item_ids) > RED_BOOK_MAX_ITEMS
+        or any(not _valid_red_book_item_id(item_id) for item_id in item_ids)
+        or len(set(item_ids)) != len(item_ids)
+    ):
+        return _red_book_api_response({"error": "Provide a valid Red Book order."}, 400)
+    try:
+        get_user_store().reorder_red_book_items(item_ids, user.get("id"))
+    except RedBookMutationError as error:
+        return _red_book_api_response({"error": str(error)}, error.status)
+    except Exception as error:
+        app.logger.error("Red Book reorder failed (%s).", type(error).__name__)
+        return _red_book_api_response(
+            {"error": "Unable to save the Red Book order."}, 503
+        )
+    return _red_book_api_response({"updated": True})
 
 
 @app.route("/materials")

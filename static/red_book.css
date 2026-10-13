@@ -1,0 +1,230 @@
+.red-book-header {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 20px clamp(16px, 4vw, 56px);
+    border-bottom: 1px solid rgba(167, 214, 196, 0.18);
+    background: #07110e;
+}
+
+.red-book-brand {
+    color: #e9fff5;
+    font-weight: 800;
+    letter-spacing: 0.16em;
+}
+
+.red-book-subtitle {
+    margin-top: 4px;
+    color: #9bb6ab;
+    font-size: 12px;
+}
+
+.red-book-main {
+    width: min(100% - 32px, 980px);
+    margin: 36px auto 72px;
+    color: #ecf8f2;
+}
+
+.red-book-hero {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 26px;
+}
+
+.red-book-eyebrow {
+    margin: 0 0 8px;
+    color: #77d3a8;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.15em;
+}
+
+.red-book-hero h1 {
+    margin: 0;
+    font-size: clamp(32px, 5vw, 46px);
+}
+
+.red-book-hero p:last-child {
+    margin: 8px 0 0;
+    color: #a9c0b6;
+}
+
+.red-book-add-form {
+    margin-bottom: 20px;
+    padding: 20px;
+    border: 1px solid rgba(114, 211, 169, 0.25);
+    border-radius: 16px;
+    background: rgba(13, 30, 25, 0.88);
+}
+
+.red-book-add-form label,
+.red-book-edit-input {
+    color: #d9eee5;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.red-book-add-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.red-book-add-row input,
+.red-book-edit-input {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid rgba(167, 214, 196, 0.28);
+    border-radius: 10px;
+    outline: none;
+    background: #081510;
+    color: #f2fff8;
+    font: inherit;
+}
+
+.red-book-add-row input:focus,
+.red-book-edit-input:focus {
+    border-color: #77d3a8;
+    box-shadow: 0 0 0 3px rgba(119, 211, 168, 0.14);
+}
+
+.red-book-button {
+    flex: 0 0 auto;
+    min-height: 40px;
+    padding: 9px 14px;
+    border: 1px solid rgba(167, 214, 196, 0.3);
+    border-radius: 10px;
+    background: rgba(18, 37, 34, 0.7);
+    color: #e9fff5;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.red-book-button:hover:not(:disabled) {
+    border-color: #77d3a8;
+    background: rgba(114, 211, 169, 0.15);
+}
+
+.red-book-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+}
+
+.red-book-primary {
+    border-color: rgba(119, 211, 168, 0.55);
+    background: #15563d;
+}
+
+.red-book-status {
+    min-height: 22px;
+    color: #9bdcb9;
+}
+
+.red-book-status[data-kind="error"] {
+    color: #ff9c9c;
+}
+
+.red-book-list {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: red-book;
+}
+
+.red-book-item {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border: 1px solid rgba(167, 214, 196, 0.2);
+    border-radius: 14px;
+    background: rgba(13, 30, 25, 0.8);
+}
+
+.red-book-item[draggable="true"] {
+    cursor: grab;
+}
+
+.red-book-item.red-book-dragging {
+    opacity: 0.45;
+}
+
+.red-book-number {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    border-radius: 50%;
+    background: rgba(119, 211, 168, 0.14);
+    color: #9be4bc;
+    font-weight: 800;
+}
+
+.red-book-text {
+    overflow-wrap: anywhere;
+    line-height: 1.55;
+}
+
+.red-book-item-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: end;
+    gap: 6px;
+}
+
+.red-book-item-actions .red-book-button {
+    min-height: 34px;
+    padding: 6px 9px;
+    font-size: 12px;
+}
+
+.red-book-item-actions .red-book-button[aria-label="Move Up"],
+.red-book-item-actions .red-book-button[aria-label="Move Down"] {
+    min-width: 38px;
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.red-book-empty {
+    padding: 32px 18px;
+    border: 1px dashed rgba(167, 214, 196, 0.3);
+    border-radius: 14px;
+    color: #a9c0b6;
+    text-align: center;
+}
+
+@media (max-width: 720px) {
+    .red-book-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .red-book-hero {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .red-book-add-row {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .red-book-item {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .red-book-item-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
+}

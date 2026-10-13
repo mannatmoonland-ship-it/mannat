@@ -13,6 +13,7 @@
             </button>
             <div class="mm-nav-submenu" id="mm-nav-construction">
                 <a href="{{ url_for('daily_reports') }}">Daily Reports</a>
+                <a href="{{ url_for('red_book_page') }}">Red Book</a>
                 {% if nav_user and nav_role == 'super_admin' %}
                 <a href="{{ url_for('trade_builder') }}">Trade Builder</a>
                 {% endif %}

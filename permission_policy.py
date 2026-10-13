@@ -34,6 +34,10 @@ PERMISSION_IDENTIFIERS = frozenset(
         "owner_scope.edit",
         "owner_scope.delete",
         "building_cost_summary.read",
+        "red_book.read",
+        "red_book.create",
+        "red_book.edit",
+        "red_book.delete",
         "user_admin.manage",
         "system_backup.manage",
     }
@@ -61,6 +65,9 @@ _OPERATIONAL_PERMISSIONS = frozenset(
         "owner_scope.create",
         "owner_scope.edit",
         "building_cost_summary.read",
+        "red_book.read",
+        "red_book.create",
+        "red_book.edit",
     }
 )
 

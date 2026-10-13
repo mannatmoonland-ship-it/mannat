@@ -23,6 +23,12 @@ def test_super_admin_receives_full_sensitive_permissions():
         "user_admin.manage",
         "system_backup.manage",
     } <= permissions
+    assert {
+        "red_book.read",
+        "red_book.create",
+        "red_book.edit",
+        "red_book.delete",
+    } <= permissions
 
 
 @pytest.mark.parametrize("role", ["office_staff", "supervisor"])
@@ -60,6 +66,12 @@ def test_operational_role_permissions(role):
     assert "trade_builder.write" not in permissions
     assert "user_admin.manage" not in permissions
     assert "system_backup.manage" not in permissions
+    assert {
+        "red_book.read",
+        "red_book.create",
+        "red_book.edit",
+    } <= permissions
+    assert "red_book.delete" not in permissions
 
 
 def test_custom_role_has_no_permissions_without_explicit_definition():

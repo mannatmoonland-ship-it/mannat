@@ -779,7 +779,22 @@ flowchart LR
     Category -->|"categoryId"| Drawing
 ```
 
-### 7.5 Owner Scope
+### 7.5 Red Book
+
+```mermaid
+flowchart LR
+    Item["red_book_items/{itemId}<br/>text, sort_order, timestamps,<br/>created_by, updated_by"]
+    Flask["Flask Red Book API<br/>role + CSRF checks"]
+    Browser["Red Book page<br/>numbered list + saved ordering"]
+    Browser -->|"same-origin API requests"| Flask
+    Flask -->|"transactional CRUD + reorder"| Item
+```
+
+Red Book is a shared site checklist. Each instruction is an individual
+Firestore document; its `sort_order` is persisted transactionally. Browser
+mutations go through Flask and do not write directly to Firestore.
+
+### 7.6 Owner Scope
 
 ```mermaid
 flowchart LR
@@ -793,7 +808,7 @@ flowchart LR
     Scope -. "legacySource metadata checked against" .-> Legacy
 ```
 
-### 7.6 Snapshot archive
+### 7.7 Snapshot archive
 
 ```mermaid
 flowchart LR
@@ -814,12 +829,13 @@ segments such as IDs are shown symbolically.
 | Route family | Operations |
 |---|---|
 | Health/static | `GET/HEAD /health`, `/favicon.ico`, static asset delivery |
-| Main pages | `/`, `/profile-settings`, `/trade-builder`, `/ledger-prints`, `/drawings`, `/materials`, `/building-cost-summary`, `/labour-payments`, `/owner-scope`, `/daily-reports`, `/google-photos`, `/user-guide`, `/developer-guide` |
+| Main pages | `/`, `/profile-settings`, `/trade-builder`, `/ledger-prints`, `/drawings`, `/materials`, `/building-cost-summary`, `/labour-payments`, `/owner-scope`, `/daily-reports`, `/red-book`, `/google-photos`, `/user-guide`, `/developer-guide` |
 | Firebase bridge | `GET /api/firebase-web-config`; `GET/POST /api/firebase-custom-token` |
 | Authentication and recovery | `/login`, `/logout`, `/password-reset-request`, `/reset-password/{user_id}`, `/reset-password/{user_id}/validate`, `/forgot-password`, `/change-password`, `/super-admin-recovery`, `/test-email` |
 | Profile and camera | `PATCH /api/profile`, `POST /api/profile/avatar`, `POST /api/camera/authenticate` |
 | User administration | `/user-management`, `/user-management/create`, `/user-management/custom-type` and `/{staff_type_id}/edit|delete`, `/user-management/{user_id}`, `/{user_id}/edit`, `/{user_id}/toggle-status`, `/{user_id}/reset-password` |
 | Drawings | Categories create/update/delete/order; drawings create/update/delete; category drawing order under `/api/drawings/...` |
+| Red Book | `GET /api/red-book/items`; `POST /api/red-book/items`; `PATCH/DELETE /api/red-book/items/{item_id}`; `POST /api/red-book/order` |
 | Materials | Category and supplier create/update/delete under `/api/material-master/...`; purchase/consumption create/update/delete under `/api/material-transactions/{kind}...` |
 | Trades/contracts | Trade create/update/delete/rename under `/api/trades`; contract item create/replace/update/delete under `/api/trades/{trade_id}/contract-items...` |
 | Labour payments | Create/update/delete under `/api/labour-payments/{trade_id}/transactions...` |

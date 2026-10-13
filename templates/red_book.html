@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mannat Moon - Red Book</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='red_book.css') }}">
+</head>
+<body
+    data-red-book-csrf="{{ red_book_csrf }}"
+    data-can-create="{{ 'true' if can_create else 'false' }}"
+    data-can-edit="{{ 'true' if can_edit else 'false' }}"
+    data-can-delete="{{ 'true' if can_delete else 'false' }}"
+>
+    <header class="red-book-header">
+        <div>
+            <div class="red-book-brand">MANNAT MOON</div>
+            <div class="red-book-subtitle">Construction Documentation</div>
+        </div>
+        {% include '_navigation.html' %}
+    </header>
+
+    <main class="red-book-main">
+        <section class="red-book-hero">
+            <div>
+                <p class="red-book-eyebrow">SITE CHECKLIST</p>
+                <h1>Red Book</h1>
+                <p>Construction precautions, measurements, checks, and instructions.</p>
+            </div>
+        </section>
+
+        {% if can_create %}
+        <form id="redBookAddForm" class="red-book-add-form">
+            <label for="redBookNewText">Add a construction instruction</label>
+            <div class="red-book-add-row">
+                <input
+                    id="redBookNewText"
+                    name="text"
+                    type="text"
+                    maxlength="500"
+                    autocomplete="off"
+                    placeholder="For example: Verify footing dimensions before placing PCC."
+                    required
+                >
+                <button class="red-book-button red-book-primary" type="submit">Add Item</button>
+            </div>
+        </form>
+        {% endif %}
+
+        <p id="redBookStatus" class="red-book-status" role="status" aria-live="polite"></p>
+        <ol id="redBookItems" class="red-book-list" aria-label="Construction instructions"></ol>
+        <p id="redBookEmpty" class="red-book-empty" hidden>No Red Book items have been added yet.</p>
+    </main>
+
+    <script src="{{ url_for('static', filename='red_book.js') }}" defer></script>
+</body>
+</html>

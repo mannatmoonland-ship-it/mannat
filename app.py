@@ -303,6 +303,7 @@ PASSWORD_RESET_WINDOW_SECONDS = 3600
 PASSWORD_RESET_IP_LIMIT = 10
 PASSWORD_RESET_USER_LIMIT = 3
 PASSWORD_RESET_RESPONSE = "If an eligible account was found, reset instructions will be sent to its saved email address."
+LEGACY_SHARED_TEMP_PASSWORD = "password"
 
 if not os.environ.get("FIREBASE_PROJECT_ID") and not IS_PRODUCTION_ENVIRONMENT:
     os.environ["FIREBASE_PROJECT_ID"] = "mannat-moon-construction"
@@ -602,107 +603,21 @@ browser_pool = BrowserPool(max_browsers=2)
 # =========================================================
 
 _url_cache = {}
-_url_failure_cache = {}
-_url_inflight = {}
-_cache_lock = threading.RLock()
+_cache_lock = threading.Lock()
 MAX_CACHE_SIZE = 1000
-GOOGLE_PHOTOS_URL_CACHE_TTL_SECONDS = 6 * 60 * 60
-GOOGLE_PHOTOS_FAILURE_CACHE_TTL_SECONDS = 20
-GOOGLE_PHOTOS_INFLIGHT_WAIT_SECONDS = 5
 
 
 def get_cached_url(photos_url):
     with _cache_lock:
-        cached = _url_cache.get(photos_url)
-        if cached is None:
-            return None
-        direct_url, expires_at = cached
-        if time.monotonic() >= expires_at:
-            del _url_cache[photos_url]
-            return None
-        return direct_url
+        return _url_cache.get(photos_url)
 
 
 def cache_url(photos_url, direct_url):
-    if not direct_url:
-        return
     with _cache_lock:
-        now = time.monotonic()
-        expired_keys = [
-            key for key, (_url, expires_at) in _url_cache.items()
-            if expires_at <= now
-        ]
-        for key in expired_keys:
-            del _url_cache[key]
-        if photos_url not in _url_cache and len(_url_cache) >= MAX_CACHE_SIZE:
+        if len(_url_cache) >= MAX_CACHE_SIZE:
             oldest_key = next(iter(_url_cache))
             del _url_cache[oldest_key]
-        _url_cache[photos_url] = (
-            direct_url,
-            now + GOOGLE_PHOTOS_URL_CACHE_TTL_SECONDS,
-        )
-        _url_failure_cache.pop(photos_url, None)
-
-
-def get_or_extract_google_photos_url(photos_url, *, force_refresh=False):
-    while True:
-        with _cache_lock:
-            if not force_refresh:
-                cached = get_cached_url(photos_url)
-                if cached:
-                    return cached, "hit"
-                failure_expires_at = _url_failure_cache.get(photos_url, 0)
-                if failure_expires_at > time.monotonic():
-                    return None, "failure_hit"
-            else:
-                _url_cache.pop(photos_url, None)
-            _url_failure_cache.pop(photos_url, None)
-            event = _url_inflight.get(photos_url)
-            if event is None:
-                event = threading.Event()
-                _url_inflight[photos_url] = event
-                is_owner = True
-            else:
-                is_owner = False
-
-        if not is_owner:
-            if not event.wait(GOOGLE_PHOTOS_INFLIGHT_WAIT_SECONDS):
-                return None, "wait_timeout"
-            force_refresh = False
-            continue
-
-        direct_url = None
-        try:
-            direct_url = _extract_google_photos_image(photos_url)
-            if direct_url:
-                cache_url(photos_url, direct_url)
-            return direct_url, "miss"
-        except Exception as error:
-            app.logger.warning(
-                "Google Photos extraction failed (%s).",
-                type(error).__name__,
-            )
-            return None, "miss"
-        finally:
-            with _cache_lock:
-                if not direct_url:
-                    now = time.monotonic()
-                    expired_failures = [
-                        key for key, expires_at in _url_failure_cache.items()
-                        if expires_at <= now
-                    ]
-                    for key in expired_failures:
-                        del _url_failure_cache[key]
-                    if (
-                        photos_url not in _url_failure_cache
-                        and len(_url_failure_cache) >= MAX_CACHE_SIZE
-                    ):
-                        _url_failure_cache.pop(next(iter(_url_failure_cache)))
-                    _url_failure_cache[photos_url] = (
-                        now + GOOGLE_PHOTOS_FAILURE_CACHE_TTL_SECONDS
-                    )
-                _url_inflight.pop(photos_url, None)
-                event.set()
+        _url_cache[photos_url] = direct_url
 
 
 # =========================================================
@@ -2129,7 +2044,7 @@ class FirebaseFirestoreStore:
         username = (username or "").strip().lower()
         docs = self._collection("users").where(
             filter=FieldFilter("username_lower", "==", username)
-        ).limit(1).stream(retry=Retry(deadline=5), timeout=5)
+        ).limit(1).stream(retry=Retry(deadline=15), timeout=15)
         for doc in docs:
             user = doc.to_dict()
             user["id"] = doc.id
@@ -3731,18 +3646,17 @@ def login_page():
             flash("Invalid username or password.", "error")
             return redirect(url_for("login_page"))
 
-        if validate_password_policy(password):
+        if check_password_hash(
+            user.get("password_hash", ""),
+            LEGACY_SHARED_TEMP_PASSWORD,
+        ):
             add_audit_log(
                 user.get("id"),
-                "weak_password_login_blocked",
-                "Blocked sign-in with a password that does not meet the current password policy",
+                "legacy_shared_password_retired",
+                "Blocked a legacy shared temporary password; a private password reset is required",
                 user.get("id"),
             )
-            flash(
-                "This password no longer meets current security requirements. "
-                "Use Forgot Password to set a new password.",
-                "warning",
-            )
+            flash("This legacy temporary password can no longer be used. Use Forgot Password to set a private password.", "warning")
             return redirect(url_for("login_page"))
 
         set_session_for_user(user)
@@ -6949,7 +6863,7 @@ def _extract_google_photos_image(url):
             page_html,
         )
         if matches:
-            direct_url = matches[0] + "=w1200"
+            direct_url = matches[0] + "=s0"
             _validate_google_photos_url(direct_url.split("=", 1)[0], image=True)
             outcome = "success"
             app.logger.info(
@@ -7023,7 +6937,7 @@ def _extract_google_photos_image(url):
             round((time.monotonic() - browser_stage_started_at) * 1000),
             len(captured),
         )
-        return f"{captured[-1]}=w1200" if captured else None
+        return f"{captured[-1]}=s0" if captured else None
     except Exception as error:
         app.logger.warning(
             "Google Photos extraction stage=%s outcome=error elapsed_ms=%d error_type=%s",
@@ -7437,44 +7351,28 @@ def extract_google_photos_url():
             "Google Photos extraction request status=400 elapsed_ms=%d",
             round((time.monotonic() - request_started_at) * 1000),
         )
-        response = jsonify(error=str(error))
-        response.status_code = 400
-        response.headers["Cache-Control"] = "private, no-store"
-        return response
+        return Response(str(error), status=400, mimetype="text/plain")
 
-    direct_url, cache_status = get_or_extract_google_photos_url(
-        url,
-        force_refresh=request.args.get("retry") == "1",
-    )
-    if direct_url:
+    cached = get_cached_url(url)
+    if cached:
         app.logger.info(
-            "Google Photos extraction request status=200 cache=%s elapsed_ms=%d",
-            cache_status,
+            "Google Photos extraction request status=200 cache=hit elapsed_ms=%d",
             round((time.monotonic() - request_started_at) * 1000),
         )
-        response = jsonify(url=direct_url)
-        response.headers["Cache-Control"] = "private, no-store"
-        return response
-    if cache_status == "wait_timeout":
+        return Response(cached, mimetype="text/plain", headers={"Cache-Control": "private, no-store"})
+    direct_url = _extract_google_photos_image(url)
+    if not direct_url:
         app.logger.warning(
-            "Google Photos extraction request status=503 cache=wait_timeout elapsed_ms=%d",
+            "Google Photos extraction request status=502 cache=miss elapsed_ms=%d",
             round((time.monotonic() - request_started_at) * 1000),
         )
-        response = jsonify(error="Google Photos preview extraction is still in progress. Retry shortly.")
-        response.status_code = 503
-        response.headers["Retry-After"] = "5"
-        response.headers["Cache-Control"] = "private, no-store"
-        return response
-
-    app.logger.warning(
-        "Google Photos extraction request status=502 cache=%s elapsed_ms=%d",
-        cache_status,
+        return Response("No Google Photos image found in the shared page.", status=502, mimetype="text/plain")
+    cache_url(url, direct_url)
+    app.logger.info(
+        "Google Photos extraction request status=200 cache=miss elapsed_ms=%d",
         round((time.monotonic() - request_started_at) * 1000),
     )
-    response = jsonify(error="No Google Photos image preview was found in the shared page.")
-    response.status_code = 502
-    response.headers["Cache-Control"] = "private, no-store"
-    return response
+    return Response(direct_url, mimetype="text/plain", headers={"Cache-Control": "private, no-store"})
 
 
 @app.route("/image")

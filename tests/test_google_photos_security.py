@@ -1,8 +1,3 @@
-from concurrent.futures import ThreadPoolExecutor
-import threading
-import time
-from types import SimpleNamespace
-
 import pytest
 from flask import Response
 
@@ -140,7 +135,7 @@ def test_google_photos_extraction_returns_validated_html_image_url_without_loggi
     with caplog.at_level("INFO", logger=app.logger.name):
         result = app_module._extract_google_photos_image(share_url)
 
-    assert result == f"{image_url}=w1200"
+    assert result == f"{image_url}=s0"
     assert "stage=html_parse outcome=image_found" in caplog.text
     assert "stage=complete outcome=success" in caplog.text
     assert share_url not in caplog.text
@@ -212,7 +207,7 @@ def test_google_photos_browser_capture_returns_only_validated_image(monkeypatch,
     with caplog.at_level("INFO", logger=app.logger.name):
         result = app_module._extract_google_photos_image(share_url)
 
-    assert result == f"{image_url}=w1200"
+    assert result == f"{image_url}=s0"
     assert "stage=browser_navigation outcome=complete" in caplog.text
     assert "status=200" in caplog.text
     assert "stage=browser_capture outcome=success" in caplog.text
@@ -232,177 +227,5 @@ def test_google_photos_extraction_endpoint_keeps_502_on_no_image(monkeypatch, ca
             response = app.view_functions["extract_google_photos_url"]()
 
     assert response.status_code == 502
-    assert response.get_json() == {
-        "error": "No Google Photos image preview was found in the shared page."
-    }
     assert "extraction request status=502" in caplog.text
     assert share_url not in caplog.text
-
-
-def test_google_photos_extraction_endpoint_returns_structured_preview_url(monkeypatch):
-    share_url = "https://photos.google.com/share/structured-response-test"
-    image_url = "https://lh3.googleusercontent.com/pw/structured-image=w1200"
-    extraction_options = []
-    monkeypatch.setattr(app_module, "get_current_user", lambda: {"id": "user"})
-    monkeypatch.setattr(app_module, "_google_photos_permission_denial", lambda *_args: None)
-    monkeypatch.setattr(
-        app_module,
-        "get_or_extract_google_photos_url",
-        lambda _url, **kwargs: (extraction_options.append(kwargs), (image_url, "miss"))[1],
-    )
-
-    with app.test_request_context(f"/extract-google-photos-url?url={share_url}&retry=1"):
-        response = app.view_functions["extract_google_photos_url"]()
-
-    assert response.status_code == 200
-    assert response.get_json() == {"url": image_url}
-    assert response.headers["Cache-Control"] == "private, no-store"
-    assert extraction_options == [{"force_refresh": True}]
-
-
-def test_google_photos_extraction_endpoint_returns_retryable_wait_timeout(monkeypatch):
-    share_url = "https://photos.google.com/share/inflight-endpoint-timeout-test"
-    monkeypatch.setattr(app_module, "get_current_user", lambda: {"id": "user"})
-    monkeypatch.setattr(app_module, "_google_photos_permission_denial", lambda *_args: None)
-    monkeypatch.setattr(
-        app_module,
-        "get_or_extract_google_photos_url",
-        lambda *_args, **_kwargs: (None, "wait_timeout"),
-    )
-
-    with app.test_request_context(f"/extract-google-photos-url?url={share_url}"):
-        response = app.view_functions["extract_google_photos_url"]()
-
-    assert response.status_code == 503
-    assert response.get_json() == {
-        "error": "Google Photos preview extraction is still in progress. Retry shortly."
-    }
-    assert response.headers["Retry-After"] == "5"
-
-
-def test_google_photos_extraction_success_is_cached_until_expiry(monkeypatch):
-    share_url = "https://photos.google.com/share/cache-expiry-test"
-    image_url = "https://lh3.googleusercontent.com/pw/cache-expiry-image=w1200"
-    clock = [100.0]
-    monkeypatch.setattr(
-        app_module,
-        "time",
-        SimpleNamespace(monotonic=lambda: clock[0]),
-    )
-    with app_module._cache_lock:
-        app_module._url_cache.pop(share_url, None)
-
-    try:
-        app_module.cache_url(share_url, image_url)
-        assert app_module.get_cached_url(share_url) == image_url
-        clock[0] += app_module.GOOGLE_PHOTOS_URL_CACHE_TTL_SECONDS + 1
-        assert app_module.get_cached_url(share_url) is None
-    finally:
-        with app_module._cache_lock:
-            app_module._url_cache.pop(share_url, None)
-
-
-def test_google_photos_user_retry_refreshes_a_cached_preview(monkeypatch):
-    share_url = "https://photos.google.com/share/force-refresh-test"
-    old_image_url = "https://lh3.googleusercontent.com/pw/old-image=w1200"
-    refreshed_image_url = "https://lh3.googleusercontent.com/pw/refreshed-image=w1200"
-    monkeypatch.setattr(
-        app_module,
-        "_extract_google_photos_image",
-        lambda _url: refreshed_image_url,
-    )
-    with app_module._cache_lock:
-        app_module._url_cache.pop(share_url, None)
-        app_module._url_failure_cache.pop(share_url, None)
-    app_module.cache_url(share_url, old_image_url)
-
-    try:
-        assert app_module.get_or_extract_google_photos_url(
-            share_url, force_refresh=True
-        ) == (refreshed_image_url, "miss")
-        assert app_module.get_or_extract_google_photos_url(share_url) == (
-            refreshed_image_url,
-            "hit",
-        )
-    finally:
-        with app_module._cache_lock:
-            app_module._url_cache.pop(share_url, None)
-            app_module._url_failure_cache.pop(share_url, None)
-
-
-def test_google_photos_concurrent_extractions_share_one_inflight_request(monkeypatch):
-    share_url = "https://photos.google.com/share/inflight-dedup-test"
-    image_url = "https://lh3.googleusercontent.com/pw/inflight-image=w1200"
-    barrier = threading.Barrier(4)
-    extraction_calls = []
-    monkeypatch.setattr(
-        app_module,
-        "_extract_google_photos_image",
-        lambda _url: (extraction_calls.append(_url), time.sleep(0.05), image_url)[2],
-    )
-    with app_module._cache_lock:
-        app_module._url_cache.pop(share_url, None)
-        app_module._url_failure_cache.pop(share_url, None)
-
-    def resolve_preview():
-        barrier.wait(timeout=2)
-        return app_module.get_or_extract_google_photos_url(share_url)[0]
-
-    try:
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            results = list(executor.map(lambda _index: resolve_preview(), range(4)))
-        assert results == [image_url] * 4
-        assert extraction_calls == [share_url]
-    finally:
-        with app_module._cache_lock:
-            app_module._url_cache.pop(share_url, None)
-            app_module._url_failure_cache.pop(share_url, None)
-
-
-def test_google_photos_inflight_wait_timeout_is_bounded(monkeypatch):
-    share_url = "https://photos.google.com/share/inflight-timeout-test"
-    waited = []
-
-    class TimedOutEvent:
-        def wait(self, timeout):
-            waited.append(timeout)
-            return False
-
-    with app_module._cache_lock:
-        app_module._url_cache.pop(share_url, None)
-        app_module._url_failure_cache.pop(share_url, None)
-        app_module._url_inflight[share_url] = TimedOutEvent()
-
-    try:
-        assert app_module.get_or_extract_google_photos_url(share_url) == (
-            None,
-            "wait_timeout",
-        )
-        assert waited == [5]
-    finally:
-        with app_module._cache_lock:
-            app_module._url_inflight.pop(share_url, None)
-
-
-def test_google_photos_failure_is_cached_only_briefly(monkeypatch):
-    share_url = "https://photos.google.com/share/failure-cache-test"
-    extraction_calls = []
-    monkeypatch.setattr(
-        app_module,
-        "_extract_google_photos_image",
-        lambda _url: (extraction_calls.append(_url), None)[1],
-    )
-    with app_module._cache_lock:
-        app_module._url_cache.pop(share_url, None)
-        app_module._url_failure_cache.pop(share_url, None)
-
-    try:
-        assert app_module.get_or_extract_google_photos_url(share_url) == (None, "miss")
-        assert app_module.get_or_extract_google_photos_url(share_url) == (None, "failure_hit")
-        assert app_module.get_or_extract_google_photos_url(
-            share_url, force_refresh=True
-        ) == (None, "miss")
-        assert extraction_calls == [share_url, share_url]
-    finally:
-        with app_module._cache_lock:
-            app_module._url_failure_cache.pop(share_url, None)

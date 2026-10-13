@@ -513,7 +513,7 @@ def test_new_user_receives_unique_password_setup_link_instead_of_shared_password
     user = store.get_user_by_username("new-staff")
     assert response.status_code == 200
     assert user["must_change_password"] is True
-    assert not check_password_hash(user["password_hash"], "weak")
+    assert not check_password_hash(user["password_hash"], "password")
     assert user["password_reset_token_hash"]
     assert len(sent) == 1
     assert sent[0][0][0] == "new-staff@example.com"
@@ -521,17 +521,17 @@ def test_new_user_receives_unique_password_setup_link_instead_of_shared_password
 
 
 @pytest.mark.parametrize("must_change_password", [True, False])
-def test_password_below_current_policy_cannot_authenticate_and_reset_remains_available(
+def test_legacy_shared_temporary_password_cannot_authenticate_and_reset_remains_available(
     client, monkeypatch, must_change_password
 ):
     store = app.config["FIRESTORE_STORE"]
     user = {
-        "id": "weak-password-user",
-        "username": "WeakPasswordUser",
-        "full_name": "Weak Password User",
+        "id": "legacy-user",
+        "username": "Legacy",
+        "full_name": "Legacy User",
         "email": "legacy@example.com",
         "role": "office_staff",
-        "password_hash": generate_password_hash("weak"),
+        "password_hash": generate_password_hash("password"),
         "must_change_password": must_change_password,
         "is_active": True,
         "active_sessions": [],
@@ -541,16 +541,16 @@ def test_password_below_current_policy_cannot_authenticate_and_reset_remains_ava
 
     response = client.post(
         "/login",
-        data={"username": "WeakPasswordUser", "password": "weak"},
+        data={"username": "Legacy", "password": "password"},
         follow_redirects=True,
     )
 
     assert response.status_code == 200
     assert user["must_change_password"] is must_change_password
-    assert check_password_hash(user["password_hash"], "weak")
+    assert check_password_hash(user["password_hash"], "password")
     assert not user.get("password_reset_token_hash")
     assert user["active_sessions"] == []
-    assert "no longer meets current security requirements" in response.get_data(as_text=True).lower()
+    assert "legacy temporary password can no longer be used" in response.get_data(as_text=True).lower()
     assert "Forgot Password" in response.get_data(as_text=True)
 
 
@@ -570,11 +570,11 @@ def _save_login_test_user(store, username, password, is_active=True):
 
 def test_account_specific_password_login_succeeds(client):
     store = app.config["FIRESTORE_STORE"]
-    _save_login_test_user(store, "AccountLogin", "Account-specific-Test-42!")
+    _save_login_test_user(store, "AccountLogin", "account-specific-test-value")
 
     response = client.post(
         "/login",
-        data={"username": "AccountLogin", "password": "Account-specific-Test-42!"},
+        data={"username": "AccountLogin", "password": "account-specific-test-value"},
     )
 
     assert response.status_code == 302
@@ -584,11 +584,11 @@ def test_account_specific_password_login_succeeds(client):
 
 def test_incorrect_account_password_is_rejected(client):
     store = app.config["FIRESTORE_STORE"]
-    _save_login_test_user(store, "WrongPassword", "Account-specific-Test-42!")
+    _save_login_test_user(store, "WrongPassword", "account-specific-test-value")
 
     response = client.post(
         "/login",
-        data={"username": "WrongPassword", "password": "Wrong-test-value-43!"},
+        data={"username": "WrongPassword", "password": "incorrect-test-value"},
     )
 
     assert response.status_code == 302
@@ -620,7 +620,7 @@ def test_login_firestore_timeout_returns_temporary_error_without_logging_credent
     assert "private-test-password" not in caplog.text
 
 
-def test_firestore_login_lookup_uses_a_five_second_retry_deadline():
+def test_firestore_login_lookup_uses_a_fifteen_second_retry_deadline():
     class FakeQuery:
         def where(self, *, filter):
             assert (filter.field_path, filter.op_string) == ("username_lower", "==")
@@ -631,8 +631,8 @@ def test_firestore_login_lookup_uses_a_five_second_retry_deadline():
             return self
 
         def stream(self, *, retry, timeout):
-            assert retry.timeout == 5
-            assert timeout == 5
+            assert retry.timeout == 15
+            assert timeout == 15
             return iter(())
 
     class FakeCollection:
@@ -1011,7 +1011,7 @@ def test_ordinary_user_cannot_edit_user_details(client):
         "permissions": ["dashboard"],
     })
 
-    login_response = client.post("/login", data={"username": "Charlie", "password": "invalid-test-password"}, follow_redirects=False)
+    login_response = client.post("/login", data={"username": "Charlie", "password": "password"}, follow_redirects=False)
     assert login_response.status_code == 302
 
     response = client.post(

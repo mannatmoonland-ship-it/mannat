@@ -29,6 +29,8 @@ from flask import (
     Flask,
     Response,
     flash,
+    g,
+    has_request_context,
     jsonify,
     redirect,
     render_template,
@@ -364,7 +366,7 @@ def _validate_firebase_service_account_path(service_account_path, project_id):
     return str(path)
 
 
-def get_active_firebase_config():
+def _load_active_firebase_config():
     configured_project_id = os.environ.get("FIREBASE_PROJECT_ID")
     if IS_PRODUCTION_ENVIRONMENT and not configured_project_id:
         raise RuntimeError("FIREBASE_PROJECT_ID must be explicitly configured in deployed environments.")
@@ -380,9 +382,12 @@ def get_active_firebase_config():
                 service_account_path = config.get("service_account_path")
                 if not service_account_path:
                     raise ValueError("Firebase Admin credentials are not configured.")
-                config["service_account_path"] = _validate_firebase_service_account_path(
-                    service_account_path,
-                    config["project_id"],
+                config["service_account_path"] = _run_login_diagnostic_step(
+                    "Validate service-account file and project binding",
+                    lambda: _validate_firebase_service_account_path(
+                        service_account_path,
+                        config["project_id"],
+                    ),
                 )
             return config
         except (OSError, json.JSONDecodeError, ValueError) as error:
@@ -412,12 +417,22 @@ def get_active_firebase_config():
             raise RuntimeError("Firebase Admin credentials must be explicitly configured in deployed environments.")
         if not service_account_path:
             raise RuntimeError("Firebase Admin credentials must be explicitly configured in deployed environments.")
-        service_account_path = _validate_firebase_service_account_path(service_account_path, project_id)
+        service_account_path = _run_login_diagnostic_step(
+            "Validate service-account file and project binding",
+            lambda: _validate_firebase_service_account_path(service_account_path, project_id),
+        )
     return {
         "project_id": project_id,
         "service_account_path": service_account_path,
         "web_config": web_config,
     }
+
+
+def get_active_firebase_config():
+    return _run_login_diagnostic_step(
+        "Load Firebase project configuration and validate configured credentials",
+        _load_active_firebase_config,
+    )
 
 
 def save_active_firebase_config(config, store):
@@ -1251,9 +1266,12 @@ class FirebaseFirestoreStore:
                 raise RuntimeError("FIREBASE_PROJECT_ID must be explicitly configured in deployed environments.")
             if not has_explicit_service_account or not configured_service_account:
                 raise RuntimeError("Firebase Admin credentials must be explicitly configured in deployed environments.")
-            configured_service_account = _validate_firebase_service_account_path(
-                configured_service_account,
-                configured_project_id,
+            configured_service_account = _run_login_diagnostic_step(
+                "Validate service-account file before Firebase Admin setup",
+                lambda: _validate_firebase_service_account_path(
+                    configured_service_account,
+                    configured_project_id,
+                ),
             )
         self.project_id = configured_project_id or "mannat-moon-construction"
         self.service_account_path = configured_service_account
@@ -1269,23 +1287,47 @@ class FirebaseFirestoreStore:
         if service_account_path and not os.path.isabs(service_account_path):
             service_account_path = os.path.abspath(os.path.join(os.path.dirname(__file__), service_account_path))
         if service_account_path and os.path.exists(service_account_path):
-            cred = credentials.Certificate(service_account_path)
+            cred = _run_login_diagnostic_step(
+                "Load Firebase service-account credentials",
+                lambda: credentials.Certificate(service_account_path),
+            )
         else:
-            cred = credentials.ApplicationDefault()
+            cred = _run_login_diagnostic_step(
+                "Load Google Application Default Credentials",
+                credentials.ApplicationDefault,
+            )
 
         firebase_app = None
+        default_app_not_initialized = object()
         if app_name is None:
-            try:
-                firebase_app = firebase_admin.get_app()
-                if firebase_app.project_id != self.project_id:
-                    firebase_app = None
-            except ValueError:
-                firebase_app = firebase_admin.initialize_app(cred, {"projectId": self.project_id})
-        if firebase_app is None:
-            firebase_app = firebase_admin.initialize_app(
-                cred,
-                {"projectId": self.project_id},
-                name=app_name or f"mannat-{self.project_id}-{uuid.uuid4().hex[:10]}",
+            def reusable_default_app():
+                try:
+                    candidate = firebase_admin.get_app()
+                except ValueError:
+                    return default_app_not_initialized
+                return candidate if candidate.project_id == self.project_id else None
+
+            firebase_app = _run_login_diagnostic_step(
+                "Check for a reusable Firebase Admin app",
+                reusable_default_app,
+            )
+
+        if firebase_app is default_app_not_initialized:
+            firebase_app = _run_login_diagnostic_step(
+                "Initialize default Firebase Admin app",
+                lambda: firebase_admin.initialize_app(
+                    cred,
+                    {"projectId": self.project_id},
+                ),
+            )
+        elif firebase_app is None:
+            firebase_app = _run_login_diagnostic_step(
+                "Initialize named Firebase Admin app",
+                lambda: firebase_admin.initialize_app(
+                    cred,
+                    {"projectId": self.project_id},
+                    name=app_name or f"mannat-{self.project_id}-{uuid.uuid4().hex[:10]}",
+                ),
             )
         auth_transport = os.environ.get("FIRESTORE_GRPC_AUTH_TRANSPORT", "").strip().lower()
         if auth_transport not in {"", "urllib3"}:
@@ -1293,12 +1335,18 @@ class FirebaseFirestoreStore:
         if auth_transport == "urllib3":
             if _Urllib3FirestoreClient is None:
                 raise RuntimeError("The urllib3 Firestore authentication transport is unavailable.")
-            db = _Urllib3FirestoreClient(
-                credentials=firebase_app.credential.get_credential(),
-                project=firebase_app.project_id,
+            db = _run_login_diagnostic_step(
+                "Create Firestore client using urllib3 transport",
+                lambda: _Urllib3FirestoreClient(
+                    credentials=firebase_app.credential.get_credential(),
+                    project=firebase_app.project_id,
+                ),
             )
         else:
-            db = firestore.client(app=firebase_app)
+            db = _run_login_diagnostic_step(
+                "Create Firestore client",
+                lambda: firestore.client(app=firebase_app),
+            )
         return firebase_app, db
 
     def _collection(self, name):
@@ -2809,16 +2857,166 @@ def _material_transaction_matches(existing, payload):
     return all(existing.get(key) == value for key, value in payload.items())
 
 
+_SAFE_FIREBASE_RUNTIME_ERRORS = {
+    "Firebase Admin SDK is not installed or Firestore is not configured. Install firebase-admin and set Firebase credentials before starting the app.": "Firebase Admin SDK is unavailable",
+    "FIREBASE_PROJECT_ID must be explicitly configured in deployed environments.": "production project ID is missing",
+    "FIREBASE_WEB_CONFIG must be explicitly configured.": "Firebase Web configuration is missing",
+    "FIREBASE_WEB_CONFIG must contain valid JSON.": "Firebase Web configuration is invalid JSON",
+    "FIREBASE_WEB_CONFIG must contain a JSON object.": "Firebase Web configuration is not a JSON object",
+    "FIREBASE_WEB_CONFIG is missing required public configuration fields.": "Firebase Web configuration is missing required fields",
+    "Firebase Admin credentials must be explicitly configured in deployed environments.": "production Firebase Admin credentials are missing",
+    "Firebase Admin credentials do not match FIREBASE_PROJECT_ID.": "Firebase Admin credential project does not match FIREBASE_PROJECT_ID",
+    "Firebase Admin service-account credentials could not be read.": "Firebase Admin credential file could not be read",
+    "Firebase Admin service-account credentials are invalid.": "Firebase Admin credential data is invalid",
+    "Firebase Admin SDK is not installed": "Firebase Admin SDK is unavailable",
+    "The active Firebase project configuration could not be read.": "active Firebase project configuration could not be read",
+}
+
+
+def _safe_firebase_error_summary(error):
+    error_type = type(error).__name__
+    if isinstance(error, RuntimeError):
+        summary = _SAFE_FIREBASE_RUNTIME_ERRORS.get(str(error), "details redacted")
+    elif isinstance(error, json.JSONDecodeError):
+        summary = "configuration JSON could not be parsed"
+    elif isinstance(error, FileNotFoundError):
+        summary = "configured credential file was not found"
+    elif isinstance(error, PermissionError):
+        summary = "configured credential file could not be accessed"
+    elif error_type == "DefaultCredentialsError":
+        summary = "Google Application Default Credentials are unavailable"
+    elif error_type == "PermissionDenied":
+        summary = "Firestore denied the configured identity"
+    elif error_type == "Unauthenticated":
+        summary = "Firestore rejected the configured identity"
+    elif error_type == "DeadlineExceeded":
+        summary = "Firestore request deadline exceeded"
+    elif error_type == "ServiceUnavailable":
+        summary = "Google API service is unavailable"
+    elif isinstance(error, GoogleAPICallError):
+        summary = "Google API request failed"
+    else:
+        summary = "details redacted"
+    return error_type, summary
+
+
+def _run_login_diagnostic_step(operation, callback):
+    if not has_request_context() or not getattr(g, "login_diagnostics_enabled", False):
+        return callback()
+
+    step_number = g.get("login_diagnostic_step", 0) + 1
+    g.login_diagnostic_step = step_number
+    started = time.monotonic()
+    app.logger.info(
+        "Sign-in diagnostic step=%02d operation=%s event=start",
+        step_number,
+        operation,
+    )
+    try:
+        result = callback()
+    except Exception as error:
+        elapsed_ms = (time.monotonic() - started) * 1000
+        error_type, category = _safe_firebase_error_summary(error)
+        cause = error
+        seen = {id(error)}
+        while cause.__cause__ is not None or cause.__context__ is not None:
+            cause = cause.__cause__ or cause.__context__
+            if id(cause) in seen:
+                break
+            seen.add(id(cause))
+        root_cause_type, root_cause_category = (
+            _safe_firebase_error_summary(cause)
+            if cause is not error
+            else ("none", "none")
+        )
+        app.logger.warning(
+            "Sign-in diagnostic step=%02d operation=%s event=failed "
+            "exception_type=%s category=%s cause_type=%s cause_category=%s elapsed_ms=%.1f",
+            step_number,
+            operation,
+            error_type,
+            category,
+            root_cause_type,
+            root_cause_category,
+            elapsed_ms,
+        )
+        raise
+
+    app.logger.info(
+        "Sign-in diagnostic step=%02d operation=%s event=complete elapsed_ms=%.1f",
+        step_number,
+        operation,
+        (time.monotonic() - started) * 1000,
+    )
+    return result
+
+
+def _firebase_exception_diagnostics(error):
+    chain = []
+    stack_frames = []
+    current = error
+    seen = set()
+    while current is not None and id(current) not in seen and len(chain) < 8:
+        seen.add(id(current))
+        error_type, summary = _safe_firebase_error_summary(current)
+        chain.append(f"{error_type}: {summary}")
+        if current.__traceback__:
+            stack_frames.extend(
+                f"{frame.filename}:{frame.lineno} in {frame.name}"
+                for frame in traceback.extract_tb(current.__traceback__)
+            )
+        current = current.__cause__ or current.__context__
+
+    configured_service_account_path = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "")
+    safe_diagnostics = {
+        "project_id": os.environ.get("FIREBASE_PROJECT_ID") or "unset",
+        "firebase_admin_available": firebase_admin is not None,
+        "firestore_mode": _configured_firestore_mode() or "default",
+        "web_config_configured": bool(os.environ.get("FIREBASE_WEB_CONFIG")),
+        "service_account_path_configured": bool(configured_service_account_path),
+        "service_account_path_exists": bool(
+            configured_service_account_path
+            and Path(configured_service_account_path).is_file()
+        ),
+        "service_account_json_configured": bool(os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")),
+        "service_account_base64_configured": bool(os.environ.get("FIREBASE_SERVICE_ACCOUNT_BASE64")),
+        "active_project_file_exists": ACTIVE_FIREBASE_CONFIG_PATH.is_file(),
+    }
+    frames = "; ".join(stack_frames[-40:]) or "traceback unavailable"
+    return ", ".join(f"{key}={value}" for key, value in safe_diagnostics.items()), " <- ".join(chain), frames
+
+
+def _configured_firestore_mode():
+    return str(
+        app.config.get("FIRESTORE_MODE")
+        or os.environ.get("FIRESTORE_MODE")
+        or ""
+    ).strip().lower()
+
+
+def _log_firebase_store_initialization_failure(stage, error):
+    if has_request_context() and getattr(g, "login_diagnostics_enabled", False):
+        return
+    diagnostics, error_chain, frames = _firebase_exception_diagnostics(error)
+    app.logger.error(
+        "Firebase user-store initialization failed stage=%s %s error_chain=%s\n%s",
+        stage,
+        diagnostics,
+        error_chain,
+        frames,
+    )
+
+
 def _should_use_in_memory_store_fallback():
-    store_mode = str(app.config.get("FIRESTORE_MODE") or "").lower()
+    if IS_PRODUCTION_ENVIRONMENT:
+        return False
+    store_mode = _configured_firestore_mode()
     if store_mode in {"memory", "in_memory"}:
         return True
     if store_mode == "firestore":
         return False
     if os.environ.get("ALLOW_IN_MEMORY_FIRESTORE", "").lower() in {"1", "true", "yes", "on"}:
         return True
-    if IS_PRODUCTION_ENVIRONMENT:
-        return False
     if any(
         os.environ.get(name) is not None
         for name in (
@@ -2837,53 +3035,94 @@ def _should_use_in_memory_store_fallback():
 
 
 def get_user_store():
-    configured_store = app.config.get("FIRESTORE_STORE")
+    configured_store = _run_login_diagnostic_step(
+        "Check for an explicitly configured user store",
+        lambda: app.config.get("FIRESTORE_STORE"),
+    )
     if configured_store is not None:
         return configured_store
 
-    store_mode = str(app.config.get("FIRESTORE_MODE") or "").lower()
-    if store_mode == "memory":
-        if not hasattr(app, "_memory_store"):
-            app._memory_store = InMemoryFirestoreStore()
-        return app._memory_store
+    store_mode = _run_login_diagnostic_step(
+        "Read configured Firestore mode",
+        _configured_firestore_mode,
+    )
+    if store_mode == "memory" and not IS_PRODUCTION_ENVIRONMENT:
+        return _run_login_diagnostic_step(
+            "Resolve local in-memory user store",
+            _get_or_create_memory_store,
+        )
 
-    if _should_use_in_memory_store_fallback():
-        if not hasattr(app, "_memory_store"):
-            app._memory_store = InMemoryFirestoreStore()
-        return app._memory_store
+    use_memory_fallback = _run_login_diagnostic_step(
+        "Check whether local in-memory fallback is permitted",
+        _should_use_in_memory_store_fallback,
+    )
+    if use_memory_fallback:
+        return _run_login_diagnostic_step(
+            "Resolve local in-memory user store",
+            _get_or_create_memory_store,
+        )
 
-    if firebase_admin is not None:
+    admin_available = _run_login_diagnostic_step(
+        "Check Firebase Admin SDK availability",
+        lambda: firebase_admin is not None,
+    )
+    if admin_available:
+        stage = "active_firebase_config"
         try:
             active_config = get_active_firebase_config()
+            stage = "firebase_admin_firestore_client"
             active_key = (active_config["project_id"], active_config.get("service_account_path"))
             if not hasattr(app, "_firebase_store") or getattr(app, "_firebase_store_key", None) != active_key:
-                app._firebase_store = FirebaseFirestoreStore(
-                    project_id=active_config["project_id"],
-                    service_account_path=active_config.get("service_account_path"),
+                app._firebase_store = _run_login_diagnostic_step(
+                    "Initialize Firebase Admin and Firestore user store",
+                    lambda: FirebaseFirestoreStore(
+                        project_id=active_config["project_id"],
+                        service_account_path=active_config.get("service_account_path"),
+                    ),
                 )
-                app._firebase_store_key = active_key
-            return app._firebase_store
+            _run_login_diagnostic_step(
+                "Cache initialized Firebase user store",
+                lambda: setattr(app, "_firebase_store_key", active_key),
+            )
+            return _run_login_diagnostic_step(
+                "Return initialized Firebase user store",
+                lambda: app._firebase_store,
+            )
         except Exception as exc:
+            _log_firebase_store_initialization_failure(stage, exc)
             if store_mode == "firestore":
                 raise RuntimeError(
                     "Firestore initialization failed. Check FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT settings."
                 ) from exc
             if _should_use_in_memory_store_fallback():
                 if not hasattr(app, "_memory_store"):
-                    app._memory_store = InMemoryFirestoreStore()
+                    _create_memory_store()
                 return app._memory_store
             raise RuntimeError(
                 "Firestore is not configured. Set FIREBASE_PROJECT_ID and valid credentials or set FIRESTORE_MODE=memory explicitly for local testing."
             ) from exc
 
-    if store_mode == "memory" or os.environ.get("ALLOW_IN_MEMORY_FIRESTORE", "").lower() in {"1", "true", "yes", "on"}:
+    if _should_use_in_memory_store_fallback():
         if not hasattr(app, "_memory_store"):
-            app._memory_store = InMemoryFirestoreStore()
+            _create_memory_store()
         return app._memory_store
 
-    raise RuntimeError(
+    error = RuntimeError(
         "Firebase Admin SDK is not installed or Firestore is not configured. Install firebase-admin and set Firebase credentials before starting the app."
     )
+    _log_firebase_store_initialization_failure("firebase_admin_import", error)
+    raise error
+
+
+def _create_memory_store():
+    app._memory_store = InMemoryFirestoreStore()
+    return app._memory_store
+
+
+def _get_or_create_memory_store():
+    if not hasattr(app, "_memory_store"):
+        return _create_memory_store()
+    return app._memory_store
 
 
 def get_current_user():
@@ -3595,61 +3834,66 @@ def login_asset(filename):
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
     if request.method == "POST":
-        app.logger.info("Login POST received")
-        username = normalize_username(request.form.get("username"))
-        password = request.form.get("password", "")
-        lookup_started = time.monotonic()
+        g.login_diagnostics_enabled = True
+        g.login_diagnostic_step = 0
+        username, password = _run_login_diagnostic_step(
+            "Read and normalize submitted sign-in fields",
+            lambda: (
+                normalize_username(request.form.get("username")),
+                request.form.get("password", ""),
+            ),
+        )
         try:
-            store = get_user_store()
-            user = store.get_user_by_username(username)
+            store = _run_login_diagnostic_step(
+                "Resolve user store",
+                get_user_store,
+            )
+            user = _run_login_diagnostic_step(
+                "Look up account in user store",
+                lambda: store.get_user_by_username(username),
+            )
         except DeadlineExceeded:
-            app.logger.warning(
-                "Firestore user lookup timed out during sign-in after %.3f seconds",
-                time.monotonic() - lookup_started,
-            )
             flash("Sign-in is temporarily unavailable. Please try again shortly.", "error")
             return render_template("login.html"), 503
-        except GoogleAPICallError as error:
-            app.logger.warning(
-                "Firestore user lookup failed during sign-in (%s) after %.3f seconds",
-                type(error).__name__,
-                time.monotonic() - lookup_started,
-            )
+        except GoogleAPICallError:
             flash("Sign-in is temporarily unavailable. Please try again shortly.", "error")
             return render_template("login.html"), 503
-        except RuntimeError as error:
-            app.logger.warning(
-                "User store unavailable during sign-in (%s) after %.3f seconds",
-                type(error).__name__,
-                time.monotonic() - lookup_started,
-            )
+        except RuntimeError:
             flash("Sign-in is temporarily unavailable. Please contact your administrator.", "error")
             return render_template("login.html"), 503
-        app.logger.info(
-            "Login account lookup completed in %.3f seconds",
-            time.monotonic() - lookup_started,
-        )
 
-        if (
-            not isinstance(user, dict)
-            or not user.get("id")
-            or not str(user.get("role") or "").strip()
-            or not isinstance(user.get("active_sessions"), (list, tuple, set))
-            or not _user_account_is_active(user)
-        ):
+        account_is_eligible = _run_login_diagnostic_step(
+            "Validate account record and active status",
+            lambda: (
+                isinstance(user, dict)
+                and bool(user.get("id"))
+                and bool(str(user.get("role") or "").strip())
+                and isinstance(user.get("active_sessions"), (list, tuple, set))
+                and _user_account_is_active(user)
+            ),
+        )
+        if not account_is_eligible:
             add_audit_log(None, "login_failed", f"Failed login attempt for username {username}", None)
             flash("Invalid username or password.", "error")
             return redirect(url_for("login_page"))
 
-        if not check_password_hash(user.get("password_hash", ""), password):
+        password_matches = _run_login_diagnostic_step(
+            "Verify submitted password against account hash",
+            lambda: check_password_hash(user.get("password_hash", ""), password),
+        )
+        if not password_matches:
             add_audit_log(user.get("id"), "login_failed", "Failed login attempt using invalid password", user.get("id"))
             flash("Invalid username or password.", "error")
             return redirect(url_for("login_page"))
 
-        if check_password_hash(
-            user.get("password_hash", ""),
-            LEGACY_SHARED_TEMP_PASSWORD,
-        ):
+        legacy_password_matches = _run_login_diagnostic_step(
+            "Check for retired shared temporary password",
+            lambda: check_password_hash(
+                user.get("password_hash", ""),
+                LEGACY_SHARED_TEMP_PASSWORD,
+            ),
+        )
+        if legacy_password_matches:
             add_audit_log(
                 user.get("id"),
                 "legacy_shared_password_retired",
@@ -3659,8 +3903,14 @@ def login_page():
             flash("This legacy temporary password can no longer be used. Use Forgot Password to set a private password.", "warning")
             return redirect(url_for("login_page"))
 
-        set_session_for_user(user)
-        add_audit_log(user.get("id"), "login_success", "User signed in successfully", user.get("id"))
+        _run_login_diagnostic_step(
+            "Create authenticated session",
+            lambda: set_session_for_user(user),
+        )
+        _run_login_diagnostic_step(
+            "Record successful sign-in audit event",
+            lambda: add_audit_log(user.get("id"), "login_success", "User signed in successfully", user.get("id")),
+        )
         if user.get("must_change_password"):
             flash("Please change your password before continuing.", "warning")
             return redirect(url_for("change_password"))

@@ -1,4 +1,6 @@
 from pathlib import Path
+import re
+from types import SimpleNamespace
 
 import pytest
 from google.api_core.exceptions import DeadlineExceeded
@@ -588,9 +590,215 @@ def test_get_user_store_falls_back_to_memory_when_local_dev_has_no_firebase_conf
     assert isinstance(store, app_module.InMemoryFirestoreStore)
 
 
-def test_account_specific_password_login_succeeds(client):
+def test_firestore_mode_is_read_from_environment_when_app_config_is_unset(monkeypatch):
+    monkeypatch.delitem(app.config, "FIRESTORE_MODE", raising=False)
+    monkeypatch.setenv("FIRESTORE_MODE", " Firestore ")
+
+    assert app_module._configured_firestore_mode() == "firestore"
+
+
+def test_production_missing_firebase_admin_fails_closed_with_safe_diagnostics(
+    monkeypatch, caplog, tmp_path
+):
+    monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", True)
+    monkeypatch.setattr(app_module, "firebase_admin", None)
+    monkeypatch.setattr(app_module, "ACTIVE_FIREBASE_CONFIG_PATH", tmp_path / "missing-active-config.json")
+    monkeypatch.setattr(app_module, "find_firebase_service_account_path", lambda: None)
+    monkeypatch.setitem(app.config, "FIRESTORE_MODE", "memory")
+    monkeypatch.setenv("ALLOW_IN_MEMORY_FIRESTORE", "true")
+    monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
+    monkeypatch.delenv("FIREBASE_WEB_CONFIG", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_BASE64", raising=False)
+    monkeypatch.delattr(app, "_memory_store", raising=False)
+    monkeypatch.delattr(app, "_firebase_store", raising=False)
+    monkeypatch.delitem(app.config, "FIRESTORE_STORE", raising=False)
+    caplog.set_level("ERROR", logger="app")
+
+    with pytest.raises(RuntimeError, match="Firebase Admin SDK is not installed"):
+        app_module.get_user_store()
+
+    assert not hasattr(app, "_memory_store")
+    assert "stage=firebase_admin_import" in caplog.text
+    assert "project_id=unset" in caplog.text
+    assert "web_config_configured=False" in caplog.text
+    assert "service_account_json_configured=False" in caplog.text
+    assert "service_account_base64_configured=False" in caplog.text
+
+
+def test_production_login_logs_sanitized_firestore_initialization_cause(
+    monkeypatch, caplog, tmp_path
+):
+    sensitive_marker = "synthetic-private-key-marker"
+    credential_path = tmp_path / "service-account.json"
+    credential_path.touch()
+
+    class FakeFirebaseAdmin:
+        initialize_names = []
+
+        @staticmethod
+        def get_app():
+            raise ValueError("no default app")
+
+        @classmethod
+        def initialize_app(cls, _credentials, options, name=None):
+            cls.initialize_names.append(name)
+            return SimpleNamespace(
+                project_id=options["projectId"],
+                credential=SimpleNamespace(get_credential=lambda: object()),
+            )
+
+    monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", True)
+    monkeypatch.setattr(app_module, "firebase_admin", FakeFirebaseAdmin)
+    monkeypatch.setattr(
+        app_module,
+        "credentials",
+        SimpleNamespace(Certificate=lambda _path: object()),
+    )
+
+    def fail_firestore_client(**_kwargs):
+        cause = ValueError(f"access_token={sensitive_marker}")
+        raise RuntimeError(f"private_key={sensitive_marker}") from cause
+
+    monkeypatch.setattr(
+        app_module,
+        "firestore",
+        SimpleNamespace(client=fail_firestore_client),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_validate_firebase_service_account_path",
+        lambda _path, _project_id: str(credential_path),
+    )
+    monkeypatch.setattr(app_module, "ACTIVE_FIREBASE_CONFIG_PATH", tmp_path / "missing-active-config.json")
+    monkeypatch.setenv("FIRESTORE_MODE", "firestore")
+    monkeypatch.setenv("FIREBASE_PROJECT_ID", "test-project")
+    monkeypatch.setenv("FIREBASE_SERVICE_ACCOUNT", str(credential_path))
+    monkeypatch.delenv("FIRESTORE_GRPC_AUTH_TRANSPORT", raising=False)
+    app.config.pop("FIRESTORE_STORE", None)
+    monkeypatch.delattr(app, "_firebase_store", raising=False)
+    monkeypatch.delattr(app, "_firebase_store_key", raising=False)
+    monkeypatch.setattr(
+        app_module,
+        "_load_active_firebase_config",
+        lambda: {
+            "project_id": "test-project",
+            "service_account_path": str(credential_path),
+        },
+    )
+    caplog.set_level("INFO", logger="app")
+
+    with app.test_client() as client:
+        response = client.post(
+            "/login",
+            data={"username": "private-test-user", "password": "private-test-password"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 503
+    assert b"Sign-in is temporarily unavailable" in response.data
+    assert "operation=Load Firebase project configuration and validate configured credentials event=complete" in caplog.text
+    assert "operation=Validate service-account file before Firebase Admin setup event=complete" in caplog.text
+    assert "operation=Initialize default Firebase Admin app event=complete" in caplog.text
+    assert "operation=Create Firestore client event=failed" in caplog.text
+    assert "exception_type=RuntimeError category=details redacted" in caplog.text
+    assert "cause_type=ValueError cause_category=details redacted" in caplog.text
+    assert sensitive_marker not in caplog.text
+    assert "private-test-user" not in caplog.text
+    assert "private-test-password" not in caplog.text
+    assert FakeFirebaseAdmin.initialize_names == [None]
+    _assert_sequential_login_diagnostics(caplog.text)
+
+
+def test_production_login_fails_closed_when_firebase_admin_is_unavailable(
+    monkeypatch, caplog, tmp_path
+):
+    monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", True)
+    monkeypatch.setattr(app_module, "firebase_admin", None)
+    monkeypatch.setattr(app_module, "ACTIVE_FIREBASE_CONFIG_PATH", tmp_path / "missing-active-config.json")
+    monkeypatch.setitem(app.config, "FIRESTORE_MODE", "memory")
+    monkeypatch.setenv("ALLOW_IN_MEMORY_FIRESTORE", "true")
+    app.config.pop("FIRESTORE_STORE", None)
+    monkeypatch.delattr(app, "_memory_store", raising=False)
+    monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
+    monkeypatch.delenv("FIREBASE_WEB_CONFIG", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_BASE64", raising=False)
+    caplog.set_level("INFO", logger="app")
+
+    with app.test_client() as client:
+        response = client.post(
+            "/login",
+            data={"username": "private-test-user", "password": "private-test-password"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 503
+    assert b"Sign-in is temporarily unavailable" in response.data
+    assert not hasattr(app, "_memory_store")
+    assert "operation=Resolve user store event=failed" in caplog.text
+    assert "exception_type=RuntimeError category=Firebase Admin SDK is unavailable" in caplog.text
+    assert "private-test-user" not in caplog.text
+    assert "private-test-password" not in caplog.text
+    _assert_sequential_login_diagnostics(caplog.text)
+
+
+def _assert_sequential_login_diagnostics(log_text):
+    start_steps = [
+        int(match.group(1))
+        for match in re.finditer(
+            r"Sign-in diagnostic step=(\d+) operation=.* event=start",
+            log_text,
+        )
+    ]
+    assert start_steps == list(range(1, len(start_steps) + 1))
+    for step in start_steps:
+        assert len(re.findall(
+            rf"Sign-in diagnostic step={step:02d} operation=.* event=(?:complete|failed)",
+            log_text,
+        )) == 1
+
+
+def test_firebase_store_initialization_logs_sanitized_cause_and_traceback(
+    monkeypatch, caplog, tmp_path
+):
+    sensitive_marker = "synthetic-private-key-marker"
+    monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", True)
+    monkeypatch.setattr(app_module, "firebase_admin", object())
+    monkeypatch.setattr(app_module, "ACTIVE_FIREBASE_CONFIG_PATH", tmp_path / "missing-active-config.json")
+    monkeypatch.setitem(app.config, "FIRESTORE_MODE", "firestore")
+    app.config.pop("FIRESTORE_STORE", None)
+    monkeypatch.delattr(app, "_firebase_store", raising=False)
+    monkeypatch.delattr(app, "_firebase_store_key", raising=False)
+    monkeypatch.delenv("FIREBASE_PROJECT_ID", raising=False)
+    monkeypatch.delenv("FIREBASE_WEB_CONFIG", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_BASE64", raising=False)
+
+    def fail_config():
+        raise RuntimeError(sensitive_marker)
+
+    monkeypatch.setattr(app_module, "get_active_firebase_config", fail_config)
+    caplog.set_level("ERROR", logger="app")
+
+    with pytest.raises(RuntimeError, match="Firestore initialization failed") as raised:
+        app_module.get_user_store()
+
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert sensitive_marker in str(raised.value.__cause__)
+    assert "stage=active_firebase_config" in caplog.text
+    assert "RuntimeError: details redacted" in caplog.text
+    assert "in fail_config" in caplog.text
+    assert sensitive_marker not in caplog.text
+
+
+def test_account_specific_password_login_succeeds(client, caplog):
     store = app.config["FIRESTORE_STORE"]
     _save_login_test_user(store, "AccountLogin", "account-specific-test-value")
+    caplog.set_level("INFO", logger="app")
 
     response = client.post(
         "/login",
@@ -600,6 +808,12 @@ def test_account_specific_password_login_succeeds(client):
     assert response.status_code == 302
     with client.session_transaction() as session:
         assert session["user_id"] == "accountlogin"
+    assert "operation=Look up account in user store event=complete" in caplog.text
+    assert "operation=Verify submitted password against account hash event=complete" in caplog.text
+    assert "operation=Create authenticated session event=complete" in caplog.text
+    assert "AccountLogin" not in caplog.text
+    assert "account-specific-test-value" not in caplog.text
+    _assert_sequential_login_diagnostics(caplog.text)
 
 
 def test_incorrect_account_password_is_rejected(client):
@@ -634,8 +848,8 @@ def test_login_firestore_timeout_returns_temporary_error_without_logging_credent
     assert response.status_code == 503
     assert b"Sign-in is temporarily unavailable" in response.data
     assert b"Invalid username or password" not in response.data
-    assert "Login POST received" in caplog.text
-    assert "timed out during sign-in" in caplog.text
+    assert "Sign-in diagnostic step=01 operation=Read and normalize submitted sign-in fields event=start" in caplog.text
+    assert "Firestore request deadline exceeded" in caplog.text
     assert "private-test-user" not in caplog.text
     assert "private-test-password" not in caplog.text
 

@@ -597,6 +597,58 @@ def test_firestore_mode_is_read_from_environment_when_app_config_is_unset(monkey
     assert app_module._configured_firestore_mode() == "firestore"
 
 
+def test_packaging_is_declared_as_a_runtime_dependency():
+    requirements_path = Path(app_module.__file__).resolve().with_name("requirements.txt")
+    requirements = requirements_path.read_text(encoding="utf-8").splitlines()
+
+    assert any(
+        requirement.strip().lower().startswith("packaging")
+        for requirement in requirements
+    )
+
+
+def test_missing_packaging_in_optional_transport_keeps_firebase_admin_available(
+    monkeypatch,
+):
+    class ExistingFirebaseApp:
+        project_id = "test-project"
+
+    class FirebaseAdmin:
+        @staticmethod
+        def get_app():
+            return ExistingFirebaseApp()
+
+    monkeypatch.setattr(app_module, "firebase_admin", FirebaseAdmin)
+    monkeypatch.setattr(
+        app_module,
+        "credentials",
+        SimpleNamespace(ApplicationDefault=lambda: object()),
+    )
+    monkeypatch.setattr(app_module, "_Urllib3FirestoreClient", None)
+    monkeypatch.setattr(
+        app_module,
+        "_FIRESTORE_TRANSPORT_IMPORT_ERROR",
+        ModuleNotFoundError("No module named 'packaging'", name="packaging"),
+    )
+    monkeypatch.setenv("FIRESTORE_GRPC_AUTH_TRANSPORT", "urllib3")
+    store = object.__new__(FirebaseFirestoreStore)
+    store.project_id = "test-project"
+    store.service_account_path = None
+
+    with pytest.raises(
+        RuntimeError,
+        match="urllib3 Firestore authentication transport is unavailable",
+    ) as raised:
+        store._initialize_client()
+
+    assert isinstance(raised.value.__cause__, ModuleNotFoundError)
+    assert raised.value.__cause__.name == "packaging"
+    assert app_module._safe_firebase_error_summary(raised.value.__cause__) == (
+        "ModuleNotFoundError",
+        "module import failed: packaging",
+    )
+
+
 def test_production_missing_firebase_admin_fails_closed_with_safe_diagnostics(
     monkeypatch, caplog, tmp_path
 ):

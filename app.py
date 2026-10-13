@@ -63,25 +63,32 @@ IS_PRODUCTION_ENVIRONMENT = (
     or bool(os.environ.get("RAILWAY_ENVIRONMENT"))
 )
 
+_FIREBASE_ADMIN_IMPORT_ERROR = None
 try:
     import firebase_admin
     from firebase_admin import auth as firebase_auth, credentials, firestore
-    import google.auth
-    import google.auth.credentials
-    import google.auth.transport.grpc
-    import google.auth.transport.urllib3
-    import grpc
     from google.cloud.firestore_v1 import FieldFilter
-    from google.cloud.firestore_v1 import client as firestore_client_module
-    from google.cloud.firestore_v1.services.firestore import client as firestore_gapic_client_module
-    from google.cloud.firestore_v1.services.firestore.transports.grpc import FirestoreGrpcTransport
-    import urllib3
-except ImportError:  # pragma: no cover - optional for local/dev fallback
+except ImportError as error:  # pragma: no cover - optional for local/dev fallback
+    _FIREBASE_ADMIN_IMPORT_ERROR = error
     firebase_admin = None
     firebase_auth = None
     credentials = None
     firestore = None
     FieldFilter = None
+
+_FIRESTORE_TRANSPORT_IMPORT_ERROR = None
+try:
+    import google.auth
+    import google.auth.credentials
+    import google.auth.transport.grpc
+    import google.auth.transport.urllib3
+    import grpc
+    from google.cloud.firestore_v1 import client as firestore_client_module
+    from google.cloud.firestore_v1.services.firestore import client as firestore_gapic_client_module
+    from google.cloud.firestore_v1.services.firestore.transports.grpc import FirestoreGrpcTransport
+    import urllib3
+except ImportError as error:  # pragma: no cover - optional authentication transport
+    _FIRESTORE_TRANSPORT_IMPORT_ERROR = error
     google = None
     grpc = None
     firestore_client_module = None
@@ -1334,7 +1341,12 @@ class FirebaseFirestoreStore:
             raise RuntimeError("FIRESTORE_GRPC_AUTH_TRANSPORT must be 'urllib3' when set.")
         if auth_transport == "urllib3":
             if _Urllib3FirestoreClient is None:
-                raise RuntimeError("The urllib3 Firestore authentication transport is unavailable.")
+                transport_error = RuntimeError(
+                    "The urllib3 Firestore authentication transport is unavailable."
+                )
+                if _FIRESTORE_TRANSPORT_IMPORT_ERROR is not None:
+                    raise transport_error from _FIRESTORE_TRANSPORT_IMPORT_ERROR
+                raise transport_error
             db = _run_login_diagnostic_step(
                 "Create Firestore client using urllib3 transport",
                 lambda: _Urllib3FirestoreClient(
@@ -2869,13 +2881,20 @@ _SAFE_FIREBASE_RUNTIME_ERRORS = {
     "Firebase Admin service-account credentials could not be read.": "Firebase Admin credential file could not be read",
     "Firebase Admin service-account credentials are invalid.": "Firebase Admin credential data is invalid",
     "Firebase Admin SDK is not installed": "Firebase Admin SDK is unavailable",
+    "The urllib3 Firestore authentication transport is unavailable.": "optional Firestore authentication transport dependencies are unavailable",
     "The active Firebase project configuration could not be read.": "active Firebase project configuration could not be read",
 }
 
 
 def _safe_firebase_error_summary(error):
     error_type = type(error).__name__
-    if isinstance(error, RuntimeError):
+    if isinstance(error, ImportError):
+        module_name = getattr(error, "name", None)
+        if isinstance(module_name, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", module_name):
+            summary = f"module import failed: {module_name}"
+        else:
+            summary = "module import failed"
+    elif isinstance(error, RuntimeError):
         summary = _SAFE_FIREBASE_RUNTIME_ERRORS.get(str(error), "details redacted")
     elif isinstance(error, json.JSONDecodeError):
         summary = "configuration JSON could not be parsed"
@@ -3062,11 +3081,26 @@ def get_user_store():
             _get_or_create_memory_store,
         )
 
-    admin_available = _run_login_diagnostic_step(
-        "Check Firebase Admin SDK availability",
-        lambda: firebase_admin is not None,
-    )
-    if admin_available:
+    def require_firebase_admin():
+        if firebase_admin is None:
+            unavailable_error = RuntimeError(
+                "Firebase Admin SDK is not installed or Firestore is not configured. "
+                "Install firebase-admin and set Firebase credentials before starting the app."
+            )
+            if _FIREBASE_ADMIN_IMPORT_ERROR is not None:
+                raise unavailable_error from _FIREBASE_ADMIN_IMPORT_ERROR
+            raise unavailable_error
+        return firebase_admin
+
+    try:
+        _run_login_diagnostic_step(
+            "Load Firebase Admin SDK",
+            require_firebase_admin,
+        )
+    except RuntimeError as error:
+        _log_firebase_store_initialization_failure("firebase_admin_import", error)
+        raise
+    if firebase_admin is not None:
         stage = "active_firebase_config"
         try:
             active_config = get_active_firebase_config()

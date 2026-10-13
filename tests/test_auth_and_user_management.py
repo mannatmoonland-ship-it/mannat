@@ -716,6 +716,11 @@ def test_production_login_fails_closed_when_firebase_admin_is_unavailable(
 ):
     monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", True)
     monkeypatch.setattr(app_module, "firebase_admin", None)
+    monkeypatch.setattr(
+        app_module,
+        "_FIREBASE_ADMIN_IMPORT_ERROR",
+        ImportError("synthetic-hidden-import-detail", name="firebase_admin.auth"),
+    )
     monkeypatch.setattr(app_module, "ACTIVE_FIREBASE_CONFIG_PATH", tmp_path / "missing-active-config.json")
     monkeypatch.setitem(app.config, "FIRESTORE_MODE", "memory")
     monkeypatch.setenv("ALLOW_IN_MEMORY_FIRESTORE", "true")
@@ -738,10 +743,13 @@ def test_production_login_fails_closed_when_firebase_admin_is_unavailable(
     assert response.status_code == 503
     assert b"Sign-in is temporarily unavailable" in response.data
     assert not hasattr(app, "_memory_store")
+    assert "operation=Load Firebase Admin SDK event=failed" in caplog.text
+    assert "cause_type=ImportError cause_category=module import failed: firebase_admin.auth" in caplog.text
     assert "operation=Resolve user store event=failed" in caplog.text
     assert "exception_type=RuntimeError category=Firebase Admin SDK is unavailable" in caplog.text
     assert "private-test-user" not in caplog.text
     assert "private-test-password" not in caplog.text
+    assert "synthetic-hidden-import-detail" not in caplog.text
     _assert_sequential_login_diagnostics(caplog.text)
 
 

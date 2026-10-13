@@ -609,22 +609,27 @@ const DailyReports = (function() {
       const response = await fetch(`/extract-google-photos-url?url=${encodeURIComponent(photosUrl)}${retryQuery}`, {
         signal: controller.signal
       });
-      let payload = null;
-      try {
-        payload = await response.json();
-      } catch (error) {
-        console.error("Google Photos extraction returned an invalid response.");
-        return null;
-      }
+      const responseBody = await response.text();
       if (!response.ok) {
         console.warn("Google Photos extraction returned status:", response.status);
         return null;
       }
-      if (!isGooglePhotosPreviewUrl(payload?.url)) {
+      const contentType = response.headers.get("content-type") || "";
+      let directUrl = responseBody.trim();
+      if (contentType.includes("application/json")) {
+        try {
+          const payload = JSON.parse(responseBody);
+          directUrl = payload?.url;
+        } catch (error) {
+          console.error("Google Photos extraction returned an invalid response.");
+          return null;
+        }
+      }
+      if (!isGooglePhotosPreviewUrl(directUrl)) {
         console.warn("Google Photos extraction did not return a supported image preview.");
         return null;
       }
-      return payload.url;
+      return directUrl;
     } catch (error) {
       if (error.name === "AbortError" && timedOut) {
         console.warn("Google Photos extraction timed out.");

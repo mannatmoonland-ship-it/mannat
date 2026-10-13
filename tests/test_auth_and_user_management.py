@@ -4,6 +4,7 @@ import pytest
 from google.api_core.exceptions import DeadlineExceeded
 from werkzeug.security import check_password_hash, generate_password_hash
 
+import app as app_module
 from app import FirebaseFirestoreStore, app
 
 BOOTSTRAP_TEST_PASSWORD = "Test-Only-Admin-2026!"
@@ -566,6 +567,25 @@ def _save_login_test_user(store, username, password, is_active=True):
         "is_active": is_active,
         "active_sessions": [],
     })
+
+
+def test_get_user_store_falls_back_to_memory_when_local_dev_has_no_firebase_config(monkeypatch):
+    monkeypatch.delenv("ALLOW_IN_MEMORY_FIRESTORE", raising=False)
+    monkeypatch.delenv("FIREBASE_WEB_CONFIG", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_JSON", raising=False)
+    monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_BASE64", raising=False)
+    app.config.pop("FIRESTORE_MODE", None)
+    app.config.pop("FIRESTORE_STORE", None)
+    if hasattr(app, "_memory_store"):
+        delattr(app, "_memory_store")
+    if hasattr(app, "_firebase_store"):
+        delattr(app, "_firebase_store")
+    monkeypatch.setattr(app_module, "find_firebase_service_account_path", lambda: None)
+
+    store = app_module.get_user_store()
+
+    assert isinstance(store, app_module.InMemoryFirestoreStore)
 
 
 def test_account_specific_password_login_succeeds(client):

@@ -2894,6 +2894,33 @@ def _material_transaction_matches(existing, payload):
     return all(existing.get(key) == value for key, value in payload.items())
 
 
+def _should_use_in_memory_store_fallback():
+    store_mode = str(app.config.get("FIRESTORE_MODE") or "").lower()
+    if store_mode in {"memory", "in_memory"}:
+        return True
+    if store_mode == "firestore":
+        return False
+    if os.environ.get("ALLOW_IN_MEMORY_FIRESTORE", "").lower() in {"1", "true", "yes", "on"}:
+        return True
+    if IS_PRODUCTION_ENVIRONMENT:
+        return False
+    if any(
+        os.environ.get(name) is not None
+        for name in (
+            "FIREBASE_WEB_CONFIG",
+            "FIREBASE_SERVICE_ACCOUNT",
+            "FIREBASE_SERVICE_ACCOUNT_JSON",
+            "FIREBASE_SERVICE_ACCOUNT_BASE64",
+        )
+    ):
+        return False
+    if ACTIVE_FIREBASE_CONFIG_PATH.is_file():
+        return False
+    if find_firebase_service_account_path() is not None:
+        return False
+    return True
+
+
 def get_user_store():
     configured_store = app.config.get("FIRESTORE_STORE")
     if configured_store is not None:
@@ -2901,6 +2928,11 @@ def get_user_store():
 
     store_mode = str(app.config.get("FIRESTORE_MODE") or "").lower()
     if store_mode == "memory":
+        if not hasattr(app, "_memory_store"):
+            app._memory_store = InMemoryFirestoreStore()
+        return app._memory_store
+
+    if _should_use_in_memory_store_fallback():
         if not hasattr(app, "_memory_store"):
             app._memory_store = InMemoryFirestoreStore()
         return app._memory_store
@@ -2921,7 +2953,7 @@ def get_user_store():
                 raise RuntimeError(
                     "Firestore initialization failed. Check FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT settings."
                 ) from exc
-            if os.environ.get("ALLOW_IN_MEMORY_FIRESTORE", "").lower() in {"1", "true", "yes", "on"}:
+            if _should_use_in_memory_store_fallback():
                 if not hasattr(app, "_memory_store"):
                     app._memory_store = InMemoryFirestoreStore()
                 return app._memory_store

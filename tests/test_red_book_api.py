@@ -112,6 +112,82 @@ def test_red_book_preserves_multiline_instruction_text(red_book_client):
     assert saved["text"] == updated_text
 
 
+def test_red_book_image_link_can_be_added_updated_and_removed(red_book_client):
+    _store, client = red_book_client
+    image_url = "https://drive.google.com/file/d/example-image-id/view?usp=sharing"
+    response = client.post(
+        "/api/red-book/items",
+        json={"text": "Inspect the retaining wall.", "image_url": image_url},
+        headers=headers(),
+    )
+    assert response.status_code == 201
+    item_id = response.get_json()["id"]
+    saved = client.get("/api/red-book/items").get_json()["items"][0]
+    assert saved["image_url"] == image_url
+
+    updated_url = "https://drive.google.com/open?id=updated-image-id"
+    updated = client.patch(
+        f"/api/red-book/items/{item_id}",
+        json={"text": "Inspect the retaining wall.", "image_url": updated_url},
+        headers=headers(),
+    )
+    assert updated.status_code == 200
+    saved = client.get("/api/red-book/items").get_json()["items"][0]
+    assert saved["image_url"] == updated_url
+
+    removed = client.patch(
+        f"/api/red-book/items/{item_id}",
+        json={"text": "Inspect the retaining wall.", "image_url": ""},
+        headers=headers(),
+    )
+    assert removed.status_code == 200
+    saved = client.get("/api/red-book/items").get_json()["items"][0]
+    assert saved["image_url"] == ""
+
+
+def test_red_book_text_only_edit_preserves_existing_image_link(red_book_client):
+    _store, client = red_book_client
+    image_url = "https://drive.google.com/file/d/example-image-id/view"
+    response = client.post(
+        "/api/red-book/items",
+        json={"text": "Inspect the retaining wall.", "image_url": image_url},
+        headers=headers(),
+    )
+    item_id = response.get_json()["id"]
+
+    updated = client.patch(
+        f"/api/red-book/items/{item_id}",
+        json={"text": "Inspect the completed retaining wall."},
+        headers=headers(),
+    )
+
+    assert updated.status_code == 200
+    saved = client.get("/api/red-book/items").get_json()["items"][0]
+    assert saved["image_url"] == image_url
+    assert saved["text"] == "Inspect the completed retaining wall."
+
+
+@pytest.mark.parametrize(
+    "image_url",
+    [
+        "http://drive.google.com/file/d/example-image-id/view",
+        "https://drive.google.com.evil.example/file/d/example-image-id/view",
+        "https://example.com/file/d/example-image-id/view",
+        "https://drive.google.com/",
+    ],
+)
+def test_red_book_rejects_non_drive_image_links(red_book_client, image_url):
+    _store, client = red_book_client
+    response = client.post(
+        "/api/red-book/items",
+        json={"text": "Inspect the retaining wall.", "image_url": image_url},
+        headers=headers(),
+    )
+
+    assert response.status_code == 400
+    assert client.get("/api/red-book/items").get_json()["items"] == []
+
+
 def test_red_book_order_is_saved_and_read_in_priority_order(red_book_client):
     _store, client = red_book_client
     first_id = add_item(client, "First instruction.")
@@ -237,6 +313,7 @@ def test_red_book_page_includes_construction_navigation_and_controls(red_book_cl
     assert b"Red Book" in response.data
     assert b"Save Order" not in response.data
     assert b"redBookAddForm" in response.data
+    assert b"Add image (Google Drive link)" in response.data
 
 
 def test_red_book_policy_and_delete_confirmation_are_explicit():

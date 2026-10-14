@@ -12,6 +12,60 @@
   let draggedItemId = null;
   let orderIsSaving = false;
 
+  function driveImageCandidates(url) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" || parsed.hostname !== "drive.google.com") return [];
+      const idMatch = parsed.pathname.match(/\/d\/([A-Za-z0-9_-]{1,200})(?:\/|$)/);
+      const id = idMatch ? idMatch[1] : parsed.searchParams.get("id");
+      if (!id || !/^[A-Za-z0-9_-]{1,200}$/.test(id)) return [];
+      const encoded = encodeURIComponent(id);
+      return [
+        `https://lh3.googleusercontent.com/d/${encoded}=w1600`,
+        `https://lh3.googleusercontent.com/d/${encoded}`,
+        `https://drive.google.com/thumbnail?id=${encoded}&sz=w1600`,
+        `https://drive.google.com/uc?export=view&id=${encoded}`
+      ];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function appendImage(content, imageUrl) {
+    if (!imageUrl) return;
+    const candidates = driveImageCandidates(imageUrl);
+    if (!candidates.length) return;
+
+    const link = document.createElement("a");
+    link.className = "red-book-image-link";
+    link.href = imageUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.setAttribute("aria-label", "Open image in Google Drive");
+
+    const image = document.createElement("img");
+    image.className = "red-book-image";
+    image.alt = "Image attached to this Red Book item";
+    image.loading = "lazy";
+    const unavailable = document.createElement("span");
+    unavailable.className = "red-book-image-error";
+    unavailable.textContent = "Image unavailable. Check Google Drive sharing settings.";
+    unavailable.hidden = true;
+    let candidateIndex = 0;
+    image.addEventListener("error", () => {
+      candidateIndex += 1;
+      if (candidateIndex < candidates.length) {
+        image.src = candidates[candidateIndex];
+      } else {
+        image.hidden = true;
+        unavailable.hidden = false;
+      }
+    });
+    image.src = candidates[candidateIndex];
+    link.append(image);
+    content.append(link, unavailable);
+  }
+
   function showStatus(message, kind = "success") {
     status.textContent = message;
     status.dataset.kind = kind;
@@ -91,6 +145,8 @@
     emptyMessage.hidden = items.length !== 0;
     if (addForm) {
       addForm.elements.text.disabled = orderIsSaving;
+      const imageUrlInput = addForm.elements.namedItem("image_url");
+      if (imageUrlInput) imageUrlInput.disabled = orderIsSaving;
       addForm.querySelector('button[type="submit"]').disabled = orderIsSaving;
     }
     items.forEach((item, index) => {
@@ -128,10 +184,14 @@
       number.setAttribute("aria-label", `Priority ${index + 1}`);
       row.append(number);
 
+      const content = document.createElement("div");
+      content.className = "red-book-content";
       const text = document.createElement("span");
       text.className = "red-book-text";
       text.textContent = item.text;
-      row.append(text);
+      content.append(text);
+      appendImage(content, item.image_url);
+      row.append(content);
 
       const actions = document.createElement("div");
       actions.className = "red-book-item-actions";
@@ -139,7 +199,7 @@
         actions.append(
           actionButton("↑", () => moveItem(item.id, -1), orderIsSaving || index === 0, "Move Up"),
           actionButton("↓", () => moveItem(item.id, 1), orderIsSaving || index === items.length - 1, "Move Down"),
-          actionButton("Edit", () => editItem(item, text), orderIsSaving)
+          actionButton("Edit", () => editItem(item, content), orderIsSaving)
         );
       }
       if (canDelete) {
@@ -150,26 +210,41 @@
     });
   }
 
-  async function editItem(item, textNode) {
+  async function editItem(item, contentNode) {
+    const fields = document.createElement("div");
+    fields.className = "red-book-edit-fields";
     const input = document.createElement("textarea");
     input.rows = 3;
     input.maxLength = 500;
     input.required = true;
     input.value = item.text;
     input.className = "red-book-edit-input";
-    textNode.replaceWith(input);
+    input.setAttribute("aria-label", "Construction instruction");
+
+    const imageLabel = document.createElement("label");
+    imageLabel.textContent = "Image (Google Drive link)";
+    const imageInput = document.createElement("input");
+    imageInput.type = "url";
+    imageInput.maxLength = 2048;
+    imageInput.value = item.image_url || "";
+    imageInput.placeholder = "https://drive.google.com/file/d/...";
+    imageInput.className = "red-book-edit-image-input";
+    imageLabel.append(imageInput);
+    fields.append(input, imageLabel);
+    contentNode.replaceWith(fields);
     input.focus();
     input.select();
 
-    const actions = input.parentElement.querySelector(".red-book-item-actions");
+    const actions = fields.parentElement.querySelector(".red-book-item-actions");
     actions.replaceChildren(
       actionButton("Save", async () => {
         try {
           await apiRequest(`/api/red-book/items/${encodeURIComponent(item.id)}`, {
             method: "PATCH",
-            body: JSON.stringify({ text: input.value })
+            body: JSON.stringify({ text: input.value, image_url: imageInput.value })
           });
           item.text = input.value.trim();
+          item.image_url = imageInput.value.trim();
           renderItems();
           showStatus("Red Book item updated.");
         } catch (error) {
@@ -201,12 +276,14 @@
     addForm.addEventListener("submit", async event => {
       event.preventDefault();
       const input = addForm.elements.text;
+      const imageUrlInput = addForm.elements.namedItem("image_url");
       try {
         await apiRequest("/api/red-book/items", {
           method: "POST",
-          body: JSON.stringify({ text: input.value })
+          body: JSON.stringify({ text: input.value, image_url: imageUrlInput?.value || "" })
         });
         input.value = "";
+        if (imageUrlInput) imageUrlInput.value = "";
         await loadItems();
         showStatus("Red Book item added.");
       } catch (error) {

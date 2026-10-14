@@ -960,7 +960,7 @@ class InMemoryFirestoreStore:
                 [{"id": item_id, **item} for item_id, item in self.red_book_items.items()]
             )
 
-    def create_red_book_item(self, item_id, text, actor_id):
+    def create_red_book_item(self, item_id, text, actor_id, image_url=""):
         with self._red_book_mutation_lock:
             if item_id in self.red_book_items:
                 raise RedBookMutationError("This item request ID has already been used.", 409)
@@ -969,6 +969,7 @@ class InMemoryFirestoreStore:
             now = iso_now()
             self.red_book_items[item_id] = {
                 "text": text,
+                "image_url": image_url,
                 "sort_order": len(self.red_book_items),
                 "created_at": now,
                 "updated_at": now,
@@ -977,12 +978,15 @@ class InMemoryFirestoreStore:
             }
             return {"id": item_id}
 
-    def update_red_book_item(self, item_id, text, actor_id):
+    def update_red_book_item(self, item_id, text, actor_id, image_url=None):
         with self._red_book_mutation_lock:
             item = self.red_book_items.get(item_id)
             if item is None:
                 return False
-            item.update({"text": text, "updated_at": iso_now(), "updated_by": actor_id})
+            changes = {"text": text, "updated_at": iso_now(), "updated_by": actor_id}
+            if image_url is not None:
+                changes["image_url"] = image_url
+            item.update(changes)
             return True
 
     def delete_red_book_item(self, item_id, actor_id):
@@ -1882,7 +1886,7 @@ class FirebaseFirestoreStore:
             [{"id": snapshot.id, **(snapshot.to_dict() or {})} for snapshot in snapshots]
         )
 
-    def create_red_book_item(self, item_id, text, actor_id):
+    def create_red_book_item(self, item_id, text, actor_id, image_url=""):
         items = self._collection("red_book_items")
         reference = items.document(item_id)
         firestore_transaction = self.db.transaction()
@@ -1909,6 +1913,7 @@ class FirebaseFirestoreStore:
             now = iso_now()
             transaction.create(reference, {
                 "text": text,
+                "image_url": image_url,
                 "sort_order": next_order,
                 "created_at": now,
                 "updated_at": now,
@@ -1919,7 +1924,7 @@ class FirebaseFirestoreStore:
 
         return create(firestore_transaction)
 
-    def update_red_book_item(self, item_id, text, actor_id):
+    def update_red_book_item(self, item_id, text, actor_id, image_url=None):
         reference = self._collection("red_book_items").document(item_id)
         firestore_transaction = self.db.transaction()
 
@@ -1928,11 +1933,14 @@ class FirebaseFirestoreStore:
             snapshot = _transaction_get_document_snapshot(transaction, reference)
             if not snapshot.exists:
                 return False
-            transaction.update(reference, {
+            changes = {
                 "text": text,
                 "updated_at": iso_now(),
                 "updated_by": actor_id,
-            })
+            }
+            if image_url is not None:
+                changes["image_url"] = image_url
+            transaction.update(reference, changes)
             return True
 
         return update(firestore_transaction)
@@ -5624,6 +5632,40 @@ def _validate_red_book_text(value):
     return normalized
 
 
+def _validate_red_book_image_url(value):
+    if not isinstance(value, str):
+        raise RedBookMutationError("Enter a valid Google Drive image link.")
+    normalized = value.strip()
+    if not normalized:
+        return ""
+    if len(normalized) > 2048 or any(
+        character.isspace() or ord(character) == 127 for character in normalized
+    ):
+        raise RedBookMutationError("Enter a valid Google Drive image link.")
+    try:
+        parsed = urlsplit(normalized)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        raise RedBookMutationError("Enter a valid Google Drive image link.")
+    has_drive_file_id = bool(
+        re.search(r"(?:^|/)d/[A-Za-z0-9_-]{1,200}(?:/|$)", parsed.path)
+        or re.search(r"(?:^|&)id=[A-Za-z0-9_-]{1,200}(?:&|$)", parsed.query)
+    )
+    if (
+        parsed.scheme != "https"
+        or hostname != "drive.google.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+        or not has_drive_file_id
+    ):
+        raise RedBookMutationError(
+            "Use a Google Drive file link, such as https://drive.google.com/file/d/..."
+        )
+    return normalized
+
+
 def _valid_red_book_item_id(value):
     try:
         parsed = uuid.UUID(value) if isinstance(value, str) else None
@@ -5714,7 +5756,9 @@ def red_book_items_api():
         public_items = [
             {
                 field: item.get(field)
-                for field in ("id", "text", "sort_order", "created_at", "updated_at")
+                for field in (
+                    "id", "text", "image_url", "sort_order", "created_at", "updated_at"
+                )
             }
             for item in items
         ]
@@ -5724,14 +5768,15 @@ def red_book_items_api():
     if denied:
         return denied
     payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or set(payload) != {"text"}:
+    if not isinstance(payload, dict) or set(payload) not in ({"text"}, {"text", "image_url"}):
         return _red_book_api_response(
-            {"error": "Provide only the construction instruction."}, 400
+            {"error": "Provide the construction instruction and optional image link."}, 400
         )
     try:
         text = _validate_red_book_text(payload["text"])
+        image_url = _validate_red_book_image_url(payload.get("image_url", ""))
         result = get_user_store().create_red_book_item(
-            str(uuid.uuid4()), text, user.get("id")
+            str(uuid.uuid4()), text, user.get("id"), image_url
         )
     except RedBookMutationError as error:
         return _red_book_api_response({"error": str(error)}, error.status)
@@ -5755,12 +5800,21 @@ def red_book_item_api(item_id):
         store = get_user_store()
         if request.method == "PATCH":
             payload = request.get_json(silent=True)
-            if not isinstance(payload, dict) or set(payload) != {"text"}:
+            if not isinstance(payload, dict) or set(payload) not in (
+                {"text"}, {"text", "image_url"}
+            ):
                 return _red_book_api_response(
-                    {"error": "Provide only the construction instruction."}, 400
+                    {"error": "Provide the construction instruction and optional image link."},
+                    400,
                 )
             text = _validate_red_book_text(payload["text"])
-            updated = store.update_red_book_item(item_id, text, user.get("id"))
+            image_url = (
+                _validate_red_book_image_url(payload["image_url"])
+                if "image_url" in payload else None
+            )
+            updated = store.update_red_book_item(
+                item_id, text, user.get("id"), image_url
+            )
             if not updated:
                 return _red_book_api_response({"error": "Red Book item not found."}, 404)
             return _red_book_api_response({"id": item_id})

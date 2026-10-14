@@ -60,10 +60,21 @@
 }
 
 .red-book-add-form label,
-.red-book-edit-input {
+.red-book-edit-fields label {
     color: #d9eee5;
     font-size: 14px;
     font-weight: 700;
+}
+
+.red-book-image-field {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.red-book-image-field small {
+    color: #a9c0b6;
+    line-height: 1.4;
 }
 
 .red-book-add-row {
@@ -74,7 +85,9 @@
 }
 
 .red-book-add-row textarea,
-.red-book-edit-input {
+.red-book-image-field input,
+.red-book-edit-fields textarea,
+.red-book-edit-fields input {
     box-sizing: border-box;
     width: 100%;
     min-width: 0;
@@ -89,7 +102,9 @@
 }
 
 .red-book-add-row textarea:focus,
-.red-book-edit-input:focus {
+.red-book-image-field input:focus,
+.red-book-edit-fields textarea:focus,
+.red-book-edit-fields input:focus {
     border-color: #77d3a8;
     box-shadow: 0 0 0 3px rgba(119, 211, 168, 0.14);
 }
@@ -175,6 +190,43 @@
     overflow-wrap: anywhere;
     line-height: 1.55;
     white-space: pre-wrap;
+}
+
+.red-book-content {
+    display: grid;
+    min-width: 0;
+    gap: 12px;
+}
+
+.red-book-image-link {
+    display: block;
+    width: fit-content;
+    max-width: 100%;
+}
+
+.red-book-image {
+    display: block;
+    max-width: 100%;
+    max-height: 420px;
+    border: 1px solid rgba(167, 214, 196, 0.2);
+    border-radius: 10px;
+    background: #081510;
+    object-fit: contain;
+}
+
+.red-book-image-error {
+    color: #ffcf91;
+    font-size: 13px;
+}
+
+.red-book-edit-fields {
+    display: grid;
+    min-width: 0;
+    gap: 10px;
+}
+
+.red-book-edit-fields textarea {
+    resize: vertical;
 }
 
 .red-book-item-actions {

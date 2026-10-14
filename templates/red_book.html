@@ -64,6 +64,14 @@
         {% endif %}
 
         <p id="redBookStatus" class="red-book-status" role="status" aria-live="polite"></p>
+        <div class="red-book-print-actions" aria-label="Export Red Book as PDF">
+            <button id="redBookPrintWithImages" class="red-book-button" type="button">
+                Print PDF with Images
+            </button>
+            <button id="redBookPrintWithoutImages" class="red-book-button" type="button">
+                Print PDF without Images
+            </button>
+        </div>
         <ol id="redBookItems" class="red-book-list" aria-label="Construction instructions"></ol>
         <p id="redBookEmpty" class="red-book-empty" hidden>No Red Book items have been added yet.</p>
     </main>

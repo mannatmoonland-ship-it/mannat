@@ -314,6 +314,8 @@ def test_red_book_page_includes_construction_navigation_and_controls(red_book_cl
     assert b"Save Order" not in response.data
     assert b"redBookAddForm" in response.data
     assert b"Add image (Google Drive link)" in response.data
+    assert b"Print PDF with Images" in response.data
+    assert b"Print PDF without Images" in response.data
 
 
 def test_red_book_policy_and_delete_confirmation_are_explicit():
@@ -336,3 +338,9 @@ def test_red_book_policy_and_delete_confirmation_are_explicit():
     assert 'await apiRequest("/api/red-book/order"' in javascript
     assert "await saveOrder();" in javascript
     assert "saveOrderButton" not in javascript
+    assert 'window.print();' in javascript
+    stylesheet = (Path(__file__).parents[1] / "static" / "red_book.css").read_text(
+        encoding="utf-8"
+    )
+    assert "@media print" in stylesheet
+    assert 'body[data-print-images="false"] .red-book-image-link' in stylesheet

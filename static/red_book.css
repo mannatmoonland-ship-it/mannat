@@ -147,6 +147,13 @@
     color: #ff9c9c;
 }
 
+.red-book-print-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 16px;
+}
+
 .red-book-list {
     display: grid;
     gap: 12px;
@@ -159,7 +166,7 @@
 .red-book-item {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
+    align-items: start;
     gap: 14px;
     padding: 16px;
     border: 1px solid rgba(167, 214, 196, 0.2);
@@ -281,5 +288,83 @@
     .red-book-item-actions {
         grid-column: 1 / -1;
         justify-content: flex-start;
+    }
+}
+
+@media print {
+    body {
+        background: #fff !important;
+        color: #111 !important;
+        print-color-adjust: economy;
+        -webkit-print-color-adjust: economy;
+    }
+
+    .red-book-header,
+    .red-book-add-form,
+    .red-book-status,
+    .red-book-print-actions,
+    .red-book-item-actions,
+    .red-book-empty {
+        display: none !important;
+    }
+
+    .red-book-main {
+        width: 100%;
+        margin: 0;
+        color: #111 !important;
+    }
+
+    .red-book-hero {
+        margin: 0 0 18px;
+    }
+
+    .red-book-hero h1,
+    .red-book-hero p,
+    .red-book-eyebrow,
+    .red-book-text {
+        color: #111 !important;
+    }
+
+    .red-book-list {
+        display: block;
+    }
+
+    .red-book-item {
+        grid-template-columns: 30px minmax(0, 1fr);
+        gap: 10px;
+        margin: 0 0 12px;
+        padding: 10px 0;
+        break-inside: avoid;
+        border: 0;
+        border-bottom: 1px solid #bbb;
+        border-radius: 0;
+        background: #fff !important;
+    }
+
+    .red-book-number {
+        width: 26px;
+        height: 26px;
+        background: #eee !important;
+        color: #111 !important;
+    }
+
+    .red-book-content {
+        min-width: 0;
+    }
+
+    .red-book-image {
+        max-width: 100%;
+        max-height: 320px;
+        border: 1px solid #bbb;
+        background: #fff;
+    }
+
+    body[data-print-images="false"] .red-book-image-link,
+    body[data-print-images="false"] .red-book-image-error {
+        display: none !important;
+    }
+
+    @page {
+        margin: 16mm;
     }
 }

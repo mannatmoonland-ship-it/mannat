@@ -8,6 +8,8 @@
   const status = document.getElementById("redBookStatus");
   const emptyMessage = document.getElementById("redBookEmpty");
   const addForm = document.getElementById("redBookAddForm");
+  const printWithImagesButton = document.getElementById("redBookPrintWithImages");
+  const printWithoutImagesButton = document.getElementById("redBookPrintWithoutImages");
   let items = [];
   let draggedItemId = null;
   let orderIsSaving = false;
@@ -70,6 +72,15 @@
     status.textContent = message;
     status.dataset.kind = kind;
   }
+
+  function printRedBook(includeImages) {
+    document.body.dataset.printImages = includeImages ? "true" : "false";
+    window.print();
+    delete document.body.dataset.printImages;
+  }
+
+  printWithImagesButton.addEventListener("click", () => printRedBook(true));
+  printWithoutImagesButton.addEventListener("click", () => printRedBook(false));
 
   async function apiRequest(path, options = {}) {
     const response = await fetch(path, {

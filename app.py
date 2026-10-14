@@ -3925,7 +3925,16 @@ def favicon():
 @require_login
 def dashboard():
     user = get_current_user()
-    return render_template("dashboard.html", current_user=user)
+    try:
+        can_read_red_book = _user_has_compiled_permission(user, "red_book.read")
+    except Exception as error:
+        app.logger.error("Dashboard permissions failed (%s).", type(error).__name__)
+        return "Unable to verify dashboard permissions.", 503
+    return render_template(
+        "dashboard.html",
+        current_user=user,
+        can_read_red_book=can_read_red_book,
+    )
 
 
 @app.route("/profile-settings")

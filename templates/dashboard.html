@@ -793,6 +793,35 @@
             </div>
 
 
+            {% if can_read_red_book %}
+            <div class="card">
+
+                <a href="{{ url_for('red_book_page') }}" class="card-click-target" aria-label="Open Red Book"></a>
+
+                <div class="card-content">
+
+                    <div class="card-header">
+
+                        <div class="card-icon red-book-module">
+                            RB
+                        </div>
+
+                        <h3 class="card-title">Red Book</h3>
+
+                    </div>
+
+                    <p class="card-description">
+                        Review construction precautions, measurements, checks, and illustrated instructions.
+                    </p>
+
+                    <a href="{{ url_for('red_book_page') }}" class="card-button">OPEN RED BOOK</a>
+
+                </div>
+
+            </div>
+            {% endif %}
+
+
             <!-- =================================================
                  LEDGER PRINTS CARD
             ================================================= -->

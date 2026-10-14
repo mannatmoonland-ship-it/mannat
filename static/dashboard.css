@@ -192,6 +192,8 @@
 .dashboard-page .card-icon.trade-builder::before { content: "TB"; }
 .dashboard-page .card-icon.daily-reports { background: linear-gradient(145deg, #68836f, #496650); }
 .dashboard-page .card-icon.daily-reports::before { content: "DR"; }
+.dashboard-page .card-icon.red-book-module { background: linear-gradient(145deg, #68836f, #496650); }
+.dashboard-page .card-icon.red-book-module::before { content: "RB"; }
 .dashboard-page .card-icon.user-management { background: linear-gradient(145deg, #527c79, #345e5c); }
 .dashboard-page .card-icon.user-management::before { content: "UM"; }
 .dashboard-page .card-icon.snapshot-module { background: linear-gradient(145deg, #697888, #485a6c); }
@@ -694,6 +696,11 @@ body.dashboard-page .card .card-button:hover {
 .dashboard-page .card-icon.daily-reports::before {
     -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3h8l5 5v13H7zM15 3v6h5M10 13h7M10 17h7M4 7v14'/%3E%3C/svg%3E");
     mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3h8l5 5v13H7zM15 3v6h5M10 13h7M10 17h7M4 7v14'/%3E%3C/svg%3E");
+}
+.dashboard-page .card-icon.red-book-module::before {
+    content: "";
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 4.5A2.5 2.5 0 0 1 7.5 2H20v18H7.5A2.5 2.5 0 0 0 5 22zM5 4.5v17.5M9 7h7M9 11h7M9 15h5'/%3E%3C/svg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 4.5A2.5 2.5 0 0 1 7.5 2H20v18H7.5A2.5 2.5 0 0 0 5 22zM5 4.5v17.5M9 7h7M9 11h7M9 15h5'/%3E%3C/svg%3E");
 }
 .dashboard-page .card-icon.ledger-prints::before {
     -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 8V3h10v5M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M7 14h10v7H7zM17 11h.01'/%3E%3C/svg%3E");

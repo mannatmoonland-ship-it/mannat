@@ -318,6 +318,22 @@ def test_red_book_page_includes_construction_navigation_and_controls(red_book_cl
     assert b"Print PDF without Images" in response.data
 
 
+def test_dashboard_shows_red_book_card_only_to_users_with_read_permission(red_book_client):
+    store, client = red_book_client
+    dashboard_response = client.get("/")
+    assert b'href="/red-book"' in dashboard_response.data
+    dashboard_css = (Path(__file__).parents[1] / "static" / "dashboard.css").read_text(
+        encoding="utf-8"
+    )
+    assert ".dashboard-page .card-icon.red-book-module::before" in dashboard_css
+    assert "M5 4.5A2.5 2.5 0 0 1 7.5 2H20v18H7.5A2.5 2.5 0 0 0 5 22z" in dashboard_css
+
+    set_role(store, client, "Site Engineer", ["dashboard"])
+    dashboard = client.get("/")
+    assert dashboard.status_code == 200
+    assert b"OPEN RED BOOK" not in dashboard.data
+
+
 def test_red_book_policy_and_delete_confirmation_are_explicit():
     source = (Path(__file__).parents[1] / "permission_policy.py").read_text(
         encoding="utf-8"

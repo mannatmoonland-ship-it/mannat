@@ -509,6 +509,7 @@ def test_new_user_receives_unique_password_setup_link_instead_of_shared_password
         "username": "new-staff",
         "full_name": "New Staff",
         "email": "new-staff@example.com",
+        "mobile_phone": "9876543210",
         "role": "office_staff",
         "custom_staff_type": "",
     }, follow_redirects=True)
@@ -1477,13 +1478,62 @@ def test_daily_report_routes_require_authentication_and_do_not_return_report_dat
         lambda _date: pytest.fail("Unauthenticated requests must not read Daily Reports."),
     )
 
-    for path in ("/daily-reports?date=2026-10-03", "/daily-reports/share-image?date=2026-10-03"):
-        response = client.get(path, environ_overrides={"REMOTE_ADDR": "127.0.0.1"})
+    page_response = client.get(
+        "/daily-reports?date=2026-10-03",
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+        follow_redirects=False,
+    )
+    assert page_response.status_code == 302
+    assert page_response.headers["Location"].startswith("/login?next=")
+    login_response = client.get(page_response.headers["Location"])
+    assert login_response.status_code == 200
+    assert b"Please sign in to continue" in login_response.data
+    assert b"Private report data" not in login_response.data
 
-        assert response.status_code == 401
-        body = response.get_data(as_text=True)
-        assert "Private report data" not in body
-        assert "<svg" not in body
+    image_response = client.get(
+        "/daily-reports/share-image?date=2026-10-03",
+        environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
+    )
+    assert image_response.status_code == 401
+    assert "Private report data" not in image_response.get_data(as_text=True)
+    assert "<svg" not in image_response.get_data(as_text=True)
+
+
+def test_daily_reports_login_returns_to_requested_date_and_rejects_external_next(client):
+    from app import ensure_initial_super_admin
+
+    admin = ensure_initial_super_admin()
+    admin["must_change_password"] = False
+    app.config["FIRESTORE_STORE"].save_user(admin)
+    requested_page = client.get("/daily-reports?date=2026-10-03", follow_redirects=False)
+    login_page = client.get(requested_page.headers["Location"])
+    assert b'name="next" value="/daily-reports?date=2026-10-03"' in login_page.data
+
+    login_response = client.post(
+        "/login",
+        data={
+            "username": "Rahim",
+            "password": BOOTSTRAP_TEST_PASSWORD,
+            "next": "/daily-reports?date=2026-10-03",
+        },
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+    assert login_response.headers["Location"] == "/daily-reports?date=2026-10-03"
+
+    with client.session_transaction() as flask_session:
+        flask_session.clear()
+    unsafe_next_response = client.post(
+        "/login",
+        data={
+            "username": "Rahim",
+            "password": BOOTSTRAP_TEST_PASSWORD,
+            "next": "https://example.com",
+        },
+        follow_redirects=False,
+    )
+    assert unsafe_next_response.status_code == 302
+    assert unsafe_next_response.headers["Location"] == "/"
 
 
 def test_daily_report_routes_require_daily_reports_read_permission(client):

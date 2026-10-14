@@ -24,27 +24,19 @@
 </head>
 
 <body data-daily-reports-csrf="{{ daily_reports_csrf }}">
+{% include "_page_loader.html" %}
 
 <div id="dr-toastContainer" class="dr-toast-container" aria-live="polite" aria-atomic="false"></div>
 
-<header>
+<header class="mm-app-header">
 
     <div>
-
-        <div class="brand">MANNAT MOON</div>
-
-        <div class="sub">Construction Documentation</div>
 
         <div class="dr-print-report-title">DAILY REPORT</div>
 
     </div>
 
     {% include '_navigation.html' %}
-
-    <button id="dr-addBtn" class="dr-icon-button">
-        <svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-        <span>Daily Record</span>
-    </button>
 
 </header>
 
@@ -59,6 +51,11 @@
             <p>Daily work, numbers, notes and visual evidence for one selected date.</p>
 
         </div>
+
+        <button id="dr-addBtn" class="dr-icon-button" type="button">
+            <svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <span>Daily Record</span>
+        </button>
 
         <div class="stats">
 

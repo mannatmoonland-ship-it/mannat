@@ -519,43 +519,19 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='red_book_context_menu.css') }}">
 </head>
 
 <body class="dashboard-page">
+{% include "_page_loader.html" %}
 
 
     <!-- =================================================
          HEADER
     ================================================= -->
 
-    <header class="dashboard-header">
-        <a class="dashboard-brand" href="{{ url_for('dashboard') }}" aria-label="Mannat Moon home">
-            <span class="dashboard-brand-mark" aria-hidden="true">MM</span>
-            <span class="dashboard-brand-copy">
-                <strong>Mannat Moon</strong>
-                <small>Construction workspace</small>
-            </span>
-        </a>
-
+    <header class="dashboard-header mm-app-header">
         {% include '_navigation.html' %}
-
-        <div class="dashboard-account">
-            {% if current_user %}
-                {% set role_id = current_user.role|lower %}
-                {% set role_labels = {'super_admin': 'Super Admin', 'office_staff': 'Office Staff', 'supervisor': 'Supervisor'} %}
-                {% set role_label = role_labels.get(role_id, current_user.custom_staff_type or current_user.role|replace('_', ' ')|title) %}
-                <a class="dashboard-user" href="{{ url_for('profile_settings') }}" aria-label="Open Profile Settings">
-                    <span class="dashboard-avatar" data-animal-avatar="{{ current_user.avatarId|default('cute_cat', true) }}" aria-hidden="true">{{ (current_user.full_name or current_user.username)[:1]|upper }}</span>
-                    <span class="dashboard-user-copy"><strong>{{ current_user.full_name or current_user.username }}</strong><small>{{ role_label }}</small></span>
-                </a>
-                <form method="post" action="{{ url_for('logout') }}" class="dashboard-logout">
-                    <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
-                    <button type="submit">Sign out</button>
-                </form>
-            {% else %}
-                <a href="{{ url_for('login_page') }}" class="dashboard-login">Sign in</a>
-            {% endif %}
-        </div>
 
     </header>
 
@@ -565,7 +541,7 @@
     ================================================= -->
 
     <main class="container">
-        <section class="dashboard-intro" aria-labelledby="dashboard-title">
+        <section class="dashboard-intro" id="dashboardHero" aria-labelledby="dashboard-title">
             <div>
                 <p class="dashboard-eyebrow"><span></span> WORKSPACE OVERVIEW</p>
                 <h2 id="dashboard-title">Project dashboard</h2>
@@ -573,6 +549,28 @@
             </div>
             <div class="dashboard-workspace-tag"><span aria-hidden="true"></span> Construction operations</div>
         </section>
+
+        {% if can_read_red_book %}
+        <section
+            class="pinned-instructions"
+            id="pinnedInstructions"
+            aria-labelledby="pinnedInstructionsTitle"
+            data-red-book-csrf="{{ red_book_csrf }}"
+        >
+            <div class="pinned-instructions-heading">
+                <div>
+                    <p class="dashboard-eyebrow"><span></span> SITE REFERENCE</p>
+                    <h2 id="pinnedInstructionsTitle">Pinned Site Instructions</h2>
+                </div>
+            </div>
+            <p class="pinned-instructions-status" id="pinnedInstructionsStatus" role="status" aria-live="polite"></p>
+            <div class="pinned-instructions-grid" id="pinnedInstructionsGrid"></div>
+            <p class="pinned-instructions-empty" id="pinnedInstructionsEmpty" hidden>
+                No site instructions have been pinned yet.
+            </p>
+            <script id="pinnedInstructionsData" type="application/json">{{ pinned_site_instructions|tojson }}</script>
+        </section>
+        {% endif %}
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
@@ -1022,6 +1020,11 @@
     </footer>
 
 
+    {% if can_read_red_book %}
+    <script src="{{ url_for('static', filename='red_book_images.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='red_book_context_menu.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='dashboard_pinned.js') }}" defer></script>
+    {% endif %}
     <script type="module">
         import { renderAnimalAvatar } from "{{ url_for('static', filename='animal_avatars.js') }}";
         document.querySelectorAll("[data-animal-avatar]").forEach(avatar => {

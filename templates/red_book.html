@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='red_book.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='red_book_context_menu.css') }}">
 </head>
 <body
     data-red-book-csrf="{{ red_book_csrf }}"
@@ -16,11 +17,8 @@
     data-can-edit="{{ 'true' if can_edit else 'false' }}"
     data-can-delete="{{ 'true' if can_delete else 'false' }}"
 >
-    <header class="red-book-header">
-        <div>
-            <div class="red-book-brand">MANNAT MOON</div>
-            <div class="red-book-subtitle">Construction Documentation</div>
-        </div>
+{% include "_page_loader.html" %}
+    <header class="red-book-header mm-app-header">
         {% include '_navigation.html' %}
     </header>
 
@@ -76,6 +74,8 @@
         <p id="redBookEmpty" class="red-book-empty" hidden>No Red Book items have been added yet.</p>
     </main>
 
+    <script src="{{ url_for('static', filename='red_book_images.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='red_book_context_menu.js') }}" defer></script>
     <script src="{{ url_for('static', filename='red_book.js') }}" defer></script>
 </body>
 </html>

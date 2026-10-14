@@ -86,6 +86,80 @@ if (root) {
     }
   });
 
+  const mobileInput = document.getElementById("profile-mobile-number");
+  const mobileCode = document.getElementById("profile-mobile-code");
+  const mobileStatus = document.getElementById("profile-mobile-status");
+  const sendMobileCode = document.getElementById("profile-send-phone-code");
+  const verifyMobileCode = document.getElementById("profile-verify-mobile");
+
+  function setMobileStatus(message, isError = false) {
+    mobileStatus.textContent = message;
+    mobileStatus.dataset.state = isError ? "error" : "success";
+    mobileStatus.setAttribute("role", isError ? "alert" : "status");
+  }
+
+  sendMobileCode.addEventListener("click", async () => {
+    const mobilePhone = mobileInput.value.trim();
+    if (!mobileInput.validity.valid) {
+      setMobileStatus("Enter a valid 10-digit Indian mobile number, such as 9876543210.", true);
+      mobileInput.focus();
+      return;
+    }
+    sendMobileCode.disabled = true;
+    try {
+      const response = await fetch("/api/profile/mobile-phone/send-code", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": root.dataset.csrfToken,
+        },
+        body: JSON.stringify({ mobile_phone: mobilePhone }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to send the SMS code.");
+      mobileCode.disabled = false;
+      verifyMobileCode.disabled = false;
+      const requestReference = result.provider_request_id
+        ? ` Fast2SMS request ID: ${result.provider_request_id}.`
+        : "";
+      setMobileStatus(
+        `Fast2SMS accepted the request for ${result.masked_mobile_phone}, but that does not confirm delivery. Check Fast2SMS Delivery Reports; if it shows Failed, use that report's failure details.${requestReference}`,
+      );
+    } catch (error) {
+      setMobileStatus(error.message || "Unable to send the SMS code. Please try again.", true);
+      sendMobileCode.disabled = false;
+    }
+  });
+
+  verifyMobileCode.addEventListener("click", async () => {
+    verifyMobileCode.disabled = true;
+    try {
+      const response = await fetch("/api/profile/mobile-phone", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": root.dataset.csrfToken,
+        },
+        body: JSON.stringify({
+          mobile_phone: mobileInput.value.trim(),
+          code: mobileCode.value.trim(),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Unable to verify this mobile number.");
+      document.getElementById("profile-mobile-current").textContent = `Verified number: ${result.mobile_phone}`;
+      setMobileStatus("Mobile number verified and saved. Password resets now require an SMS code.");
+      mobileCode.value = "";
+      mobileInput.value = result.mobile_phone.slice(-10);
+      sendMobileCode.disabled = true;
+    } catch (error) {
+      setMobileStatus(error.message || "Unable to verify this mobile number. Please try again.", true);
+      verifyMobileCode.disabled = false;
+    }
+  });
+
   const dialog = document.getElementById("avatar-library");
   const library = document.getElementById("avatar-library-list");
   const currentAvatar = document.getElementById("profile-current-avatar");

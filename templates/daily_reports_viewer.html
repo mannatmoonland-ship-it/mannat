@@ -16,6 +16,7 @@
     <title>Mannat Moon Daily Reports</title>
     {% endif %}
     <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
     <style>
         :root {
             --bg: #0f172a;
@@ -56,23 +57,7 @@
             border-radius: 18px;
             box-shadow: var(--shadow);
         }
-        .brand-block {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-        .brand-mark {
-            font-size: clamp(1.2rem, 2vw, 2rem);
-            font-weight: 800;
-            letter-spacing: 0.18em;
-            color: var(--brand);
-        }
-        .brand-sub {
-            font-size: 0.86rem;
-            color: var(--muted);
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-        }
+        .brand-block { display: flex; align-items: center; }
         .share-button {
             appearance: none;
             border: 1px solid rgba(250, 204, 21, 0.4);
@@ -214,11 +199,11 @@
     </style>
 </head>
 <body>
+{% include "_page_loader.html" %}
     <div class="viewer-shell">
         <header class="brand-bar">
             <div class="brand-block">
-                <div class="brand-mark">MANNAT MOON</div>
-                <div class="brand-sub">Construction Documentation</div>
+                {% include "_brand.html" %}
             </div>
             {% if selected_date %}
             <div>

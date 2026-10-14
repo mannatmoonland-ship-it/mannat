@@ -28,6 +28,8 @@ def profile_client(monkeypatch):
     monkeypatch.setitem(app_module.app.config, "TESTING", True)
     monkeypatch.setitem(app_module.app.config, "SECRET_KEY", "profile-test-secret")
     monkeypatch.setitem(app_module.app.config, "FIRESTORE_STORE", store)
+    monkeypatch.setattr(app_module, "SMS_OTP_ATTEMPTS", {})
+    monkeypatch.setattr(app_module, "_send_fast2sms_otp", lambda *_args: None)
     client = app_module.app.test_client()
     with client.session_transaction() as session:
         session["user_id"] = "profile-user"
@@ -211,6 +213,125 @@ def test_profile_update_requires_csrf_and_authentication(profile_client):
     logout_with_csrf(client)
     logged_out = save_profile(client, csrf_token, full_name="Casey Moon")
     assert logged_out.status_code == 401
+
+
+def test_profile_mobile_phone_requires_csrf_and_sms_code(profile_client, monkeypatch):
+    client, store = profile_client
+    page = client.get("/profile-settings")
+    csrf_token = csrf_token_from(page)
+
+    missing_csrf = client.post(
+        "/api/profile/mobile-phone/send-code",
+        json={
+            "mobile_phone": "9876543210",
+        },
+    )
+    sent_codes = []
+    monkeypatch.setattr(app_module, "_send_fast2sms_otp", lambda _phone, code: sent_codes.append(code))
+    sent = client.post(
+        "/api/profile/mobile-phone/send-code",
+        json={"mobile_phone": "9876543210"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    stored_challenge = next(iter(store.sms_otp_challenges.values()))
+    assert stored_challenge["code_digest"] == app_module._sms_otp_digest(
+        stored_challenge["id"], sent_codes[-1]
+    )
+    assert sent_codes[-1] not in stored_challenge.values()
+    wrong_code = client.post(
+        "/api/profile/mobile-phone",
+        json={
+            "mobile_phone": "9876543210",
+            "code": "000000" if sent_codes[-1] != "000000" else "000001",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    saved = client.post(
+        "/api/profile/mobile-phone",
+        json={
+            "mobile_phone": "9876543210",
+            "code": sent_codes[-1],
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert missing_csrf.status_code == 403
+    assert sent.status_code == 200
+    assert wrong_code.status_code == 400
+    assert saved.status_code == 200
+    assert saved.get_json() == {
+        "mobile_phone": "9876543210",
+        "mobile_phone_verified": True,
+    }
+    user = store.get_user("profile-user")
+    assert user["mobile_phone"] == "9876543210"
+    assert user["mobile_phone_verified_at"]
+
+
+def test_profile_mobile_phone_rejects_invalid_number_and_incorrect_code(profile_client, monkeypatch):
+    client, store = profile_client
+    csrf_token = csrf_token_from(client.get("/profile-settings"))
+
+    invalid_number = client.post(
+        "/api/profile/mobile-phone/send-code",
+        json={
+            "mobile_phone": "4155550123",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    non_indian_number = client.post(
+        "/api/profile/mobile-phone/send-code",
+        json={"mobile_phone": "+14155550123"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    wrong_code = client.post(
+        "/api/profile/mobile-phone",
+        json={
+            "mobile_phone": "9876543210",
+            "code": "000000",
+        },
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert invalid_number.status_code == 400
+    assert non_indian_number.status_code == 400
+    assert wrong_code.status_code == 400
+    assert store.get_user("profile-user").get("mobile_phone") is None
+
+
+def test_profile_mobile_otp_is_invalidated_after_too_many_attempts(profile_client, monkeypatch):
+    client, store = profile_client
+    csrf_token = csrf_token_from(client.get("/profile-settings"))
+    sent_codes = []
+    monkeypatch.setattr(
+        app_module, "_send_fast2sms_otp", lambda _phone, code: sent_codes.append(code)
+    )
+    sent = client.post(
+        "/api/profile/mobile-phone/send-code",
+        json={"mobile_phone": "9876543210"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert sent.status_code == 200
+    for _ in range(app_module.SMS_OTP_MAX_VERIFY_ATTEMPTS):
+        wrong_code = client.post(
+            "/api/profile/mobile-phone",
+            json={
+                "mobile_phone": "9876543210",
+                "code": "000000" if sent_codes[-1] != "000000" else "000001",
+            },
+            headers={"X-CSRF-Token": csrf_token},
+        )
+        assert wrong_code.status_code == 400
+
+    assert store.sms_otp_challenges == {}
+    correct_code_after_lockout = client.post(
+        "/api/profile/mobile-phone",
+        json={"mobile_phone": "9876543210", "code": sent_codes[-1]},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert correct_code_after_lockout.status_code == 400
+    assert store.get_user("profile-user").get("mobile_phone") is None
 
 
 def test_profile_update_reports_storage_errors(profile_client, monkeypatch):

@@ -1,3 +1,4 @@
+import json
 import uuid
 from pathlib import Path
 
@@ -49,6 +50,17 @@ def add_item(client, text):
     )
     assert response.status_code == 201
     return response.get_json()["id"]
+
+
+def dashboard_pinned_items(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    html = response.get_data(as_text=True)
+    payload = html.partition(
+        'id="pinnedInstructionsData" type="application/json">'
+    )[2].partition("</script>")[0]
+    return json.loads(payload)
 
 
 def set_role(store, client, role, permissions=None):
@@ -143,6 +155,170 @@ def test_red_book_image_link_can_be_added_updated_and_removed(red_book_client):
     assert removed.status_code == 200
     saved = client.get("/api/red-book/items").get_json()["items"][0]
     assert saved["image_url"] == ""
+
+
+def test_red_book_pin_is_shared_idempotent_and_keeps_the_original_item(red_book_client):
+    store, client = red_book_client
+    image_url = "https://drive.google.com/file/d/pinned-image-id/view"
+    created = client.post(
+        "/api/red-book/items",
+        json={"text": "Keep the original image and instruction.", "image_url": image_url},
+        headers=headers(),
+    )
+    item_id = created.get_json()["id"]
+
+    first_pin = client.put(
+        f"/api/red-book/items/{item_id}/pin",
+        json={"pinned": True},
+        headers=headers(),
+    )
+    repeated_pin = client.put(
+        f"/api/red-book/items/{item_id}/pin",
+        json={"pinned": True},
+        headers=headers(),
+    )
+
+    assert first_pin.status_code == repeated_pin.status_code == 200
+    assert client.get("/api/red-book/items").get_json()["items"][0]["pinned"] is True
+    pinned = client.get("/api/red-book/pinned").get_json()["items"]
+    assert len(pinned) == 1
+    assert pinned[0]["id"] == item_id
+    assert pinned[0]["text"] == "Keep the original image and instruction."
+    assert pinned[0]["image_url"] == image_url
+
+    dashboard = client.get("/")
+    assert dashboard.status_code == 200
+    assert b"Pinned Site Instructions" in dashboard.data
+    assert b"pinnedInstructionsData" in dashboard.data
+    assert [item["id"] for item in dashboard_pinned_items(client)] == [item_id]
+
+    unpinned = client.put(
+        f"/api/red-book/items/{item_id}/pin",
+        json={"pinned": False},
+        headers=headers(),
+    )
+    assert unpinned.status_code == 200
+    assert client.get("/api/red-book/pinned").get_json()["items"] == []
+    assert store.red_book_items[item_id]["text"] == "Keep the original image and instruction."
+    assert store.red_book_items[item_id]["image_url"] == image_url
+    assert item_id in store.red_book_items
+
+
+def test_red_book_allows_multiple_pins_and_unpins_only_the_selected_item(red_book_client):
+    _store, client = red_book_client
+    item_ids = [
+        add_item(client, f"Site instruction {number}.")
+        for number in range(1, 11)
+    ]
+
+    for item_id in item_ids:
+        response = client.put(
+            f"/api/red-book/items/{item_id}/pin",
+            json={"pinned": True},
+            headers=headers(),
+        )
+        assert response.status_code == 200
+
+    pinned = client.get("/api/red-book/pinned").get_json()["items"]
+    assert {item["id"] for item in pinned} == set(item_ids)
+    assert len(pinned) == 10
+
+    unpinned = client.put(
+        f"/api/red-book/items/{item_ids[1]}/pin",
+        json={"pinned": False},
+        headers=headers(),
+    )
+    remaining = client.get("/api/red-book/pinned").get_json()["items"]
+    assert unpinned.status_code == 200
+    assert {item["id"] for item in remaining} == set(item_ids) - {item_ids[1]}
+
+
+def test_red_book_read_only_user_can_pin_but_invalid_requests_are_rejected(red_book_client):
+    store, client = red_book_client
+    item_id = add_item(client, "A read-authorised user may pin this instruction.")
+    set_role(store, client, "Site Engineer", ["red_book.read"])
+
+    pinned = client.put(
+        f"/api/red-book/items/{item_id}/pin",
+        json={"pinned": True},
+        headers=headers(),
+    )
+    invalid_status = client.put(
+        f"/api/red-book/items/{item_id}/pin",
+        json={"pinned": "true"},
+        headers=headers(),
+    )
+    invalid_id = client.put(
+        "/api/red-book/items/not-a-uuid/pin",
+        json={"pinned": False},
+        headers=headers(),
+    )
+    missing_csrf = client.put(
+        f"/api/red-book/items/{item_id}/pin",
+        json={"pinned": False},
+    )
+
+    assert pinned.status_code == 200
+    assert invalid_status.status_code == 400
+    assert invalid_id.status_code == 400
+    assert missing_csrf.status_code == 403
+    assert client.get("/api/red-book/pinned").get_json()["items"][0]["id"] == item_id
+
+
+def test_pinned_state_is_shared_with_another_authenticated_user(red_book_client):
+    store, client = red_book_client
+    item_id = add_item(client, "Shared site instruction.")
+    assert client.put(
+        f"/api/red-book/items/{item_id}/pin",
+        json={"pinned": True},
+        headers=headers(),
+    ).status_code == 200
+
+    other_user = store.save_user({
+        "id": "red-book-second-user",
+        "username": "red-book-second-user",
+        "role": "office_staff",
+        "status": "active",
+        "is_active": True,
+        "active_sessions": ["red-book-second-session"],
+        "authorization_version": 1,
+        "password_hash": generate_password_hash("AnotherSecure1!"),
+    })
+    second_client = app.test_client()
+    with second_client.session_transaction() as flask_session:
+        flask_session["user_id"] = other_user["id"]
+        flask_session["session_id"] = "red-book-second-session"
+        flask_session["red_book_csrf"] = CSRF
+
+    shared = second_client.get("/api/red-book/pinned")
+    assert shared.status_code == 200
+    assert [item["id"] for item in shared.get_json()["items"]] == [item_id]
+    assert [item["id"] for item in dashboard_pinned_items(second_client)] == [item_id]
+
+    unpinned = second_client.put(
+        f"/api/red-book/items/{item_id}/pin",
+        json={"pinned": False},
+        headers=headers(),
+    )
+    assert unpinned.status_code == 200
+    assert client.get("/api/red-book/pinned").get_json()["items"] == []
+
+
+def test_red_book_pin_requires_read_permission(red_book_client):
+    store, client = red_book_client
+    item_id = add_item(client, "Only authorised users can pin this instruction.")
+    set_role(store, client, "Site Engineer", ["dashboard"])
+
+    pinned = client.put(
+        f"/api/red-book/items/{item_id}/pin",
+        json={"pinned": True},
+        headers=headers(),
+    )
+    dashboard = client.get("/")
+
+    assert pinned.status_code == 403
+    assert b"Pinned Site Instructions" not in dashboard.data
+    assert store.red_book_items[item_id].get("pinned") is not True
 
 
 def test_red_book_text_only_edit_preserves_existing_image_link(red_book_client):
@@ -360,3 +536,40 @@ def test_red_book_policy_and_delete_confirmation_are_explicit():
     )
     assert "@media print" in stylesheet
     assert 'body[data-print-images="false"] .red-book-image-link' in stylesheet
+
+
+def test_context_menu_and_pinned_dashboard_assets_are_connected():
+    root = Path(__file__).parents[1]
+    red_book_template = (root / "templates" / "red_book.html").read_text(encoding="utf-8")
+    dashboard_template = (root / "templates" / "dashboard.html").read_text(encoding="utf-8")
+    dashboard_css = (root / "static" / "dashboard.css").read_text(encoding="utf-8")
+    red_book_css = (root / "static" / "red_book.css").read_text(encoding="utf-8")
+    red_book_js = (root / "static" / "red_book.js").read_text(encoding="utf-8")
+    context_menu = (root / "static" / "red_book_context_menu.js").read_text(encoding="utf-8")
+    dashboard_js = (root / "static" / "dashboard_pinned.js").read_text(encoding="utf-8")
+    pinned_section = dashboard_template.split('id="pinnedInstructions"', 1)[1].split("</section>", 1)[0]
+
+    assert "red_book_context_menu.js" in red_book_template
+    assert "red_book_images.js" in red_book_template
+    assert "data-context-item-id" in context_menu
+    assert 'event.preventDefault();' in context_menu
+    assert "setTimeout" in context_menu
+    assert "pointercancel" in context_menu
+    assert "Pinned Site Instructions" in dashboard_template
+    assert ".red-book-item.red-book-item-pinned" in red_book_css
+    assert 'row.classList.toggle("red-book-item-pinned", item.pinned === true)' in red_book_js
+    assert 'row.classList.toggle("red-book-item-pinned", pinned)' in red_book_js
+    assert "Open Red Book" not in pinned_section
+    assert "View in Red Book" not in dashboard_js
+    assert 'id="dashboardHero"' in dashboard_template
+    assert ".dashboard-intro[hidden] { display: none; }" in dashboard_css
+    assert "pinnedInstructionsData" in dashboard_template
+    assert "red_book_context_menu.js" in dashboard_template
+    assert "/api/red-book/pinned" in dashboard_js
+    assert 'JSON.stringify({ pinned: false })' in dashboard_js
+    assert "section.hidden = items.length === 0;" in dashboard_js
+    assert "hero.hidden = items.length !== 0;" in dashboard_js
+    assert "empty.hidden = true;" in dashboard_js
+    images_js = (root / "static" / "red_book_images.js").read_text(encoding="utf-8")
+    assert "if (!imageUrl) return;" in images_js
+    assert "longPressMs = 600" in context_menu

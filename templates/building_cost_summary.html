@@ -10,13 +10,15 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
 </head>
 <body>
-<header class="cost-header">
-    <div>
-        <p class="cost-eyebrow">MANNAT MOON CONSTRUCTION</p>
-        <h1>Building Cost Summary</h1>
-    </div>
+{% include "_page_loader.html" %}
+<header class="cost-header mm-app-header">
     {% include '_navigation.html' %}
 </header>
+
+<section class="mm-page-heading" aria-labelledby="buildingCostPageTitle">
+    <p class="mm-page-eyebrow">Project Finance</p>
+    <h1 id="buildingCostPageTitle">Building Cost Summary</h1>
+</section>
 
 <main class="cost-main">
     <div class="cost-filter-row">

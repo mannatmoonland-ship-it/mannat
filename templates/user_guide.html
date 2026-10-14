@@ -54,14 +54,16 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
 </head>
 <body>
-    <header>
-        <div>
-            <h1>User Help Guide</h1>
-            <p>Mannat Moon Construction</p>
-        </div>
+{% include "_page_loader.html" %}
+    <header class="mm-app-header">
         {% include '_navigation.html' %}
         <a class="guide-top-link" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
     </header>
+
+    <section class="mm-page-heading" aria-labelledby="userGuidePageTitle">
+        <h1 id="userGuidePageTitle">User Help Guide</h1>
+        <p>Guides and procedures</p>
+    </section>
 
     <main>
         <article class="guide-panel">
@@ -108,7 +110,7 @@
                 </ol>
                 <p>If you cannot sign in, use <strong>Forgot Password?</strong> on the sign-in page if it is available, or contact your administrator.</p>
                 <h3>Log out</h3>
-                <p>Select <strong>Logout</strong> in the Dashboard header when you have finished. Do not share your sign-in details with another person.</p>
+                <p>Select <strong>Sign out</strong> in the page header when you have finished. Do not share your sign-in details with another person.</p>
             </section>
 
             <section class="guide-chapter" id="dashboard" aria-labelledby="dashboardTitle">
@@ -117,7 +119,7 @@
                     <li>After signing in, use the Dashboard cards to open a module.</li>
                     <li>Choose <strong>Daily Reports</strong> for site records, <strong>Material Builder</strong> for material activity, <strong>Labour Payments</strong> for payment records, or <strong>Drawings Library</strong> for plans.</li>
                     <li>Use <strong>Trade Builder</strong> to maintain trades and worker categories when that card is available to your role.</li>
-                    <li>Select <strong>Dashboard</strong> from a module page to return. Use <strong>Logout</strong> when finished.</li>
+                    <li>Use the shared header menus to move between modules, or choose <strong>Dashboard</strong> to return to the workspace overview. Select <strong>Sign out</strong> when finished.</li>
                 </ol>
                 <p>Some Dashboard cards, including Trade Builder, User Management, Snapshot, and Developer Documentation, are shown only to Super Admins.</p>
             </section>

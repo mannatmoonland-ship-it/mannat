@@ -12,14 +12,16 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='owner_scope.css') }}">
 </head>
 <body class="owner-scope-page">
-<header class="owner-scope-header">
-    <div>
-        <p class="owner-scope-eyebrow">MANNAT MOON CONSTRUCTION · PROJECT FINANCE</p>
-        <h1>Owner Scope</h1>
-        <p class="owner-scope-intro">Owner-level expense items, kept separate from labour and material contracts.</p>
-    </div>
+{% include "_page_loader.html" %}
+<header class="owner-scope-header mm-app-header">
     {% include '_navigation.html' %}
 </header>
+
+<section class="mm-page-heading" aria-labelledby="ownerScopePageTitle">
+    <p class="mm-page-eyebrow">Project Finance</p>
+    <h1 id="ownerScopePageTitle">Owner Scope</h1>
+    <p>Owner-level expense items, kept separate from labour and material contracts.</p>
+</section>
 
 <main class="owner-scope">
     <div id="ownerScopeStatus" class="owner-scope-status" role="status" aria-live="polite">

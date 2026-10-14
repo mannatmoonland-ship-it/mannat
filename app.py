@@ -310,13 +310,23 @@ app.config.update(
     MAIL_USERNAME=os.environ.get("MAIL_USERNAME", "mannatmoonland@gmail.com"),
     MAIL_PASSWORD=os.environ.get("MAIL_PASSWORD", ""),
     MAIL_DEFAULT_SENDER=os.environ.get("MAIL_DEFAULT_SENDER", "mannatmoonland@gmail.com"),
+    FAST2SMS_API_KEY=os.environ.get("FAST2SMS_API_KEY", ""),
+    FAST2SMS_SENDER_ID=os.environ.get("FAST2SMS_SENDER_ID", "JJROBO"),
+    FAST2SMS_MESSAGE_ID=os.environ.get("FAST2SMS_MESSAGE_ID", "144137"),
 )
 mail = Mail(app)
 PASSWORD_RESET_LOCK = threading.Lock()
 PASSWORD_RESET_ATTEMPTS = {}
+SMS_OTP_LOCK = threading.Lock()
+SMS_OTP_ATTEMPTS = {}
 PASSWORD_RESET_WINDOW_SECONDS = 3600
 PASSWORD_RESET_IP_LIMIT = 10
 PASSWORD_RESET_USER_LIMIT = 3
+SMS_OTP_WINDOW_SECONDS = 3600
+SMS_OTP_IP_LIMIT = 10
+SMS_OTP_PHONE_LIMIT = 3
+SMS_OTP_TTL_SECONDS = 300
+SMS_OTP_MAX_VERIFY_ATTEMPTS = 5
 PASSWORD_RESET_RESPONSE = "If an eligible account was found, reset instructions will be sent to its saved email address."
 LEGACY_SHARED_TEMP_PASSWORD = "password"
 
@@ -466,7 +476,35 @@ def get_request_base_url():
     if not configured_base_url:
         if IS_PRODUCTION_ENVIRONMENT:
             return None
-        configured_base_url = "http://127.0.0.1:5020"
+        try:
+            configured_base_url = request.host_url
+        except RuntimeError:
+            configured_base_url = ""
+        if configured_base_url:
+            try:
+                request_origin = urlsplit(configured_base_url)
+                request_hostname = request_origin.hostname
+                request_ip = None
+                if request_hostname and request_hostname != "localhost":
+                    request_ip = ipaddress.ip_address(request_hostname)
+            except ValueError:
+                return None
+            if not (
+                request_origin.scheme == "http"
+                and request_hostname
+                and (
+                    request_hostname == "localhost"
+                    or (
+                        request_ip is not None
+                        and (request_ip.is_private or request_ip.is_loopback)
+                        and not request_ip.is_unspecified
+                        and not request_ip.is_multicast
+                    )
+                )
+            ):
+                return None
+        else:
+            configured_base_url = "http://127.0.0.1:5020"
 
     try:
         parsed = urlsplit(configured_base_url)
@@ -690,9 +728,275 @@ def password_reset_token_is_valid(user, token_hash, now=None):
     return expires_at > (now or datetime.now(timezone.utc))
 
 
+def _valid_mobile_phone(value):
+    return isinstance(value, str) and re.fullmatch(r"\+[1-9][0-9]{7,14}", value) is not None
+
+
+def _fast2sms_phone_digits(value):
+    if not isinstance(value, str):
+        return None
+    if re.fullmatch(r"[6-9][0-9]{9}", value):
+        return value
+    if re.fullmatch(r"\+91[6-9][0-9]{9}", value):
+        return value[3:]
+    return None
+
+
+def _valid_fast2sms_mobile_phone(value):
+    return _fast2sms_phone_digits(value) is not None
+
+
+def _mobile_phone_is_verified(user):
+    phone = user.get("mobile_phone") if isinstance(user, dict) else None
+    verified_at = user.get("mobile_phone_verified_at") if isinstance(user, dict) else None
+    return _valid_fast2sms_mobile_phone(phone) and isinstance(verified_at, str) and bool(verified_at.strip())
+
+
+def _mobile_phone_can_be_used_for_setup(user):
+    phone = user.get("mobile_phone") if isinstance(user, dict) else None
+    return bool(
+        isinstance(user, dict)
+        and user.get("must_change_password")
+        and _valid_fast2sms_mobile_phone(phone)
+    )
+
+
+def _mask_mobile_phone(phone):
+    phone_digits = _fast2sms_phone_digits(phone)
+    if not phone_digits:
+        return ""
+    return f"{'•' * 6}{phone_digits[-4:]}"
+
+
+class Fast2SMSConfigurationError(RuntimeError):
+    pass
+
+
+class Fast2SMSProviderError(RuntimeError):
+    pass
+
+
+def _fast2sms_provider_error_message(result, api_key):
+    message = result.get("message") or result.get("error")
+    if isinstance(message, list):
+        message = "; ".join(item for item in message if isinstance(item, str))
+    if not isinstance(message, str) or not message.strip():
+        return "Fast2SMS did not accept the SMS request."
+    message = message.replace(api_key, "[redacted]").strip()
+    message = re.sub(
+        r"(?i)(authorization|api[_ -]?key)([\"'\s:=]+)[^\s,;\"']+",
+        r"\1\2[redacted]",
+        message,
+    )
+    return f"Fast2SMS rejected the SMS request: {message[:240]}"
+
+
+def _fast2sms_configuration():
+    config = {
+        "api_key": str(app.config.get("FAST2SMS_API_KEY") or "").strip(),
+        "sender_id": str(app.config.get("FAST2SMS_SENDER_ID") or "").strip(),
+        "message_id": str(app.config.get("FAST2SMS_MESSAGE_ID") or "").strip(),
+    }
+    if not all(config.values()):
+        raise Fast2SMSConfigurationError("Fast2SMS is not fully configured.")
+    if not re.fullmatch(r"[A-Z0-9]{6}", config["sender_id"]):
+        raise Fast2SMSConfigurationError("Fast2SMS sender ID configuration is invalid.")
+    if not re.fullmatch(r"[0-9]{1,20}", config["message_id"]):
+        raise Fast2SMSConfigurationError("Fast2SMS DLT message ID configuration is invalid.")
+    return config
+
+
+def _send_fast2sms_otp(phone, code):
+    phone_digits = _fast2sms_phone_digits(phone)
+    if not phone_digits:
+        raise ValueError("Enter a valid 10-digit Indian mobile number.")
+    if not isinstance(code, str) or not re.fullmatch(r"[0-9]{6}", code):
+        raise ValueError("Fast2SMS OTP must be a six-digit code.")
+    config = _fast2sms_configuration()
+    response = requests.get(
+        "https://www.fast2sms.com/dev/bulkV2",
+        headers={"Authorization": config["api_key"]},
+        params={
+            "route": "dlt",
+            "sender_id": config["sender_id"],
+            "message": config["message_id"],
+            "variables_values": code,
+            "numbers": phone_digits,
+        },
+        timeout=15,
+    )
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as error:
+        try:
+            result = response.json()
+        except ValueError:
+            result = {}
+        message = (
+            _fast2sms_provider_error_message(result, config["api_key"])
+            if isinstance(result, dict)
+            else f"Fast2SMS returned HTTP {response.status_code}."
+        )
+        raise Fast2SMSProviderError(message) from error
+    try:
+        result = response.json()
+    except ValueError as error:
+        raise RuntimeError("Fast2SMS returned an invalid response.") from error
+    if not isinstance(result, dict) or result.get("return") is not True:
+        if isinstance(result, dict):
+            raise Fast2SMSProviderError(
+                _fast2sms_provider_error_message(result, config["api_key"])
+            )
+        raise Fast2SMSProviderError("Fast2SMS returned an unexpected response.")
+    request_id = result.get("request_id")
+    if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request_id):
+        return None
+    return request_id
+
+
+def _allow_sms_otp_send(remote_addr, phone):
+    now = time.monotonic()
+    address_digest = hashlib.sha256(str(remote_addr or "unknown").encode("utf-8")).hexdigest()
+    phone_digest = hashlib.sha256(phone.encode("utf-8")).hexdigest()
+    keys = (
+        ("ip", address_digest, SMS_OTP_IP_LIMIT),
+        ("phone", phone_digest, SMS_OTP_PHONE_LIMIT),
+    )
+    with SMS_OTP_LOCK:
+        for key, attempts in list(SMS_OTP_ATTEMPTS.items()):
+            while attempts and now - attempts[0] >= SMS_OTP_WINDOW_SECONDS:
+                attempts.popleft()
+            if not attempts:
+                SMS_OTP_ATTEMPTS.pop(key, None)
+        if any(len(SMS_OTP_ATTEMPTS.get((scope, digest), ())) >= limit for scope, digest, limit in keys):
+            return False
+        for scope, digest, _limit in keys:
+            SMS_OTP_ATTEMPTS.setdefault((scope, digest), deque()).append(now)
+        while len(SMS_OTP_ATTEMPTS) > 5000:
+            SMS_OTP_ATTEMPTS.pop(next(iter(SMS_OTP_ATTEMPTS)))
+    return True
+
+
+def _sms_otp_digest(challenge_id, code):
+    secret = app.secret_key
+    if isinstance(secret, str):
+        secret = secret.encode("utf-8")
+    return hmac.new(
+        secret,
+        f"{challenge_id}:{code}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _sms_otp_challenge_document_id(purpose, user_id):
+    secret = app.secret_key
+    if isinstance(secret, str):
+        secret = secret.encode("utf-8")
+    return hmac.new(
+        secret,
+        f"sms-otp-challenge:{purpose}:{user_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _sms_otp_challenge_record_matches(challenge, expected, challenge_id, now):
+    return bool(
+        isinstance(challenge, dict)
+        and hmac.compare_digest(str(challenge.get("id") or ""), challenge_id)
+        and all(challenge.get(key) == value for key, value in expected.items())
+        and int(challenge.get("expires_at") or 0) > now
+    )
+
+
+def _clear_sms_otp_challenge(purpose, user_id):
+    get_user_store().delete_sms_otp_challenge(
+        _sms_otp_challenge_document_id(purpose, user_id)
+    )
+    session.pop("sms_otp_challenge", None)
+
+
+def _issue_sms_otp(purpose, user_id, phone, token_hash=None):
+    phone_digits = _fast2sms_phone_digits(phone)
+    if not phone_digits:
+        raise ValueError("Enter a valid 10-digit Indian mobile number.")
+    phone = phone_digits
+    if not _allow_sms_otp_send(request.remote_addr, phone):
+        raise ValueError("Too many SMS code requests. Please wait before requesting another code.")
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    provider_request_id = _send_fast2sms_otp(phone, code)
+    challenge_id = secrets.token_urlsafe(24)
+    challenge = {
+        "id": challenge_id,
+        "purpose": purpose,
+        "user_id": str(user_id),
+        "phone": phone,
+        "token_hash": token_hash,
+        "code_digest": _sms_otp_digest(challenge_id, code),
+        "expires_at": int(time.time()) + SMS_OTP_TTL_SECONDS,
+        "attempts": 0,
+        "verified": False,
+    }
+    challenge_document_id = _sms_otp_challenge_document_id(purpose, user_id)
+    get_user_store().save_sms_otp_challenge(challenge_document_id, challenge)
+    session["sms_otp_challenge"] = challenge_id
+    return provider_request_id
+
+
+def _sms_otp_challenge_matches(
+    purpose, user_id, phone, token_hash=None, require_verified=False
+):
+    challenge_id = session.get("sms_otp_challenge")
+    phone_digits = _fast2sms_phone_digits(phone)
+    if not isinstance(challenge_id, str) or not phone_digits:
+        return False
+    challenge = get_user_store().get_sms_otp_challenge(
+        _sms_otp_challenge_document_id(purpose, user_id)
+    )
+    expected = {
+        "purpose": purpose,
+        "user_id": str(user_id),
+        "phone": phone_digits,
+        "token_hash": token_hash,
+    }
+    return bool(
+        _sms_otp_challenge_record_matches(
+            challenge, expected, challenge_id, int(time.time())
+        )
+        and (not require_verified or challenge.get("verified") is True)
+    )
+
+
+def _verify_sms_otp(purpose, user_id, phone, code, token_hash=None):
+    challenge_id = session.get("sms_otp_challenge")
+    phone_digits = _fast2sms_phone_digits(phone)
+    if not isinstance(challenge_id, str) or not phone_digits:
+        return False
+    expected = {
+        "purpose": purpose,
+        "user_id": str(user_id),
+        "phone": phone_digits,
+        "token_hash": token_hash,
+    }
+    submitted_digest = (
+        _sms_otp_digest(challenge_id, code)
+        if isinstance(code, str) and re.fullmatch(r"[0-9]{6}", code)
+        else ""
+    )
+    return get_user_store().verify_sms_otp_challenge(
+        _sms_otp_challenge_document_id(purpose, user_id),
+        expected,
+        challenge_id,
+        submitted_digest,
+        SMS_OTP_MAX_VERIFY_ATTEMPTS,
+        int(time.time()),
+    )
+
+
 class InMemoryFirestoreStore:
     def __init__(self):
         self.users = {}
+        self.sms_otp_challenges = {}
+        self._sms_otp_challenge_lock = threading.Lock()
         self.trades = {}
         self.drawings_categories = {}
         self.drawings = {}
@@ -960,6 +1264,21 @@ class InMemoryFirestoreStore:
                 [{"id": item_id, **item} for item_id, item in self.red_book_items.items()]
             )
 
+    def set_red_book_item_pinned(self, item_id, pinned, actor_id):
+        with self._red_book_mutation_lock:
+            item = self.red_book_items.get(item_id)
+            if item is None:
+                return False
+            now = iso_now()
+            item.update({
+                "pinned": pinned,
+                "pinned_at": now if pinned else None,
+                "pinned_by": actor_id,
+                "updated_at": now,
+                "updated_by": actor_id,
+            })
+            return True
+
     def create_red_book_item(self, item_id, text, actor_id, image_url=""):
         with self._red_book_mutation_lock:
             if item_id in self.red_book_items:
@@ -1028,6 +1347,8 @@ class InMemoryFirestoreStore:
             "full_name": user.get("full_name", ""),
             "email": user.get("email"),
             "recovery_email": user.get("recovery_email"),
+            "mobile_phone": user.get("mobile_phone"),
+            "mobile_phone_verified_at": user.get("mobile_phone_verified_at"),
             "role": user.get("role"),
             "custom_staff_type": user.get("custom_staff_type", ""),
             "password_hash": user.get("password_hash", ""),
@@ -1077,6 +1398,47 @@ class InMemoryFirestoreStore:
             raise ValueError("User id is required")
         self.users[user["id"]] = self._normalize_user(user)
         return self.users[user["id"]]
+
+    def save_sms_otp_challenge(self, challenge_document_id, challenge):
+        with self._sms_otp_challenge_lock:
+            self.sms_otp_challenges[challenge_document_id] = dict(challenge)
+
+    def get_sms_otp_challenge(self, challenge_document_id):
+        with self._sms_otp_challenge_lock:
+            challenge = self.sms_otp_challenges.get(challenge_document_id)
+            return dict(challenge) if challenge is not None else None
+
+    def verify_sms_otp_challenge(
+        self, challenge_document_id, expected, challenge_id,
+        submitted_digest, max_attempts, now,
+    ):
+        with self._sms_otp_challenge_lock:
+            challenge = self.sms_otp_challenges.get(challenge_document_id)
+            if challenge is None:
+                return False
+            if not _sms_otp_challenge_record_matches(
+                challenge, expected, challenge_id, now
+            ):
+                if int(challenge.get("expires_at") or 0) <= now:
+                    self.sms_otp_challenges.pop(challenge_document_id, None)
+                return False
+            if challenge.get("verified"):
+                return True
+            if not hmac.compare_digest(
+                str(challenge.get("code_digest") or ""),
+                submitted_digest,
+            ):
+                challenge["attempts"] = int(challenge.get("attempts") or 0) + 1
+                if challenge["attempts"] >= max_attempts:
+                    self.sms_otp_challenges.pop(challenge_document_id, None)
+                return False
+            challenge["verified"] = True
+            challenge["code_digest"] = None
+            return True
+
+    def delete_sms_otp_challenge(self, challenge_document_id):
+        with self._sms_otp_challenge_lock:
+            self.sms_otp_challenges.pop(challenge_document_id, None)
 
     def delete_user(self, user_id):
         if user_id not in self.users:
@@ -1255,7 +1617,9 @@ class InMemoryFirestoreStore:
         user["recovery_email"] = recovery_email
         return self._normalize_user(user)
 
-    def consume_password_reset(self, user_id, token_hash, password_hash, now):
+    def consume_password_reset(
+        self, user_id, token_hash, password_hash, now, mobile_phone_verified_at=None
+    ):
         with self._password_reset_lock:
             user = self.users.get(user_id)
             if not password_reset_token_is_valid(user, token_hash, now):
@@ -1270,6 +1634,8 @@ class InMemoryFirestoreStore:
                 "last_password_change": iso_now(),
                 "updated_at": iso_now(),
             })
+            if mobile_phone_verified_at:
+                user["mobile_phone_verified_at"] = mobile_phone_verified_at
             self.users[user_id] = self._normalize_user(user)
             return True
 
@@ -1886,6 +2252,27 @@ class FirebaseFirestoreStore:
             [{"id": snapshot.id, **(snapshot.to_dict() or {})} for snapshot in snapshots]
         )
 
+    def set_red_book_item_pinned(self, item_id, pinned, actor_id):
+        reference = self._collection("red_book_items").document(item_id)
+        firestore_transaction = self.db.transaction()
+
+        @firestore.transactional
+        def set_pinned(transaction):
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
+            if not snapshot.exists:
+                return False
+            now = iso_now()
+            transaction.update(reference, {
+                "pinned": pinned,
+                "pinned_at": now if pinned else None,
+                "pinned_by": actor_id,
+                "updated_at": now,
+                "updated_by": actor_id,
+            })
+            return True
+
+        return set_pinned(firestore_transaction)
+
     def create_red_book_item(self, item_id, text, actor_id, image_url=""):
         items = self._collection("red_book_items")
         reference = items.document(item_id)
@@ -2330,6 +2717,52 @@ class FirebaseFirestoreStore:
         self._collection("users").document(user_id).set(payload, merge=True)
         return self.get_user(user_id)
 
+    def save_sms_otp_challenge(self, challenge_document_id, challenge):
+        self._collection("sms_otp_challenges").document(challenge_document_id).set(challenge)
+
+    def get_sms_otp_challenge(self, challenge_document_id):
+        snapshot = self._collection("sms_otp_challenges").document(challenge_document_id).get()
+        return snapshot.to_dict() if snapshot.exists else None
+
+    def verify_sms_otp_challenge(
+        self, challenge_document_id, expected, challenge_id,
+        submitted_digest, max_attempts, now,
+    ):
+        transaction = self.db.transaction()
+
+        @firestore.transactional
+        def verify(transaction):
+            reference = self._collection("sms_otp_challenges").document(challenge_document_id)
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
+            if not snapshot.exists:
+                return False
+            challenge = snapshot.to_dict() or {}
+            if not _sms_otp_challenge_record_matches(
+                challenge, expected, challenge_id, now
+            ):
+                if int(challenge.get("expires_at") or 0) <= now:
+                    transaction.delete(reference)
+                return False
+            if challenge.get("verified"):
+                return True
+            if not hmac.compare_digest(
+                str(challenge.get("code_digest") or ""),
+                submitted_digest,
+            ):
+                attempts = int(challenge.get("attempts") or 0) + 1
+                if attempts >= max_attempts:
+                    transaction.delete(reference)
+                else:
+                    transaction.update(reference, {"attempts": attempts})
+                return False
+            transaction.update(reference, {"verified": True, "code_digest": None})
+            return True
+
+        return verify(transaction)
+
+    def delete_sms_otp_challenge(self, challenge_document_id):
+        self._collection("sms_otp_challenges").document(challenge_document_id).delete()
+
     def delete_user(self, user_id):
         reference = self._collection("users").document(user_id)
         if not reference.get().exists:
@@ -2348,7 +2781,9 @@ class FirebaseFirestoreStore:
         })
         return self.get_user(user_id)
 
-    def consume_password_reset(self, user_id, token_hash, password_hash, now):
+    def consume_password_reset(
+        self, user_id, token_hash, password_hash, now, mobile_phone_verified_at=None
+    ):
         transaction = self.db.transaction()
 
         @firestore.transactional
@@ -2360,7 +2795,7 @@ class FirebaseFirestoreStore:
             user = snapshot.to_dict()
             if not password_reset_token_is_valid(user, token_hash, now):
                 return False
-            transaction.update(reference, {
+            changes = {
                 "password_hash": password_hash,
                 "must_change_password": False,
                 "password_reset_token_hash": None,
@@ -2369,7 +2804,10 @@ class FirebaseFirestoreStore:
                 "authorization_version": get_authorization_version(user) + 1,
                 "last_password_change": iso_now(),
                 "updated_at": iso_now(),
-            })
+            }
+            if mobile_phone_verified_at:
+                changes["mobile_phone_verified_at"] = mobile_phone_verified_at
+            transaction.update(reference, changes)
             return True
 
         return consume(transaction)
@@ -3695,6 +4133,21 @@ def require_login(view):
     return wrapped
 
 
+def _safe_local_redirect_target(target):
+    if not target or any(ord(character) < 32 or character == "\x7f" for character in target):
+        return None
+    parsed_target = urlsplit(target)
+    if (
+        parsed_target.scheme
+        or parsed_target.netloc
+        or not parsed_target.path.startswith("/")
+        or parsed_target.path.startswith("//")
+        or "\\" in parsed_target.path
+    ):
+        return None
+    return target
+
+
 def require_role(*allowed_roles):
     def decorator(view):
         @wraps(view)
@@ -3710,6 +4163,18 @@ def require_role(*allowed_roles):
         return wrapped
 
     return decorator
+
+
+@app.errorhandler(404)
+def page_not_found(error):
+    if request.path.startswith(("/api/", "/static/", "/login-assets/")):
+        if request.path.startswith("/api/"):
+            return jsonify(error="Not found."), 404
+        return error
+    return render_template(
+        "404.html",
+        current_user=get_current_user(),
+    ), 404
 
 
 def ensure_initial_super_admin():
@@ -3930,11 +4395,30 @@ def dashboard():
     except Exception as error:
         app.logger.error("Dashboard permissions failed (%s).", type(error).__name__)
         return "Unable to verify dashboard permissions.", 503
-    return render_template(
+    pinned_site_instructions = []
+    red_book_csrf = ""
+    if can_read_red_book:
+        try:
+            pinned_site_instructions = _pinned_red_book_items()
+        except Exception as error:
+            app.logger.error(
+                "Dashboard pinned Red Book items could not be loaded (%s).",
+                type(error).__name__,
+            )
+            return "Unable to load pinned site instructions.", 503
+        red_book_csrf = session.get("red_book_csrf", "")
+        if not red_book_csrf:
+            red_book_csrf = secrets.token_urlsafe(32)
+            session["red_book_csrf"] = red_book_csrf
+    response = app.make_response(render_template(
         "dashboard.html",
         current_user=user,
         can_read_red_book=can_read_red_book,
-    )
+        pinned_site_instructions=pinned_site_instructions,
+        red_book_csrf=red_book_csrf,
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @app.route("/profile-settings")
@@ -3960,6 +4444,8 @@ def profile_settings():
         "username": user.get("username") or "",
         "email": user.get("email") or "",
         "recovery_email": user.get("recovery_email") or "",
+        "mobile_phone": user.get("mobile_phone") or "",
+        "mobile_phone_verified": _mobile_phone_is_verified(user),
         "role": role_labels.get(
             str(user.get("role") or "").lower(),
             user.get("custom_staff_type") or str(user.get("role") or "User").replace("_", " ").title(),
@@ -4023,6 +4509,86 @@ def update_profile():
     })
 
 
+@app.route("/api/profile/mobile-phone", methods=["POST"])
+def verify_profile_mobile_phone():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Sign in to verify your mobile number."}), 401
+    expected_token = session.get("profile_avatar_csrf", "")
+    supplied_token = request.headers.get("X-CSRF-Token", "")
+    if not expected_token or not supplied_token or not hmac.compare_digest(
+        expected_token, supplied_token
+    ):
+        return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"mobile_phone", "code"}:
+        return jsonify({"error": "Provide your mobile number and SMS code."}), 400
+    mobile_phone = payload.get("mobile_phone")
+    if not isinstance(mobile_phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", mobile_phone):
+        return jsonify({"error": "Enter a valid 10-digit Indian mobile number."}), 400
+
+    try:
+        store = get_user_store()
+        if not _verify_sms_otp("profile-mobile", user["id"], mobile_phone, payload["code"]):
+            return jsonify({"error": "The SMS code is invalid or expired. Request a new code and try again."}), 400
+        updated_user = store.get_user(user["id"])
+        if not updated_user:
+            return jsonify({"error": "Your profile could not be found."}), 404
+        updated_user["mobile_phone"] = mobile_phone
+        updated_user["mobile_phone_verified_at"] = iso_now()
+        store.save_user(updated_user)
+        _clear_sms_otp_challenge("profile-mobile", user["id"])
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Exception as error:
+        app.logger.error("Profile mobile verification failed (%s).", type(error).__name__)
+        return jsonify({"error": "Mobile verification is temporarily unavailable."}), 503
+
+    return jsonify({
+        "mobile_phone": mobile_phone,
+        "mobile_phone_verified": True,
+    })
+
+
+@app.route("/api/profile/mobile-phone/send-code", methods=["POST"])
+def send_profile_mobile_phone_code():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Sign in to verify your mobile number."}), 401
+    expected_token = session.get("profile_avatar_csrf", "")
+    supplied_token = request.headers.get("X-CSRF-Token", "")
+    if not expected_token or not supplied_token or not hmac.compare_digest(
+        expected_token, supplied_token
+    ):
+        return jsonify({"error": "Your session expired. Reload the page and try again."}), 403
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"mobile_phone"}:
+        return jsonify({"error": "Provide your mobile number."}), 400
+    mobile_phone = payload.get("mobile_phone")
+    if not isinstance(mobile_phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", mobile_phone):
+        return jsonify({"error": "Enter a valid 10-digit Indian mobile number."}), 400
+    try:
+        provider_request_id = _issue_sms_otp("profile-mobile", user["id"], mobile_phone)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Fast2SMSConfigurationError:
+        app.logger.error("Fast2SMS profile OTP send failed: server configuration is incomplete or invalid.")
+        return jsonify({"error": "Fast2SMS is not configured. Set the API key, sender ID, and DLT message ID in private server settings, then restart the app."}), 503
+    except Fast2SMSProviderError as error:
+        app.logger.error("Fast2SMS profile OTP send failed: %s", error)
+        return jsonify({"error": str(error)}), 503
+    except Exception as error:
+        app.logger.error("Fast2SMS profile OTP send failed (%s).", type(error).__name__)
+        return jsonify({"error": "Unable to send the SMS code. Check the Fast2SMS API key, sender ID, and DLT message ID."}), 503
+    return jsonify({
+        "sent": True,
+        "masked_mobile_phone": _mask_mobile_phone(mobile_phone),
+        "provider_request_id": provider_request_id,
+    })
+
+
 @app.route("/api/profile/avatar", methods=["POST"])
 def save_profile_avatar():
     user = get_current_user()
@@ -4062,6 +4628,7 @@ def login_asset(filename):
 
 @app.route("/login", methods=["GET", "POST"])
 def login_page():
+    next_url = _safe_local_redirect_target(request.values.get("next", ""))
     if request.method == "POST":
         g.login_diagnostics_enabled = True
         g.login_diagnostic_step = 0
@@ -4083,13 +4650,13 @@ def login_page():
             )
         except DeadlineExceeded:
             flash("Sign-in is temporarily unavailable. Please try again shortly.", "error")
-            return render_template("login.html"), 503
+            return render_template("login.html", next_url=next_url), 503
         except GoogleAPICallError:
             flash("Sign-in is temporarily unavailable. Please try again shortly.", "error")
-            return render_template("login.html"), 503
+            return render_template("login.html", next_url=next_url), 503
         except RuntimeError:
             flash("Sign-in is temporarily unavailable. Please contact your administrator.", "error")
-            return render_template("login.html"), 503
+            return render_template("login.html", next_url=next_url), 503
 
         account_is_eligible = _run_login_diagnostic_step(
             "Validate account record and active status",
@@ -4104,7 +4671,7 @@ def login_page():
         if not account_is_eligible:
             add_audit_log(None, "login_failed", f"Failed login attempt for username {username}", None)
             flash("Invalid username or password.", "error")
-            return redirect(url_for("login_page"))
+            return redirect(url_for("login_page", next=next_url) if next_url else url_for("login_page"))
 
         password_matches = _run_login_diagnostic_step(
             "Verify submitted password against account hash",
@@ -4113,7 +4680,7 @@ def login_page():
         if not password_matches:
             add_audit_log(user.get("id"), "login_failed", "Failed login attempt using invalid password", user.get("id"))
             flash("Invalid username or password.", "error")
-            return redirect(url_for("login_page"))
+            return redirect(url_for("login_page", next=next_url) if next_url else url_for("login_page"))
 
         legacy_password_matches = _run_login_diagnostic_step(
             "Check for retired shared temporary password",
@@ -4130,7 +4697,7 @@ def login_page():
                 user.get("id"),
             )
             flash("This legacy temporary password can no longer be used. Use Forgot Password to set a private password.", "warning")
-            return redirect(url_for("login_page"))
+            return redirect(url_for("login_page", next=next_url) if next_url else url_for("login_page"))
 
         _run_login_diagnostic_step(
             "Create authenticated session",
@@ -4143,9 +4710,9 @@ def login_page():
         if user.get("must_change_password"):
             flash("Please change your password before continuing.", "warning")
             return redirect(url_for("change_password"))
-        return redirect(url_for("dashboard"))
+        return redirect(next_url or url_for("dashboard"))
 
-    return render_template("login.html")
+    return render_template("login.html", next_url=next_url)
 
 
 @app.route("/password-reset-request", methods=["GET", "POST"])
@@ -4171,12 +4738,19 @@ def password_reset_request():
                     user
                     and normalize_user_status(user.get("status"), default_active=bool(user.get("is_active", True))) == "active"
                     and is_valid_email(saved_email)
+                    and _mobile_phone_is_verified(user)
+                    and _valid_fast2sms_mobile_phone(user.get("mobile_phone"))
                 )
                 base_url = get_request_base_url()
 
                 if eligible and base_url:
                     try:
-                        send_password_reset_link(user, base_url, store)
+                        send_password_reset_link(
+                            user,
+                            base_url,
+                            store,
+                            allow_unverified_mobile=bool(user.get("must_change_password")),
+                        )
                     except Exception as error:  # Keep SMTP details and reset tokens out of logs.
                         app.logger.warning("Password reset email delivery failed (%s).", type(error).__name__)
                 elif eligible and not base_url:
@@ -4196,11 +4770,17 @@ def _password_reset_csrf_valid(payload):
     return bool(expected and supplied) and hmac.compare_digest(expected, str(supplied))
 
 
-def send_password_reset_link(user, base_url, store=None):
+def send_password_reset_link(user, base_url, store=None, *, allow_unverified_mobile=False):
     store = store or get_user_store()
     saved_email = str(user.get("email") or "").strip()
     if not is_valid_email(saved_email):
         raise ValueError("The user's saved email address is missing or invalid.")
+    if not _valid_fast2sms_mobile_phone(user.get("mobile_phone")):
+        raise ValueError("The user's account must have a valid 10-digit Indian mobile number for Fast2SMS OTP verification.")
+    if not _mobile_phone_is_verified(user) and not (
+        allow_unverified_mobile and _mobile_phone_can_be_used_for_setup(user)
+    ):
+        raise ValueError("The user's mobile number must be verified before a password reset.")
     canonical_base_url = get_request_base_url()
     if not canonical_base_url or base_url != canonical_base_url:
         raise ValueError("The configured public HTTPS origin is invalid.")
@@ -4226,6 +4806,7 @@ def send_password_reset_link(user, base_url, store=None):
         f"Hello {display_name},\n\n"
         "A password reset was requested for your Mannat Moon Construction account.\n\n"
         f"Reset your password using this link:\n{reset_link}\n\n"
+        "You will also need the SMS verification code sent to your registered mobile number.\n\n"
         f"This link expires at {expires_label} (30 minutes after it was issued).\n\n"
         "If you did not request this reset, you can ignore this email.\n"
     )
@@ -4242,6 +4823,7 @@ def send_password_reset_link(user, base_url, store=None):
       <h1 style="margin:0 0 18px;font-size:22px;color:#18212b;">Password reset request</h1>
       <p>Hello {{ display_name }},</p>
       <p>A password reset was requested for your Mannat Moon Construction account.</p>
+      <p>After opening this link, enter the SMS verification code sent to your registered mobile number.</p>
       <p style="margin:24px 0;"><a href="{{ reset_link }}" style="display:inline-block;padding:12px 18px;border-radius:7px;background:#0284c7;color:#fff;text-decoration:none;font-weight:700;">Reset Password</a></p>
       <p>If the button does not work, use this link:<br><a href="{{ reset_link }}" style="color:#0369a1;word-break:break-all;">{{ reset_link }}</a></p>
       <p>This link expires at <strong>{{ expires_label }}</strong> (30 minutes after it was issued).</p>
@@ -4289,7 +4871,83 @@ def validate_password_reset_link(user_id):
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     if not password_reset_token_is_valid(user, token_hash):
         return jsonify(valid=False, error="This reset link is invalid or expired."), 400
-    return jsonify(valid=True)
+    setup_required = _mobile_phone_can_be_used_for_setup(user)
+    if not _mobile_phone_is_verified(user) and not setup_required:
+        return jsonify(valid=False, error="This reset link is invalid or expired."), 400
+    username = str(user.get("username") or "").strip()
+    mobile_phone = user.get("mobile_phone")
+    if not username or not _valid_mobile_phone(mobile_phone):
+        return jsonify(valid=False, error="This reset link is invalid or expired."), 400
+    return jsonify(
+        valid=True,
+        username=username,
+        masked_mobile_phone=_mask_mobile_phone(mobile_phone),
+        setup_required=setup_required,
+    )
+
+
+@app.route("/api/reset-password/<user_id>/send-code", methods=["POST"])
+def send_password_reset_sms_code(user_id):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not _password_reset_csrf_valid(payload):
+        return jsonify({"error": "This reset link is invalid or expired."}), 400
+    token = payload.get("token", "")
+    if not isinstance(token, str) or not token:
+        return jsonify({"error": "This reset link is invalid or expired."}), 400
+    store = get_user_store()
+    user = store.get_user(user_id)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    if not password_reset_token_is_valid(user, token_hash):
+        return jsonify({"error": "This reset link is invalid or expired."}), 400
+    if not _mobile_phone_is_verified(user) and not _mobile_phone_can_be_used_for_setup(user):
+        return jsonify({"error": "This reset link is invalid or expired."}), 400
+    try:
+        provider_request_id = _issue_sms_otp(
+            "password-reset", user_id, user["mobile_phone"], token_hash
+        )
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    except Fast2SMSConfigurationError:
+        app.logger.error("Fast2SMS password-reset OTP send failed: server configuration is incomplete or invalid.")
+        return jsonify({"error": "Fast2SMS is not configured. Set the API key, sender ID, and DLT message ID in private server settings, then restart the app."}), 503
+    except Fast2SMSProviderError as error:
+        app.logger.error("Fast2SMS password-reset OTP send failed: %s", error)
+        return jsonify({"error": str(error)}), 503
+    except Exception as error:
+        app.logger.error("Fast2SMS password-reset OTP send failed (%s).", type(error).__name__)
+        return jsonify({"error": "Unable to send the SMS code. Check the Fast2SMS API key, sender ID, and DLT message ID."}), 503
+    return jsonify({
+        "sent": True,
+        "masked_mobile_phone": _mask_mobile_phone(user["mobile_phone"]),
+        "provider_request_id": provider_request_id,
+    })
+
+
+@app.route("/api/reset-password/<user_id>/verify-code", methods=["POST"])
+def verify_password_reset_sms_code(user_id):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not _password_reset_csrf_valid(payload):
+        return jsonify({"error": "This reset link is invalid or expired."}), 400
+    token = payload.get("token", "")
+    code = payload.get("code", "")
+    if not isinstance(token, str) or not token:
+        return jsonify({"error": "This reset link is invalid or expired."}), 400
+    store = get_user_store()
+    user = store.get_user(user_id)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    if not password_reset_token_is_valid(user, token_hash):
+        return jsonify({"error": "This reset link is invalid or expired."}), 400
+    if not _mobile_phone_is_verified(user) and not _mobile_phone_can_be_used_for_setup(user):
+        return jsonify({"error": "This reset link is invalid or expired."}), 400
+    if not _verify_sms_otp(
+        "password-reset",
+        user_id,
+        user["mobile_phone"],
+        code,
+        token_hash,
+    ):
+        return jsonify({"error": "The SMS code is invalid or expired. Request a new code and try again."}), 400
+    return jsonify({"verified": True})
 
 
 @app.route("/reset-password/<user_id>", methods=["GET", "POST"])
@@ -4312,14 +4970,27 @@ def password_reset_page(user_id):
         if not password_reset_token_is_valid(user, token_hash):
             flash("This reset link is invalid or expired. Request a new reset link.", "error")
             return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=True)
+        setup_required = _mobile_phone_can_be_used_for_setup(user)
+        if not _mobile_phone_is_verified(user) and not setup_required:
+            flash("This reset link is invalid or expired. Request a new reset link.", "error")
+            return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=True)
+        if not _sms_otp_challenge_matches(
+            "password-reset",
+            user_id,
+            user.get("mobile_phone"),
+            token_hash,
+            require_verified=True,
+        ):
+            flash("Verify your registered mobile number by SMS before resetting your password.", "error")
+            return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=False, reset_token=token)
 
         password_error = validate_password_policy(new_password)
         if password_error:
             flash(password_error, "error")
-            return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=False)
+            return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=False, reset_token=token)
         if new_password != confirm_password:
             flash("The passwords do not match.", "error")
-            return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=False)
+            return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=False, reset_token=token)
 
         try:
             consumed = get_user_store().consume_password_reset(
@@ -4327,6 +4998,7 @@ def password_reset_page(user_id):
                 token_hash,
                 generate_password_hash(new_password),
                 datetime.now(timezone.utc),
+                mobile_phone_verified_at=iso_now() if setup_required else None,
             )
         except Exception as error:
             app.logger.warning("Password reset could not be completed (%s).", type(error).__name__)
@@ -4336,6 +5008,7 @@ def password_reset_page(user_id):
             flash("This reset link is invalid or expired. Request a new reset link.", "error")
             return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=True)
 
+        _clear_sms_otp_challenge("password-reset", user_id)
         flash("Your password has been reset. You can now sign in.", "success")
         return redirect(url_for("login_page"))
 
@@ -4408,11 +5081,13 @@ def test_email():
                     .toast.error { border: 1px solid #fca5a5; background: #fee2e2; color: #991b1b; }
                     @media (max-width: 480px) { header { align-items: flex-start; flex-direction: column; } main { margin-top: 24px; } .panel { padding: 20px; } }
                 </style>
+                <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+                <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+                <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
             </head>
             <body>
-                <header>
-                    <h1>MANNAT MOON</h1>
-                    <nav><a href="{{ url_for('dashboard') }}">Dashboard</a><form method="post" action="{{ url_for('logout') }}" style="margin:0;"><input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}"><button type="submit">Logout</button></form></nav>
+                <header class="mm-app-header">
+                    {% include '_navigation.html' %}
                 </header>
                 <main>
                     <section class="panel">
@@ -4435,7 +5110,7 @@ def test_email():
                 </main>
             </body>
         </html>
-    """)
+    """, current_user=get_current_user())
 
 
 @app.route("/logout", methods=["POST"]) 
@@ -4522,7 +5197,7 @@ def forgot_password():
         except Exception as error:
             app.logger.warning("Admin password reset email failed (%s).", type(error).__name__)
             if isinstance(error, ValueError):
-                flash("Unable to send a password-reset link. Check the saved email address and configured public origin.", "error")
+                flash("Unable to send a password-reset link. Check the saved email and public origin, and ensure the user has a verified Indian (+91) mobile number in Profile Settings.", "error")
             else:
                 flash("Unable to send the password-reset email. No password change was made; check the mail configuration and try again.", "error")
             return redirect(url_for("forgot_password"))
@@ -4620,6 +5295,7 @@ def user_management_create():
     username = normalize_username(request.form.get("username"))
     full_name = (request.form.get("full_name") or "").strip()
     email = (request.form.get("email") or "").strip()
+    mobile_phone = (request.form.get("mobile_phone") or "").strip()
     role = (request.form.get("role") or "").strip()
     custom_staff_type = (request.form.get("custom_staff_type") or "").strip()
 
@@ -4631,6 +5307,9 @@ def user_management_create():
         return ("", 400)
     if not is_valid_email(email):
         flash("A valid email address is required to securely set up the account.", "error")
+        return ("", 400)
+    if not isinstance(mobile_phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", mobile_phone):
+        flash("Enter the user's 10-digit Indian mobile number, such as 9876543210.", "error")
         return ("", 400)
     if get_user_store().get_user_by_username(username):
         flash("A user with that username already exists.", "error")
@@ -4646,6 +5325,8 @@ def user_management_create():
         "full_name": full_name,
         "email": email,
         "recovery_email": (request.form.get("recovery_email") or "").strip(),
+        "mobile_phone": mobile_phone,
+        "mobile_phone_verified_at": None,
         "role": role,
         "custom_staff_type": custom_staff_type,
         "password_hash": generate_password_hash(secrets.token_urlsafe(48)),
@@ -4665,7 +5346,12 @@ def user_management_create():
     get_user_store().save_user(user)
     add_audit_log(get_current_user().get("id"), "user_created", f"Created user {username} with role {role}", user["id"])
     try:
-        send_password_reset_link(user, get_request_base_url(), get_user_store())
+        send_password_reset_link(
+            user,
+            get_request_base_url(),
+            get_user_store(),
+            allow_unverified_mobile=True,
+        )
     except Exception as error:
         app.logger.error("Unable to send new account setup link (%s).", type(error).__name__)
         flash("User created, but the password setup email could not be sent. Use Reset User Password to send a new link.", "error")
@@ -5037,7 +5723,7 @@ def user_management_reset_password(user_id):
     except Exception as error:
         app.logger.warning("Admin password reset email failed (%s).", type(error).__name__)
         if isinstance(error, ValueError):
-            flash("Unable to send a password-reset link. Check the saved email address and configured public origin.", "error")
+            flash("Unable to send a password-reset link. Check the saved email and public origin, and ensure the user has a verified Indian (+91) mobile number in Profile Settings.", "error")
         else:
             flash("Unable to send the password-reset email. No password change was made; check the mail configuration and try again.", "error")
         return redirect(url_for("user_management_page"))
@@ -5616,6 +6302,17 @@ def _sort_red_book_items(items):
     )
 
 
+def _pinned_red_book_items():
+    return [
+        {
+            field: item.get(field)
+            for field in ("id", "text", "image_url", "sort_order", "pinned_at")
+        }
+        for item in get_user_store().list_red_book_items()
+        if item.get("pinned") is True
+    ]
+
+
 def _sort_red_book_snapshots(snapshots):
     return sorted(
         snapshots,
@@ -5766,7 +6463,8 @@ def red_book_items_api():
             {
                 field: item.get(field)
                 for field in (
-                    "id", "text", "image_url", "sort_order", "created_at", "updated_at"
+                    "id", "text", "image_url", "sort_order", "created_at", "updated_at",
+                    "pinned", "pinned_at",
                 )
             }
             for item in items
@@ -5838,6 +6536,49 @@ def red_book_item_api(item_id):
         return _red_book_api_response(
             {"error": "Unable to update the Red Book item."}, 503
         )
+
+
+@app.route("/api/red-book/items/<item_id>/pin", methods=["PUT"])
+def red_book_item_pin_api(item_id):
+    user, denied = _red_book_api_authorize("red_book.read", require_csrf=True)
+    if denied:
+        return denied
+    if not _valid_red_book_item_id(item_id):
+        return _red_book_api_response({"error": "Invalid Red Book item identifier."}, 400)
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or set(payload) != {"pinned"} or not isinstance(
+        payload.get("pinned"), bool
+    ):
+        return _red_book_api_response(
+            {"error": "Provide the pinned status as a boolean."}, 400
+        )
+    try:
+        updated = get_user_store().set_red_book_item_pinned(
+            item_id, payload["pinned"], user.get("id")
+        )
+    except Exception as error:
+        app.logger.error("Red Book pin update failed (%s).", type(error).__name__)
+        return _red_book_api_response(
+            {"error": "Unable to update the pinned status."}, 503
+        )
+    if not updated:
+        return _red_book_api_response({"error": "Red Book item not found."}, 404)
+    return _red_book_api_response({"id": item_id, "pinned": payload["pinned"]})
+
+
+@app.route("/api/red-book/pinned")
+def red_book_pinned_items_api():
+    _user, denied = _red_book_api_authorize("red_book.read")
+    if denied:
+        return denied
+    try:
+        items = _pinned_red_book_items()
+    except Exception as error:
+        app.logger.error("Pinned Red Book items could not be loaded (%s).", type(error).__name__)
+        return _red_book_api_response(
+            {"error": "Pinned site instructions are temporarily unavailable."}, 503
+        )
+    return _red_book_api_response({"items": items})
 
 
 @app.route("/api/red-book/order", methods=["POST"])
@@ -7754,6 +8495,9 @@ def daily_report_share_image():
 
 @app.route("/daily-reports")
 def daily_reports():
+    if not get_current_user():
+        return redirect(url_for("login_page", next=request.full_path.rstrip("?")))
+
     current_user, denied = _daily_record_api_authorize("daily_reports.read")
     if denied:
         return denied

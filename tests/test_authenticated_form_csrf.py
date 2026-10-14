@@ -39,6 +39,7 @@ def _create_user(client, *, token=None):
         "username": "new-account",
         "full_name": "New Account",
         "email": "new-account@example.test",
+        "mobile_phone": "9876543210",
         "role": "office_staff",
         "custom_staff_type": "",
     }

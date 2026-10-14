@@ -13,60 +13,7 @@
   let items = [];
   let draggedItemId = null;
   let orderIsSaving = false;
-
-  function driveImageCandidates(url) {
-    try {
-      const parsed = new URL(url);
-      if (parsed.protocol !== "https:" || parsed.hostname !== "drive.google.com") return [];
-      const idMatch = parsed.pathname.match(/\/d\/([A-Za-z0-9_-]{1,200})(?:\/|$)/);
-      const id = idMatch ? idMatch[1] : parsed.searchParams.get("id");
-      if (!id || !/^[A-Za-z0-9_-]{1,200}$/.test(id)) return [];
-      const encoded = encodeURIComponent(id);
-      return [
-        `https://lh3.googleusercontent.com/d/${encoded}=w1600`,
-        `https://lh3.googleusercontent.com/d/${encoded}`,
-        `https://drive.google.com/thumbnail?id=${encoded}&sz=w1600`,
-        `https://drive.google.com/uc?export=view&id=${encoded}`
-      ];
-    } catch (error) {
-      return [];
-    }
-  }
-
-  function appendImage(content, imageUrl) {
-    if (!imageUrl) return;
-    const candidates = driveImageCandidates(imageUrl);
-    if (!candidates.length) return;
-
-    const link = document.createElement("a");
-    link.className = "red-book-image-link";
-    link.href = imageUrl;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.setAttribute("aria-label", "Open image in Google Drive");
-
-    const image = document.createElement("img");
-    image.className = "red-book-image";
-    image.alt = "Image attached to this Red Book item";
-    image.loading = "lazy";
-    const unavailable = document.createElement("span");
-    unavailable.className = "red-book-image-error";
-    unavailable.textContent = "Image unavailable. Check Google Drive sharing settings.";
-    unavailable.hidden = true;
-    let candidateIndex = 0;
-    image.addEventListener("error", () => {
-      candidateIndex += 1;
-      if (candidateIndex < candidates.length) {
-        image.src = candidates[candidateIndex];
-      } else {
-        image.hidden = true;
-        unavailable.hidden = false;
-      }
-    });
-    image.src = candidates[candidateIndex];
-    link.append(image);
-    content.append(link, unavailable);
-  }
+  let isRefreshingPinStates = false;
 
   function showStatus(message, kind = "success") {
     status.textContent = message;
@@ -163,7 +110,11 @@
     items.forEach((item, index) => {
       const row = document.createElement("li");
       row.className = "red-book-item";
+      row.classList.toggle("red-book-item-pinned", item.pinned === true);
       row.dataset.itemId = item.id;
+      row.dataset.contextItemId = item.id;
+      row.id = `red-book-item-${item.id}`;
+      row.tabIndex = 0;
       row.draggable = canEdit && !orderIsSaving;
       row.addEventListener("dragstart", event => {
         draggedItemId = item.id;
@@ -201,7 +152,7 @@
       text.className = "red-book-text";
       text.textContent = item.text;
       content.append(text);
-      appendImage(content, item.image_url);
+      window.MannatRedBookImages.appendImage(content, item.image_url);
       row.append(content);
 
       const actions = document.createElement("div");
@@ -308,10 +259,105 @@
       const payload = await apiRequest("/api/red-book/items");
       items = payload.items;
       renderItems();
+      if (window.location.hash.startsWith("#red-book-item-")) {
+        document.getElementById(window.location.hash.slice(1))?.scrollIntoView();
+      }
     } catch (error) {
       showStatus(error.message, "error");
     }
   }
 
+  window.MannatRedBookContextMenu.bind(list, {
+    getActions(row) {
+      const index = items.findIndex(item => item.id === row.dataset.itemId);
+      const item = items[index];
+      if (!item) return [];
+      const actions = [{
+        action: "pin",
+        label: item.pinned ? "Unpin" : "Pin It"
+      }];
+      if (canEdit) {
+        actions.push(
+          { action: "edit", label: "Edit", disabled: orderIsSaving },
+          { action: "move-up", label: "Move Up", disabled: orderIsSaving || index === 0 },
+          { action: "move-down", label: "Move Down", disabled: orderIsSaving || index === items.length - 1 }
+        );
+      }
+      if (canCreate) actions.push({ action: "duplicate", label: "Duplicate", disabled: orderIsSaving });
+      if (item.image_url) actions.push({ action: "view-image", label: "View Image" });
+      actions.push({ action: "copy-text", label: "Copy Text" });
+      if (canDelete) actions.push({ action: "delete", label: "Delete", disabled: orderIsSaving });
+      return actions;
+    },
+    async onAction(action, row) {
+      const item = items.find(candidate => candidate.id === row?.dataset.itemId);
+      if (!item) return;
+      const content = row.querySelector(".red-book-content");
+      if (action === "pin") {
+        const pinned = !item.pinned;
+        try {
+          await apiRequest(`/api/red-book/items/${encodeURIComponent(item.id)}/pin`, {
+            method: "PUT",
+            body: JSON.stringify({ pinned })
+          });
+          item.pinned = pinned;
+          row.classList.toggle("red-book-item-pinned", pinned);
+          showStatus(pinned ? "Instruction pinned to the Dashboard." : "Instruction unpinned.");
+        } catch (error) {
+          showStatus(error.message, "error");
+        }
+      } else if (action === "edit") {
+        editItem(item, content);
+      } else if (action === "duplicate") {
+        try {
+          await apiRequest("/api/red-book/items", {
+            method: "POST",
+            body: JSON.stringify({ text: item.text, image_url: item.image_url || "" })
+          });
+          await loadItems();
+          showStatus("Red Book item duplicated.");
+        } catch (error) {
+          showStatus(error.message, "error");
+        }
+      } else if (action === "move-up") {
+        await moveItem(item.id, -1);
+      } else if (action === "move-down") {
+        await moveItem(item.id, 1);
+      } else if (action === "view-image") {
+        const imageLink = document.createElement("a");
+        imageLink.href = item.image_url;
+        imageLink.target = "_blank";
+        imageLink.rel = "noopener noreferrer";
+        imageLink.click();
+      } else if (action === "copy-text") {
+        try {
+          await navigator.clipboard.writeText(item.text);
+          showStatus("Instruction text copied.");
+        } catch (error) {
+          showStatus("Could not copy the instruction text.", "error");
+        }
+      } else if (action === "delete") {
+        await deleteItem(item);
+      }
+    }
+  });
+
   loadItems();
+  window.setInterval(async () => {
+    if (document.hidden || orderIsSaving || isRefreshingPinStates) return;
+    isRefreshingPinStates = true;
+    try {
+      const payload = await apiRequest("/api/red-book/items");
+      const pinStates = new Map(payload.items.map(item => [item.id, item.pinned === true]));
+      items.forEach(item => {
+        item.pinned = pinStates.get(item.id) === true;
+        document.getElementById(`red-book-item-${item.id}`)
+          ?.classList.toggle("red-book-item-pinned", item.pinned);
+      });
+    } catch (error) {
+      showStatus(error.message, "error");
+    } finally {
+      isRefreshingPinStates = false;
+    }
+  }, 10000);
 })();

@@ -11,13 +11,15 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
 </head>
 <body data-drawings-csrf="{{ drawings_csrf }}">
-  <header class="drawings-header">
-    <div>
-      <h1>DRAWINGS LIBRARY</h1>
-      <p>Architectural, structural, and MEP documentation</p>
-    </div>
+{% include "_page_loader.html" %}
+  <header class="drawings-header mm-app-header">
     {% include '_navigation.html' %}
   </header>
+
+  <section class="mm-page-heading" aria-labelledby="drawingsPageTitle">
+    <h1 id="drawingsPageTitle">Drawings Library</h1>
+    <p>Architectural, structural, and MEP documentation</p>
+  </section>
 
   <main class="drawings-main">
     <div class="drawings-toolbar">

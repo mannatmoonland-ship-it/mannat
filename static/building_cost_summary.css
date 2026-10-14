@@ -29,8 +29,8 @@ body {
     gap: 20px;
     padding: 22px max(24px, calc((100vw - 1200px) / 2));
     color: #fff;
-    background: #172b3a;
-    border-bottom: 3px solid #16809a;
+    background: linear-gradient(112deg, #0b1e30 0%, #14354b 62%, #0d514f 120%);
+    border-bottom: 3px solid rgba(11, 169, 149, .9);
 }
 
 .cost-eyebrow { margin: 0 0 5px; color: #a9c2ca; font-size: 11px; font-weight: 700; }
@@ -38,7 +38,7 @@ body {
 .dashboard-link { padding: 9px 13px; color: #fff; border: 1px solid #63808d; border-radius: 5px; text-decoration: none; font-size: 13px; }
 .dashboard-link:hover { background: #294453; }
 
-.cost-main { width: min(1200px, calc(100% - 40px)); margin: 0 auto; padding: 25px 0 48px; }
+.cost-main { width: min(1200px, calc(100% - 40px)); margin: 18px auto 0; padding: 25px 0 48px; }
 .cost-filter-row { display: flex; align-items: end; flex-wrap: wrap; gap: 10px 14px; margin-bottom: 16px; color: var(--cost-muted); font-size: 13px; font-weight: 700; }
 .cost-filter-row > label { align-self: center; }
 .cost-filter-row select, .custom-date-range input { min-height: 38px; padding: 7px 10px; color: var(--cost-ink); border: 1px solid #bfced5; border-radius: 5px; background: var(--cost-paper); font: inherit; }

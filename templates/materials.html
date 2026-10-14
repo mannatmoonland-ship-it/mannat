@@ -12,13 +12,15 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
 </head>
 <body data-material-transactions-csrf="{{ material_transactions_csrf }}">
-<header class="drawings-header materials-header">
-    <div>
-        <h1>MATERIAL BUILDER</h1>
-        <p>Materials, categories, and supplier directory</p>
-    </div>
+{% include "_page_loader.html" %}
+<header class="drawings-header materials-header mm-app-header">
     {% include '_navigation.html' %}
 </header>
+
+<section class="mm-page-heading" aria-labelledby="materialsPageTitle">
+    <h1 id="materialsPageTitle">Material Builder</h1>
+    <p>Materials, categories, and supplier directory</p>
+</section>
 
 <main class="drawings-main materials-main">
     <div class="materials-tabs" role="tablist" aria-label="Material Builder sections">

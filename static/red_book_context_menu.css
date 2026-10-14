@@ -1,0 +1,73 @@
+.red-book-context-menu {
+    position: fixed;
+    z-index: 2000;
+    display: grid;
+    min-width: 184px;
+    max-width: min(260px, calc(100vw - 12px));
+    max-height: min(70vh, 420px);
+    overflow-y: auto;
+    gap: 2px;
+    padding: 6px;
+    border: 1px solid rgba(123, 224, 182, .22);
+    border-radius: 10px;
+    color: #d9e9df;
+    background: #08120d;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, .42);
+}
+
+body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item {
+    min-height: 38px;
+    padding: 0 10px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: inherit;
+    background: transparent;
+    box-shadow: none;
+    font: 600 13px/1.2 Inter, "Segoe UI", Arial, sans-serif;
+    text-align: left;
+    cursor: pointer;
+    filter: none;
+    transform: none;
+}
+
+body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item:hover,
+body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item:focus-visible {
+    border-color: rgba(93, 221, 180, .18);
+    color: #f0fff7;
+    background: rgba(77, 205, 157, .16);
+    box-shadow: none;
+    filter: none;
+    transform: none;
+}
+
+body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item:focus-visible {
+    outline: 2px solid #83e5c1;
+    outline-offset: 1px;
+}
+
+body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item:disabled {
+    opacity: .42;
+    cursor: not-allowed;
+}
+
+.red-book-item,
+.pinned-instruction-card {
+    touch-action: pan-y;
+}
+
+body:not(.login-page) .red-book-item:focus-visible,
+body:not(.login-page) .pinned-instruction-card:focus-visible {
+    outline: 2px solid #61e5bb;
+    outline-offset: 3px;
+}
+
+@media (hover: none) {
+    .red-book-item,
+    .red-book-item *,
+    .pinned-instruction-card,
+    .pinned-instruction-card * {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+    }
+}

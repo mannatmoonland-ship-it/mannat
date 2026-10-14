@@ -19,13 +19,28 @@
         input { width:100%; padding:12px 14px; border-radius:10px; border:1px solid #cbd5e1; }
         button { border:none; border-radius:10px; background:#0ea5e9; color:white; padding:12px 18px; font-weight:600; cursor:pointer; }
         .meta { font-size:13px; color:#64748b; }
+        .standard-reset {
+            margin: 18px 0 22px;
+            padding: 14px 16px;
+            border: 1px solid rgba(123, 224, 182, .18);
+            border-radius: 10px;
+            color: #b9cbbf;
+            background: rgba(77, 205, 157, .055);
+            font-size: 13px;
+            line-height: 1.55;
+        }
+        .standard-reset a { color: #79dfb8; font-weight: 700; text-decoration: none; }
+        .standard-reset a:hover, .standard-reset a:focus-visible { color: #a1f1d2; text-decoration: underline; }
     </style>
     <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
 </head>
 <body>
+{% include "_page_loader.html" %}
     <main class="shell">
         <section class="panel">
+            {% include "_brand.html" %}
             <h2>Super Admin Recovery</h2>
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
@@ -35,7 +50,12 @@
                 {% endif %}
             {% endwith %}
 
-            <p class="meta">This flow is restricted to the Super Admin account. Recovery email must match the stored recovery email and the single-use recovery code must be valid.</p>
+            <p class="meta">This backup recovery flow is restricted to the Super Admin account. It requires the saved recovery email and a single-use recovery code.</p>
+            <p class="standard-reset">
+                Have access to the Super Admin account's saved email and verified mobile?
+                <a href="{{ url_for('password_reset_request') }}">Use the regular password reset</a>
+                to receive a reset link and verify with an SMS code instead.
+            </p>
 
             <form method="post" action="{{ url_for('super_admin_recovery') }}">
                 <div>

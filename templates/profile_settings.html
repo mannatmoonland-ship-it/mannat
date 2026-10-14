@@ -12,28 +12,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='profile_settings.css') }}">
 </head>
 <body class="dashboard-page profile-page">
-    <header class="dashboard-header">
-        <a class="dashboard-brand" href="{{ url_for('dashboard') }}" aria-label="Mannat Moon home">
-            <span class="dashboard-brand-mark" aria-hidden="true">MM</span>
-            <span class="dashboard-brand-copy">
-                <strong>Mannat Moon</strong>
-                <small>Construction workspace</small>
-            </span>
-        </a>
+{% include "_page_loader.html" %}
+    <header class="dashboard-header mm-app-header">
         {% include '_navigation.html' %}
-        <div class="dashboard-account">
-            <a class="dashboard-user" href="{{ url_for('profile_settings') }}" aria-current="page" aria-label="Profile Settings">
-                <span class="dashboard-avatar" data-animal-avatar="{{ profile.avatar_id }}" aria-hidden="true">{{ profile.full_name[:1]|upper }}</span>
-                <span class="dashboard-user-copy">
-                    <strong>{{ profile.full_name }}</strong>
-                    <small>{{ profile.role }}</small>
-                </span>
-            </a>
-            <form method="post" action="{{ url_for('logout') }}" class="dashboard-logout">
-                <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
-                <button type="submit">Sign out</button>
-            </form>
-        </div>
     </header>
 
     <main class="container profile-settings-main" data-profile-settings data-avatar-id="{{ profile.avatar_id }}" data-csrf-token="{{ csrf_token }}">
@@ -97,6 +78,29 @@
                         <p id="profile-edit-status" class="profile-edit-status" role="status" aria-live="polite"></p>
                     </div>
                 </form>
+            </section>
+
+            <section class="profile-card" aria-labelledby="profile-mobile-title">
+                <h2 id="profile-mobile-title">Password-reset mobile verification</h2>
+                <p>Verify a mobile number to protect password resets with an SMS one-time code.</p>
+                <p id="profile-mobile-current">
+                    {% if profile.mobile_phone_verified %}
+                        Verified number: {{ profile.mobile_phone[3:] if profile.mobile_phone.startswith('+91') else profile.mobile_phone }}
+                    {% elif profile.mobile_phone %}
+                        Setup number: {{ profile.mobile_phone[3:] if profile.mobile_phone.startswith('+91') else profile.mobile_phone }} (verification required)
+                    {% else %}
+                        No mobile number is verified yet.
+                    {% endif %}
+                </p>
+                <div class="profile-mobile-form">
+                    <label for="profile-mobile-number">10-digit Indian mobile number</label>
+                    <input id="profile-mobile-number" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="10" pattern="[6-9][0-9]{9}" placeholder="9876543210" value="{{ profile.mobile_phone[3:] if profile.mobile_phone.startswith('+91') else profile.mobile_phone }}" required>
+                    <button id="profile-send-phone-code" type="button">Send SMS Code</button>
+                    <label for="profile-mobile-code">SMS verification code</label>
+                    <input id="profile-mobile-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" disabled>
+                    <button id="profile-verify-mobile" type="button" disabled>Verify and Save Number</button>
+                    <p id="profile-mobile-status" role="status" aria-live="polite"></p>
+                </div>
             </section>
 
             <section class="profile-card profile-avatar-card" aria-labelledby="profile-avatar-title">

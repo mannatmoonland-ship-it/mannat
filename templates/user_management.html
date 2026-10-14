@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mannat Moon - User Management</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='dialogs.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
     <style>
         * { box-sizing: border-box; }
         body { margin:0; font-family: Arial, Helvetica, sans-serif; background:#f8fafc; color:#1e293b; }
@@ -51,15 +50,12 @@
     </style>
     <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
 </head>
 <body data-csrf-token="{{ authenticated_form_csrf_token() }}">
-    <header>
-        <h1>MANNAT MOON</h1>
+{% include "_page_loader.html" %}
+    <header class="mm-app-header">
         {% include '_navigation.html' %}
-        <div class="nav">
-            <a href="{{ url_for('forgot_password') }}">Reset User Password</a>
-            <form style="display:inline" method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}"><button type="submit" style="padding:8px 12px; background:#0f172a; color:#fff; border:none; border-radius:8px; cursor:pointer;">Logout</button></form>
-        </div>
     </header>
 
     <main class="shell">
@@ -94,10 +90,13 @@
                                 <input id="email" name="email" type="email" required>
                             </div>
                             <div>
-                                <label for="recovery_email">Recovery Email</label>
-                                <input id="recovery_email" name="recovery_email" type="email">
+                                <label for="mobile_phone">10-digit Indian Mobile Number</label>
+                                <input id="mobile_phone" name="mobile_phone" type="tel" required pattern="[6-9][0-9]{9}" maxlength="10" placeholder="9876543210" autocomplete="tel-national">
                             </div>
                         </div>
+                        <p class="form-hint">Enter 10 digits only. The user must verify the number by SMS before setting their first password.</p>
+                        <label for="recovery_email">Recovery Email (optional)</label>
+                        <input id="recovery_email" name="recovery_email" type="email" autocomplete="email">
                         <div class="field-row">
                             <div>
                                 <label for="role">Role</label>
@@ -160,6 +159,7 @@
                         <th>Role</th>
                         <th>Type</th>
                         <th>Status</th>
+                        <th>Mobile OTP</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -180,6 +180,7 @@
                                     {{ 'Active' if user.is_active else 'Inactive' }}
                                 </span>
                             </td>
+                            <td>{{ (user.mobile_phone[3:] if user.mobile_phone.startswith('+91') else user.mobile_phone) if user.mobile_phone else 'No number' }} ({{ 'Verified' if user.mobile_phone_verified_at and user.mobile_phone else 'Pending' }})</td>
                             <td class="actions">
                                 <a href="{{ url_for('user_management_details', user_id=user.id) }}"><button type="button">View</button></a>
                                 <form method="post" action="{{ url_for('user_management_toggle_status', user_id=user.id) }}" data-confirm="Toggle this user account status?">

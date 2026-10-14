@@ -10,13 +10,14 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
 </head>
 <body data-contract-values-csrf="{{ contract_values_csrf }}" data-trade-builder-csrf="{{ trade_builder_csrf }}" data-can-edit-ledger="{{ 'true' if can_edit_ledger else 'false' }}">
-  <header class="ledger-header">
-    <div>
-      <h1>MANNAT MOON</h1>
-      <p>Ledger Prints</p>
-    </div>
+{% include "_page_loader.html" %}
+  <header class="ledger-header mm-app-header">
     {% include '_navigation.html' %}
   </header>
+
+  <section class="mm-page-heading" aria-labelledby="ledgerPrintsPageTitle">
+    <h1 id="ledgerPrintsPageTitle">Ledger Prints</h1>
+  </section>
 
   <main class="ledger-main">
     <div class="ledger-toolbar">

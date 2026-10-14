@@ -51,9 +51,10 @@ body:not(.login-page) header .nav-link:hover { color: #fff; background: rgba(255
 body:not(.login-page) main,
 body:not(.login-page) .container,
 body:not(.login-page) .shell,
-body:not(.login-page) .drawings-main {
+body:not(.login-page) .drawings-main,
+body:not(.login-page) .cost-main {
     width: min(100% - 40px, 1320px);
-    margin: 30px auto;
+    margin: 30px auto 0;
 }
 body:not(.login-page) .card,
 body:not(.login-page) .panel,

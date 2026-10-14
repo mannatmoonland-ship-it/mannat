@@ -1,0 +1,153 @@
+<style>
+    #page-load-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 100000;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        gap: 16px;
+        color: #e2e8f0;
+        background: #07130f;
+        opacity: 1;
+        transition: opacity 220ms ease;
+    }
+    #page-load-overlay.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+    }
+    #page-load-spinner {
+        width: 48px;
+        height: 48px;
+        border: 4px solid rgba(94, 234, 212, .2);
+        border-top-color: #5eead4;
+        border-radius: 50%;
+        animation: page-load-spin 800ms linear infinite;
+    }
+    #page-load-label {
+        color: #cbd5e1;
+        font: 600 13px/1.4 Arial, Helvetica, sans-serif;
+        letter-spacing: .04em;
+    }
+    @keyframes page-load-spin {
+        to { transform: rotate(360deg); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        #page-load-overlay { transition: none; }
+        #page-load-spinner { animation: none; }
+    }
+    @media print {
+        #page-load-overlay { display: none !important; }
+    }
+</style>
+<noscript><style>#page-load-overlay { display: none !important; }</style></noscript>
+<div id="page-load-overlay" role="status" aria-live="polite" aria-label="Loading page">
+    <span id="page-load-spinner" aria-hidden="true"></span>
+    <span id="page-load-label">Loading Mannat Moon…</span>
+</div>
+<script>
+    (() => {
+        const overlay = document.getElementById("page-load-overlay");
+        if (!overlay) return;
+
+        const minimumAfterLoadMs = 900;
+        const quietPeriodMs = 600;
+        const maximumWaitMs = 30000;
+        const startedAt = Date.now();
+        let loadFinishedAt = 0;
+        let lastRequestFinishedAt = startedAt;
+        let pendingRequests = 0;
+        let hideTimer = 0;
+        let hidden = false;
+
+        const hideOverlay = () => {
+            if (hidden) return;
+            hidden = true;
+            overlay.classList.add("is-hidden");
+            document.documentElement.setAttribute("aria-busy", "false");
+            window.setTimeout(() => overlay.remove(), 240);
+        };
+
+        const markRequestStarted = () => {
+            pendingRequests += 1;
+            window.clearTimeout(hideTimer);
+        };
+
+        const markRequestFinished = () => {
+            pendingRequests = Math.max(0, pendingRequests - 1);
+            lastRequestFinishedAt = Date.now();
+            scheduleHide();
+        };
+
+        const scheduleHide = () => {
+            if (hidden || !loadFinishedAt) return;
+            window.clearTimeout(hideTimer);
+
+            const now = Date.now();
+            const eligibleAt = Math.max(
+                loadFinishedAt + minimumAfterLoadMs,
+                lastRequestFinishedAt + quietPeriodMs
+            );
+            if (pendingRequests === 0 && now >= eligibleAt) {
+                hideOverlay();
+                return;
+            }
+            if (now - startedAt < maximumWaitMs) {
+                const nextCheckAt = pendingRequests === 0
+                    ? eligibleAt
+                    : Math.min(startedAt + maximumWaitMs, now + 250);
+                hideTimer = window.setTimeout(
+                    scheduleHide,
+                    Math.max(25, nextCheckAt - now)
+                );
+            }
+        };
+
+        const originalFetch = window.fetch;
+        if (typeof originalFetch === "function") {
+            window.fetch = (...args) => {
+                markRequestStarted();
+                try {
+                    return originalFetch(...args).finally(markRequestFinished);
+                } catch (error) {
+                    markRequestFinished();
+                    throw error;
+                }
+            };
+        }
+
+        const originalXhrSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.send = function (...args) {
+            let finished = false;
+            const finish = () => {
+                if (finished) return;
+                finished = true;
+                markRequestFinished();
+            };
+            markRequestStarted();
+            this.addEventListener("loadend", finish, { once: true });
+            try {
+                return originalXhrSend.apply(this, args);
+            } catch (error) {
+                finish();
+                throw error;
+            }
+        };
+
+        const onLoad = () => {
+            if (!loadFinishedAt) loadFinishedAt = Date.now();
+            scheduleHide();
+        };
+
+        document.documentElement.setAttribute("aria-busy", "true");
+        if (document.readyState === "complete") {
+            onLoad();
+        } else {
+            window.addEventListener("load", onLoad, { once: true });
+        }
+        window.setTimeout(hideOverlay, maximumWaitMs);
+        window.addEventListener("pageshow", event => {
+            if (event.persisted) onLoad();
+        });
+    })();
+</script>

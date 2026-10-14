@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#050907">
+    <title>Page Not Found - Mannat Moon</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <style>
+        body.not-found-page {
+            min-height: 100vh;
+            margin: 0;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background:
+                radial-gradient(ellipse at 50% 0%, rgba(25, 110, 73, .2), transparent 35rem),
+                radial-gradient(ellipse at 100% 65%, rgba(29, 135, 105, .08), transparent 24rem),
+                var(--mm-canvas);
+            color: var(--mm-ink);
+            font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+        }
+        .not-found-card {
+            width: min(560px, 100%);
+            padding: clamp(28px, 7vw, 56px);
+            border: 1px solid var(--mm-line);
+            border-radius: var(--mm-radius);
+            background: linear-gradient(145deg, rgba(18, 34, 26, .94), rgba(8, 16, 12, .96));
+            box-shadow: var(--mm-shadow);
+            text-align: center;
+            backdrop-filter: blur(14px);
+        }
+        .not-found-art {
+            position: relative;
+            display: grid;
+            place-items: center;
+            width: 132px;
+            height: 132px;
+            margin: 0 auto 24px;
+            border: 1px solid var(--mm-line);
+            border-radius: var(--mm-radius);
+            background: linear-gradient(145deg, rgba(75, 186, 135, .12), rgba(242, 138, 69, .08));
+            color: var(--mm-accent);
+        }
+        .not-found-art::before,
+        .not-found-art::after {
+            position: absolute;
+            content: "";
+            border: 2px solid var(--mm-flare, #f28a45);
+            border-radius: 50%;
+        }
+        .not-found-art::before { inset: 19px; opacity: .35; }
+        .not-found-art::after { inset: 29px; border-color: var(--mm-accent); opacity: .25; }
+        .not-found-art svg { position: relative; z-index: 1; width: 58px; height: 58px; }
+        .error-code {
+            margin: 0;
+            color: var(--mm-accent);
+            font-size: clamp(52px, 12vw, 76px);
+            font-weight: 800;
+            letter-spacing: -.07em;
+            line-height: 1;
+        }
+        h1 { margin: 16px 0 10px; font-size: clamp(23px, 5vw, 30px); }
+        .not-found-message { margin: 0 auto 26px; max-width: 390px; color: var(--mm-muted); }
+        .not-found-actions { display: flex; justify-content: center; }
+        .not-found-actions a {
+            display: inline-flex;
+            min-height: 44px;
+            align-items: center;
+            justify-content: center;
+            padding: 0 18px;
+            border: 1px solid var(--mm-line);
+            border-radius: 9px;
+            background: rgba(255, 255, 255, .055);
+            color: var(--mm-ink);
+            font-weight: 700;
+            text-decoration: none;
+        }
+        .not-found-actions a.primary {
+            border-color: transparent;
+            background: linear-gradient(135deg, #72e5c2, #38c99b);
+            color: #06140e;
+        }
+        .not-found-actions a:focus-visible { outline: 3px solid rgba(93, 221, 180, .55); outline-offset: 3px; }
+        .not-found-header {
+            position: absolute;
+            top: 0;
+            right: 0;
+            left: 0;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            min-height: 76px;
+            padding: 12px clamp(18px, 4vw, 56px);
+        }
+        @media (max-width: 1280px) {
+            .not-found-header { flex-wrap: wrap; }
+        }
+        @media (prefers-reduced-motion: no-preference) {
+            .not-found-art { animation: float-in .55s cubic-bezier(.2, .75, .25, 1) both; }
+            @keyframes float-in {
+                from { opacity: 0; transform: translateY(10px) scale(.96); }
+                to { opacity: 1; transform: translateY(0) scale(1); }
+            }
+        }
+    </style>
+</head>
+<body class="not-found-page">
+    <header class="not-found-header">
+        {% if current_user %}
+            {% include '_navigation.html' %}
+        {% else %}
+            {% include "_brand.html" %}
+        {% endif %}
+    </header>
+    <main class="not-found-card">
+        <div class="not-found-art" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none">
+                <path d="M12 49h40M18 49V27l14-12 14 12v22M27 49V36h10v13M23 28h.1M41 28h.1"
+                      stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="m46 12 7 7m0-7-7 7" stroke="#df6710" stroke-width="3" stroke-linecap="round"/>
+            </svg>
+        </div>
+        <p class="error-code" aria-label="Error 404">404</p>
+        <h1>We couldn't find that page</h1>
+        <p class="not-found-message">The address may be incorrect, or the page may have moved. Let’s get you back on track.</p>
+        <nav class="not-found-actions" aria-label="Page navigation">
+            {% if current_user %}
+                <a class="primary" href="{{ url_for('dashboard') }}">Go to dashboard</a>
+            {% else %}
+                <a class="primary" href="{{ url_for('login_page') }}">Sign in</a>
+            {% endif %}
+        </nav>
+    </main>
+</body>
+</html>

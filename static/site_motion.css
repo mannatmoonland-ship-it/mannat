@@ -75,7 +75,7 @@ body:not(.login-page) .cards-grid > .card { animation: mm-card-in .48s cubic-bez
     from { opacity: 0; transform: translateY(14px) scale(.985); }
     to { opacity: 1; transform: translateY(0) scale(1); }
 }
-body:not(.login-page) button,
+body:not(.login-page) button:not(.mm-nav-button):not(.mm-nav-mobile-toggle):not(.red-book-context-menu-item),
 body:not(.login-page) .drawings-nav-button,
 body:not(.login-page) .drawings-primary,
 body:not(.login-page) .drawings-action:not(.danger),
@@ -83,7 +83,7 @@ body:not(.login-page) .card-button,
 body:not(.login-page) .dashboard-login {
     transition: transform .18s ease, box-shadow .18s ease, background-color .18s ease, filter .18s ease, color .18s ease;
 }
-body:not(.login-page) button:hover,
+body:not(.login-page) button:not(.mm-nav-button):not(.mm-nav-mobile-toggle):not(.red-book-context-menu-item):hover,
 body:not(.login-page) .drawings-nav-button:hover,
 body:not(.login-page) .drawings-primary:hover,
 body:not(.login-page) .drawings-action:not(.danger):hover {
@@ -91,7 +91,7 @@ body:not(.login-page) .drawings-action:not(.danger):hover {
     transform: translateY(-2px);
     box-shadow: 0 8px 18px rgba(11, 121, 128, .2);
 }
-body:not(.login-page) button:active { transform: translateY(0) scale(.985); }
+body:not(.login-page) button:not(.mm-nav-button):not(.mm-nav-mobile-toggle):not(.red-book-context-menu-item):active { transform: translateY(0) scale(.985); }
 body:not(.login-page) input,
 body:not(.login-page) select,
 body:not(.login-page) textarea {
@@ -209,7 +209,7 @@ body:not(.login-page) .save,
 body:not(.login-page) .card-button,
 body:not(.login-page) .drawings-primary,
 body:not(.login-page) .drawings-action:not(.danger),
-body:not(.login-page) button:not(.secondary):not(.danger):not(.delete-btn):not(.edit-btn) { background-color: #e31837; border-color: #e31837; }
+body:not(.login-page) button:not(.secondary):not(.danger):not(.delete-btn):not(.edit-btn):not(.mm-nav-button):not(.mm-nav-mobile-toggle):not(.red-book-context-menu-item) { background-color: #e31837; border-color: #e31837; }
 body:not(.login-page) .materials-tab.active,
 body:not(.login-page) .materials-subtab.active { border-bottom-color: #e31837; color: #bf142e; }
 body:not(.login-page) .materials-tab:hover,
@@ -308,20 +308,20 @@ body:not(.login-page) .ev:hover {
     border-color: rgba(99,226,179,.38);
     box-shadow: 0 18px 44px rgba(0,0,0,.3), 0 0 22px rgba(51,190,137,.07);
 }
-body:not(.login-page) button,
+body:not(.login-page) button:not(.red-book-context-menu-item),
 body:not(.login-page) .primary,
 body:not(.login-page) .primary-button,
 body:not(.login-page) .save,
 body:not(.login-page) .card-button,
 body:not(.login-page) .drawings-primary,
 body:not(.login-page) .drawings-action:not(.danger),
-body:not(.login-page) button:not(.secondary):not(.danger):not(.delete-btn):not(.edit-btn) {
+body:not(.login-page) button:not(.secondary):not(.danger):not(.delete-btn):not(.edit-btn):not(.mm-nav-button):not(.mm-nav-mobile-toggle):not(.red-book-context-menu-item) {
     border-color: #5dddb4;
     color: #06140e;
     background: linear-gradient(135deg, #72e5c2, #38c99b);
     box-shadow: 0 5px 18px rgba(54,201,151,.14);
 }
-body:not(.login-page) button:hover,
+body:not(.login-page) button:not(.mm-nav-button):not(.mm-nav-mobile-toggle):not(.red-book-context-menu-item):hover,
 body:not(.login-page) .drawings-primary:hover,
 body:not(.login-page) .card-button:hover { filter: brightness(1.08); }
 body:not(.login-page) .secondary,

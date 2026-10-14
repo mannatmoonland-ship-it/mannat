@@ -58,14 +58,16 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
 </head>
 <body>
-    <header>
-        <div>
-            <h1>Developer Documentation</h1>
-            <p>Mannat Moon Construction</p>
-        </div>
+{% include "_page_loader.html" %}
+    <header class="mm-app-header">
         {% include '_navigation.html' %}
         <a class="guide-top-link" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
     </header>
+
+    <section class="mm-page-heading" aria-labelledby="developerGuidePageTitle">
+        <h1 id="developerGuidePageTitle">Developer Documentation</h1>
+        <p>Application architecture and operations</p>
+    </section>
 
     <main>
         <article class="guide-panel">
@@ -131,6 +133,7 @@
                 <p>Files in <code>templates/</code> are rendered with Flask/Jinja. Most operational pages load a page-specific ES module from <code>static/</code>. JavaScript uses DOM events and page-specific state; there is no single-page-app framework.</p>
                 <h3>Firebase and Firestore</h3>
                 <p>The browser-facing modules request the active public web configuration from <code>/api/firebase-web-config</code>, await the Firebase Auth custom-token bridge for the current Flask session, and then use Firestore for permission-scoped reads. Firestore Rules validate the token's Flask session ID and authorization version against the server-owned user record. Flask/Admin SDK APIs handle mutations; Admin SDK access bypasses Firestore Rules and must retain its own permission checks.</p>
+                <p>Password-reset protection uses the Fast2SMS DLT API. Configure <code>FAST2SMS_API_KEY</code>, the approved <code>FAST2SMS_SENDER_ID</code>, and <code>FAST2SMS_MESSAGE_ID</code> on the server. The API key is sent in the <code>Authorization</code> HTTP header; the app sends the user's 10-digit Indian mobile number and its generated six-digit OTP as the DLT template variable to <code>https://www.fast2sms.com/dev/bulkV2</code>. Do not expose the API key to browser code or commit it. Users enter only the 10-digit mobile number in Profile Settings; administrators also enter only 10 digits when creating an account. The user verifies the number by entering the SMS code; the app compares it with a short-lived HMAC digest in the server-only <code>sms_otp_challenges</code> Firestore collection. Challenges are bound to the user, phone, and purpose, expire after five minutes, and have attempt limits; the raw OTP is never stored. Firestore Rules must keep this collection inaccessible to browser clients. Reset links alone do not permit a password change: the user must also complete SMS verification for the saved number.</p>
                 <p>Active browser modules refer to collections including <code>trades</code>, <code>daily_records</code>, <code>drawings_categories</code>, <code>drawings</code>, and the material categories, suppliers, purchases, and consumption collections. Field shapes are owned by the respective module code; review those modules before changing data behavior.</p>
                 <h3>Google Photos and Drive</h3>
                 <p>The <code>/google-photos</code> helper tries Requests first and then a pooled headless Playwright browser to find a shared image URL; results are cached in process memory. Daily Reports can store photo/video evidence links. Drawing PDFs are linked by URL and opened by the browser; no Drive API integration is present.</p>
@@ -171,6 +174,7 @@ python -m playwright install chromium</code></pre>
                     <div><dt><code>FIREBASE_WEB_CONFIG</code></dt><dd>Optional JSON object for the browser Firebase app. Its project ID must match <code>FIREBASE_PROJECT_ID</code>.</dd></div>
                     <div><dt><code>FIRESTORE_MODE</code> and <code>ALLOW_IN_MEMORY_FIRESTORE</code></dt><dd>Control the configured store mode and explicit in-memory development/test fallback. Do not use in-memory mode when persistent production data is required.</dd></div>
                     <div><dt><code>MAIL_SERVER</code>, <code>MAIL_PORT</code>, <code>MAIL_USE_TLS</code>, <code>MAIL_USERNAME</code>, <code>MAIL_PASSWORD</code>, <code>MAIL_DEFAULT_SENDER</code></dt><dd>Configure Flask-Mail for password reset and test email workflows. Keep mail credentials private.</dd></div>
+                    <div><dt><code>FAST2SMS_API_KEY</code>, <code>FAST2SMS_SENDER_ID</code>, <code>FAST2SMS_MESSAGE_ID</code></dt><dd>Configure the Fast2SMS DLT API with a server-side API key and the approved sender ID and DLT message ID from the Fast2SMS dashboard.</dd></div>
                 </dl>
                 <p>Snapshot project switching writes active project details under <code>instance/</code>. Treat runtime files in that folder as deployment state; do not copy credential values into source control.</p>
             </section>
@@ -384,6 +388,7 @@ python -m playwright install chromium</code></pre>
                     <div><dt><code>FIRESTORE_MODE</code></dt><dd>Selects the store mode; the source recognizes <code>firestore</code> and <code>memory</code>.</dd></div>
                     <div><dt><code>ALLOW_IN_MEMORY_FIRESTORE</code></dt><dd>Explicit opt-in to the in-memory fallback when enabled with a true-like value. In-memory data is not durable and is not appropriate where persistent production records are required.</dd></div>
                     <div><dt><code>MAIL_SERVER</code>, <code>MAIL_PORT</code>, <code>MAIL_USE_TLS</code>, <code>MAIL_USERNAME</code>, <code>MAIL_PASSWORD</code>, <code>MAIL_DEFAULT_SENDER</code></dt><dd>Configure Flask-Mail for password reset and the Super Admin test-email page. Keep mail credentials private.</dd></div>
+                    <div><dt><code>FAST2SMS_API_KEY</code>, <code>FAST2SMS_SENDER_ID</code>, <code>FAST2SMS_MESSAGE_ID</code></dt><dd>Configure the Fast2SMS DLT API with a server-side API key and the approved sender ID and DLT message ID from the Fast2SMS dashboard.</dd></div>
                 </dl>
                 <p>Snapshot project switching can write active project data to <code>instance/firebase_active_project.json</code>. This runtime file and credential files are excluded by the repository's <code>.gitignore</code>; preserve that separation and never commit secret values.</p>
             </section>

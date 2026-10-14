@@ -68,11 +68,12 @@
 
 .red-book-add-row {
     display: flex;
+    align-items: flex-start;
     gap: 10px;
     margin-top: 10px;
 }
 
-.red-book-add-row input,
+.red-book-add-row textarea,
 .red-book-edit-input {
     box-sizing: border-box;
     width: 100%;
@@ -84,9 +85,10 @@
     background: #081510;
     color: #f2fff8;
     font: inherit;
+    resize: vertical;
 }
 
-.red-book-add-row input:focus,
+.red-book-add-row textarea:focus,
 .red-book-edit-input:focus {
     border-color: #77d3a8;
     box-shadow: 0 0 0 3px rgba(119, 211, 168, 0.14);
@@ -172,6 +174,7 @@
 .red-book-text {
     overflow-wrap: anywhere;
     line-height: 1.55;
+    white-space: pre-wrap;
 }
 
 .red-book-item-actions {

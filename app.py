@@ -5609,14 +5609,17 @@ def _sort_red_book_snapshots(snapshots):
 def _validate_red_book_text(value):
     if not isinstance(value, str):
         raise RedBookMutationError("Enter a valid construction instruction.")
-    normalized = value.strip()
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n").strip()
     if (
         not normalized
         or len(normalized) > RED_BOOK_MAX_TEXT_LENGTH
-        or any(ord(character) < 32 or ord(character) == 127 for character in normalized)
+        or any(
+            (ord(character) < 32 and character != "\n") or ord(character) == 127
+            for character in normalized
+        )
     ):
         raise RedBookMutationError(
-            f"Enter one instruction of 1 to {RED_BOOK_MAX_TEXT_LENGTH} characters."
+            f"Enter an instruction of 1 to {RED_BOOK_MAX_TEXT_LENGTH} characters."
         )
     return normalized
 

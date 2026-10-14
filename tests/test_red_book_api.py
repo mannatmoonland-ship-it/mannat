@@ -95,6 +95,23 @@ def test_red_book_create_edit_delete_and_audit(red_book_client):
     assert client.get("/api/red-book/items").get_json()["items"] == []
 
 
+def test_red_book_preserves_multiline_instruction_text(red_book_client):
+    _store, client = red_book_client
+    text = "Check excavation depth.\nConfirm dimensions before placing PCC."
+    item_id = add_item(client, text)
+
+    updated_text = "Check excavation depth.\n\nRecord measurements in the site log."
+    updated = client.patch(
+        f"/api/red-book/items/{item_id}",
+        json={"text": updated_text},
+        headers=headers(),
+    )
+
+    assert updated.status_code == 200
+    saved = client.get("/api/red-book/items").get_json()["items"][0]
+    assert saved["text"] == updated_text
+
+
 def test_red_book_order_is_saved_and_read_in_priority_order(red_book_client):
     _store, client = red_book_client
     first_id = add_item(client, "First instruction.")
@@ -132,7 +149,7 @@ def test_red_book_delete_renumbers_remaining_items(red_book_client):
     assert [item["sort_order"] for item in items] == [0, 1]
 
 
-@pytest.mark.parametrize("text", ["", "   ", "one\ninstruction", "x" * 501, None, 12])
+@pytest.mark.parametrize("text", ["", "   ", "one\tinstruction", "x" * 501, None, 12])
 def test_red_book_rejects_invalid_instruction_text(red_book_client, text):
     _store, client = red_book_client
     response = client.post(

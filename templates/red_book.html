@@ -37,15 +37,14 @@
         <form id="redBookAddForm" class="red-book-add-form">
             <label for="redBookNewText">Add a construction instruction</label>
             <div class="red-book-add-row">
-                <input
+                <textarea
                     id="redBookNewText"
                     name="text"
-                    type="text"
                     maxlength="500"
-                    autocomplete="off"
+                    rows="3"
                     placeholder="For example: Verify footing dimensions before placing PCC."
                     required
-                >
+                ></textarea>
                 <button class="red-book-button red-book-primary" type="submit">Add Item</button>
             </div>
         </form>

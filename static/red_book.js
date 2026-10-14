@@ -151,8 +151,8 @@
   }
 
   async function editItem(item, textNode) {
-    const input = document.createElement("input");
-    input.type = "text";
+    const input = document.createElement("textarea");
+    input.rows = 3;
     input.maxLength = 500;
     input.required = true;
     input.value = item.text;

@@ -133,6 +133,9 @@ def test_user_required_to_change_password_is_denied(client):
 def test_active_user_without_camera_permission_is_denied(client):
     test_client, store = client
     add_user(store, permissions=["dashboard"])
+    store.save_non_admin_permissions(
+        sorted(set(store.get_non_admin_permissions()) - {"camera_upload"})
+    )
 
     response = authenticate(test_client)
 

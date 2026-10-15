@@ -107,6 +107,12 @@ def test_operational_staff_cannot_delete_daily_reports_by_default(daily_report_d
     response = delete_report(client)
 
     assert response.status_code == 403
+    assert response.get_json() == {
+        "error": (
+            "You do not have the required privileges to delete this daily record. "
+            "Please contact a Super Admin or Admin to request deletion."
+        )
+    }
     assert "report-1" in records.records
     assert records.deleted_ids == []
 

@@ -8,6 +8,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 import app as app_module
 from app import FirebaseFirestoreStore, app
+from permission_policy import DEFAULT_NON_ADMIN_PERMISSIONS, PERMISSION_IDENTIFIERS
 
 BOOTSTRAP_TEST_PASSWORD = "Test-Only-Admin-2026!"
 
@@ -16,6 +17,7 @@ class FakeFirestoreStore:
     def __init__(self):
         self.users = {}
         self.custom_staff_types = {}
+        self.non_admin_permissions = set(DEFAULT_NON_ADMIN_PERMISSIONS)
         self.audit_log = []
         self.fail_user_deletion = False
 
@@ -37,6 +39,12 @@ class FakeFirestoreStore:
 
     def list_custom_staff_types(self):
         return list(self.custom_staff_types.values())
+
+    def get_non_admin_permissions(self):
+        return sorted(self.non_admin_permissions)
+
+    def save_non_admin_permissions(self, permissions):
+        self.non_admin_permissions = set(permissions)
 
     def save_custom_staff_type(self, staff_type):
         self.custom_staff_types[staff_type["id"]] = staff_type
@@ -965,7 +973,15 @@ def test_custom_staff_type_edit_updates_name(client):
     login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
     assert login_response.status_code == 302
 
-    client.post("/user-management/custom-type", data={"type_name": " Driver "}, follow_redirects=False)
+    client.post(
+        "/user-management/custom-type",
+        data={
+            "type_name": " Driver ",
+            "permissions_configured": "true",
+            "permissions": ["daily_reports.delete"],
+        },
+        follow_redirects=False,
+    )
     custom_type = app.config["FIRESTORE_STORE"].list_custom_staff_types()[0]
 
     response = client.post(
@@ -977,6 +993,406 @@ def test_custom_staff_type_edit_updates_name(client):
     assert response.status_code == 302
     updated_type = app.config["FIRESTORE_STORE"].list_custom_staff_types()[0]
     assert updated_type["name"] == "Logistics Staff"
+    assert updated_type["permissions"] == ["daily_reports.delete"]
+
+
+def test_custom_staff_type_creation_saves_selected_permissions(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+
+    response = client.post(
+        "/user-management/custom-type",
+        data={
+            "type_name": "Report Maintainer",
+            "permissions_configured": "true",
+            "permissions": ["daily_reports.read", "daily_reports.delete"],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    custom_type = app.config["FIRESTORE_STORE"].list_custom_staff_types()[0]
+    assert custom_type["permissions"] == ["daily_reports.delete", "daily_reports.read"]
+
+
+def test_new_custom_staff_type_defaults_to_standard_non_admin_permissions(client):
+    from app import ensure_initial_super_admin
+    from permission_policy import DEFAULT_NON_ADMIN_PERMISSIONS
+
+    ensure_initial_super_admin()
+    login_response = client.post(
+        "/login",
+        data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+
+    response = client.post(
+        "/user-management/custom-type",
+        data={"type_name": "Site Team"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    custom_type = app.config["FIRESTORE_STORE"].list_custom_staff_types()[0]
+    assert custom_type["permissions"] == sorted(DEFAULT_NON_ADMIN_PERMISSIONS)
+
+
+def test_custom_staff_type_edit_updates_permissions_and_invalidates_assigned_users(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+    store = app.config["FIRESTORE_STORE"]
+    store.save_custom_staff_type({
+        "id": "report-maintainer",
+        "name": "Report Maintainer",
+        "permissions": ["daily_reports.read"],
+    })
+    store.save_user({
+        "id": "report-user",
+        "username": "ReportUser",
+        "role": "Report Maintainer",
+        "custom_staff_type": "",
+        "is_active": True,
+        "active_sessions": ["report-session"],
+        "authorization_version": 2,
+    })
+
+    response = client.post(
+        "/user-management/custom-type/report-maintainer/edit",
+        data={
+            "type_name": "Report Maintainer",
+            "permissions_configured": "true",
+            "permissions": ["daily_reports.read", "daily_reports.delete"],
+        },
+        headers={"X-Requested-With": "XMLHttpRequest"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+    assert store.list_custom_staff_types()[0]["permissions"] == [
+        "daily_reports.delete",
+        "daily_reports.read",
+    ]
+    updated_user = store.get_user("report-user")
+    assert updated_user["active_sessions"] == []
+    assert updated_user["authorization_version"] == 3
+    assert app_module._user_has_compiled_permission(updated_user, "daily_reports.delete")
+
+
+def test_custom_staff_type_rejects_super_admin_only_permissions(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+
+    response = client.post(
+        "/user-management/custom-type",
+        data={
+            "type_name": "Custom Administrator",
+            "permissions_configured": "true",
+            "permissions": ["system_backup.manage"],
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert app.config["FIRESTORE_STORE"].list_custom_staff_types() == []
+    assert b"One or more selected permissions are not supported." in response.data
+
+
+def test_user_management_lists_custom_staff_type_permissions(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+    app.config["FIRESTORE_STORE"].save_custom_staff_type({
+        "id": "report-maintainer",
+        "name": "Report Maintainer",
+        "permissions": ["daily_reports.read", "daily_reports.delete"],
+    })
+
+    response = client.get("/user-management")
+
+    assert response.status_code == 200
+    assert b"Create Staff Type" in response.data
+    assert b"Delete reports" in response.data
+    assert b"daily_reports.delete" in response.data
+    assert b"permissions_configured" in response.data
+    assert b'class="user-management-page"' in response.data
+    assert b"user_permissions.css" in response.data
+    assert b'value="daily_reports.read" checked' in response.data
+
+
+def test_custom_staff_type_permission_options_match_supported_non_admin_permissions():
+    assert app_module.CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS == (
+        PERMISSION_IDENTIFIERS - {"user_admin.manage", "system_backup.manage"}
+    )
+
+
+def test_existing_user_can_be_assigned_custom_role_and_view_effective_permissions(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post(
+        "/login",
+        data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+    store = app.config["FIRESTORE_STORE"]
+    store.save_custom_staff_type({
+        "id": "report-maintainer",
+        "name": "Report Maintainer",
+        "permissions": ["daily_reports.read", "daily_reports.delete"],
+    })
+    store.save_user({
+        "id": "existing-report-user",
+        "username": "existing-user",
+        "full_name": "Existing User",
+        "email": "existing-user@example.com",
+        "recovery_email": "",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "password_hash": "test-hash",
+        "must_change_password": False,
+        "status": "active",
+        "is_active": True,
+        "active_sessions": ["existing-session"],
+        "authorization_version": 0,
+        "permissions": [],
+    })
+
+    before = client.get("/user-management/existing-report-user")
+    assert before.status_code == 200
+    assert b"Current Permissions" in before.data
+    assert b"Delete reports (not allowed)" in before.data
+    assert b"all non-admin accounts" in before.data
+    assert b"rolePermissionsPreviewList" in before.data
+    assert b'name="permissions" type="checkbox"' in before.data
+    assert b"user_permissions.css" in before.data
+    assert b"not allowed" in before.data
+
+    response = client.post(
+        "/user-management/existing-report-user/edit",
+        data={
+            "username": "existing-user",
+            "full_name": "Existing User",
+            "email": "existing-user@example.com",
+            "recovery_email": "",
+            "role": "Report Maintainer",
+            "custom_staff_type": "",
+            "is_active": "true",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    updated_user = store.get_user("existing-report-user")
+    assert updated_user["role"] == "Report Maintainer"
+    assert updated_user["active_sessions"] == []
+    assert app_module._user_has_compiled_permission(updated_user, "daily_reports.delete")
+
+    after = client.get("/user-management/existing-report-user")
+    assert b"Delete reports (not allowed)" not in after.data
+    assert b"Delete reports" in after.data
+    assert b"Permissions for selected role" in after.data
+    assert b"Report Maintainer" in after.data
+
+
+def test_edit_user_form_updates_shared_custom_role_permissions(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post(
+        "/login",
+        data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD},
+        follow_redirects=False,
+    )
+    assert login_response.status_code == 302
+    store = app.config["FIRESTORE_STORE"]
+    store.save_custom_staff_type({
+        "id": "site-supervisors",
+        "name": "Site Supervisors",
+        "permissions": ["daily_reports.read"],
+    })
+    store.save_user({
+        "id": "target-user",
+        "username": "target-user",
+        "full_name": "Target User",
+        "email": "target@example.com",
+        "role": "office_staff",
+        "custom_staff_type": "",
+        "password_hash": "test-hash",
+        "is_active": True,
+        "active_sessions": ["target-session"],
+        "authorization_version": 0,
+        "permissions": [],
+    })
+    store.save_user({
+        "id": "another-supervisor",
+        "username": "another-supervisor",
+        "role": "Site Supervisors",
+        "custom_staff_type": "",
+        "is_active": True,
+        "active_sessions": ["other-session"],
+        "authorization_version": 3,
+        "permissions": [],
+    })
+
+    response = client.post(
+        "/user-management/target-user/edit",
+        data={
+            "username": "target-user",
+            "full_name": "Target User",
+            "email": "target@example.com",
+            "recovery_email": "",
+            "role": "Site Supervisors",
+            "custom_staff_type": "",
+            "is_active": "true",
+            "permissions_configured": "true",
+            "permissions": ["daily_reports.read", "daily_reports.delete"],
+        },
+        headers={"X-Requested-With": "XMLHttpRequest"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    assert "shared non-admin permissions updated" in response.get_json()["message"]
+    staff_type = store.list_custom_staff_types()[0]
+    assert staff_type["permissions"] == ["daily_reports.delete", "daily_reports.read"]
+    assert store.get_user("target-user")["active_sessions"] == []
+    assert store.get_user("another-supervisor")["active_sessions"] == []
+    assert store.get_user("another-supervisor")["authorization_version"] == 4
+
+
+def test_edit_user_can_change_shared_permissions_for_builtin_non_admin_role(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    store = app.config["FIRESTORE_STORE"]
+    store.save_user({
+        "id": "target-user",
+        "username": "target-user",
+        "full_name": "Target User",
+        "email": "target@example.com",
+        "role": "office_staff",
+        "is_active": True,
+        "active_sessions": ["target-session"],
+        "authorization_version": 0,
+        "permissions": [],
+    })
+    store.save_user({
+        "id": "another-worker",
+        "username": "another-worker",
+        "role": "supervisor",
+        "is_active": True,
+        "active_sessions": ["worker-session"],
+        "authorization_version": 2,
+        "permissions": [],
+    })
+
+    response = client.post(
+        "/user-management/target-user/edit",
+        data={
+            "username": "target-user",
+            "full_name": "Target User",
+            "email": "target@example.com",
+            "role": "office_staff",
+            "is_active": "true",
+            "permissions_configured": "true",
+            "permissions": ["daily_reports.delete"],
+        },
+        headers={"X-Requested-With": "XMLHttpRequest"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 200
+    assert store.get_non_admin_permissions() == ["daily_reports.delete"]
+    assert store.get_user("target-user")["permissions"] == ["daily_reports.delete"]
+    assert store.get_user("another-worker")["permissions"] == ["daily_reports.delete"]
+    assert store.get_user("target-user")["active_sessions"] == []
+    assert store.get_user("another-worker")["active_sessions"] == []
+
+
+def test_edit_user_cannot_change_admin_or_super_admin_permissions(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    store = app.config["FIRESTORE_STORE"]
+    store.save_user({
+        "id": "target-admin",
+        "username": "target-admin",
+        "full_name": "Target Admin",
+        "email": "admin@example.com",
+        "role": "super_admin",
+        "is_active": True,
+        "active_sessions": [],
+        "permissions": [],
+    })
+
+    response = client.post(
+        "/user-management/target-admin/edit",
+        data={
+            "username": "target-admin",
+            "full_name": "Target Admin",
+            "email": "admin@example.com",
+            "role": "super_admin",
+            "is_active": "true",
+            "permissions_configured": "true",
+            "permissions": ["daily_reports.delete"],
+        },
+        headers={"X-Requested-With": "XMLHttpRequest"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["message"] == "Admin and Super Admin permissions cannot be changed here."
+
+
+def test_new_user_inherits_permissions_from_selected_custom_staff_type(client, monkeypatch):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    login_response = client.post("/login", data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD}, follow_redirects=False)
+    assert login_response.status_code == 302
+    store = app.config["FIRESTORE_STORE"]
+    store.save_custom_staff_type({
+        "id": "report-maintainer",
+        "name": "Report Maintainer",
+        "permissions": ["daily_reports.delete"],
+    })
+    monkeypatch.setattr("app.send_email", lambda *args, **kwargs: True)
+
+    response = client.post(
+        "/user-management/create",
+        data={
+            "username": "report-user",
+            "full_name": "Report User",
+            "email": "report-user@example.com",
+            "mobile_phone": "9876543210",
+            "role": "Report Maintainer",
+            "custom_staff_type": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    created_user = store.get_user_by_username("report-user")
+    assert created_user
+    assert app_module._user_has_compiled_permission(created_user, "daily_reports.delete")
+    assert "camera_upload" in created_user["permissions"]
+    assert created_user["default_permissions_version"] == 1
 
 
 def test_custom_staff_type_edit_rejects_duplicate_name_ignoring_case_and_spaces(client):
@@ -1157,7 +1573,7 @@ def test_super_admin_can_grant_and_revoke_camera_upload(client):
     })
 
     details = client.get("/user-management/camera-user")
-    assert b'name="camera_upload"' in details.data
+    assert b'id="rolePermission-camera_upload"' in details.data
 
     update = {
         "username": "CameraUser",
@@ -1167,24 +1583,33 @@ def test_super_admin_can_grant_and_revoke_camera_upload(client):
         "role": "office_staff",
         "custom_staff_type": "",
         "is_active": "true",
+        "permissions_configured": "true",
     }
+    common_permissions = set(app.config["FIRESTORE_STORE"].get_non_admin_permissions())
     response = client.post(
         "/user-management/camera-user/edit",
-        data={**update, "camera_upload": "true"},
+        data={
+            **update,
+            "permissions": sorted(common_permissions),
+        },
         follow_redirects=False,
     )
     assert response.status_code == 302
     assert "camera_upload" in app.config["FIRESTORE_STORE"].get_user("camera-user")["permissions"]
     granted_details = client.get("/user-management/camera-user")
-    assert b'name="camera_upload" type="checkbox" value="true" checked>' in granted_details.data
+    assert b'id="rolePermission-camera_upload" name="permissions" type="checkbox" value="camera_upload" disabled' in granted_details.data
 
     response = client.post(
         "/user-management/camera-user/edit",
-        data=update,
+        data={
+            **update,
+            "permissions": sorted(common_permissions - {"camera_upload"}),
+        },
         follow_redirects=False,
     )
     assert response.status_code == 302
     assert "camera_upload" not in app.config["FIRESTORE_STORE"].get_user("camera-user")["permissions"]
+    assert "camera_upload" not in app.config["FIRESTORE_STORE"].get_non_admin_permissions()
 
 
 def test_user_edit_rejects_duplicate_username(client):
@@ -1538,6 +1963,9 @@ def test_daily_reports_login_returns_to_requested_date_and_rejects_external_next
 
 def test_daily_report_routes_require_daily_reports_read_permission(client):
     store = app.config["FIRESTORE_STORE"]
+    store.save_non_admin_permissions(
+        set(store.get_non_admin_permissions()) - {"daily_reports.read"}
+    )
     store.save_user({
         "id": "report-user",
         "username": "report-user",

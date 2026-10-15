@@ -8,6 +8,7 @@ PERMISSION_IDENTIFIERS = frozenset(
         "dashboard.read",
         "profile.edit",
         "google_photos.use",
+        "camera_upload",
         "trade_builder.read",
         "trade_builder.write",
         "trade_builder.delete",
@@ -45,31 +46,43 @@ PERMISSION_IDENTIFIERS = frozenset(
 
 SUPER_ADMIN_PERMISSIONS = PERMISSION_IDENTIFIERS
 
-_OPERATIONAL_PERMISSIONS = frozenset(
+DEFAULT_NON_ADMIN_PERMISSIONS = frozenset(
     {
         "dashboard.read",
         "profile.edit",
         "google_photos.use",
-        "labour_payments.read",
-        "labour_payments.create",
+        "camera_upload",
         "daily_reports.read",
         "daily_reports.create",
         "daily_reports.edit",
-        "materials.read",
-        "materials.write",
-        "materials.transactions.write",
         "drawings.read",
-        "drawings.write",
+        "labour_payments.read",
+        "labour_payments.create",
         "ledger.read",
         "owner_scope.read",
         "owner_scope.create",
-        "owner_scope.edit",
-        "building_cost_summary.read",
+        "materials.read",
+        "materials.write",
+        "materials.transactions.write",
         "red_book.read",
         "red_book.create",
-        "red_book.edit",
     }
 )
+
+
+def is_admin_or_super_admin_role(role):
+    normalized = " ".join(
+        str(role or "").replace("_", " ").replace("-", " ").split()
+    ).casefold()
+    return normalized in {
+        "admin",
+        "administrator",
+        "super admin",
+        "super administrator",
+    }
+
+
+_OPERATIONAL_PERMISSIONS = DEFAULT_NON_ADMIN_PERMISSIONS
 
 _BUILT_IN_ROLE_PERMISSIONS = {
     "super_admin": SUPER_ADMIN_PERMISSIONS,
@@ -114,7 +127,11 @@ def _custom_role_permissions(user, role_definition):
     )
 
 
-def compile_effective_permissions(user, custom_role_definition=None):
+def compile_effective_permissions(
+    user,
+    custom_role_definition=None,
+    non_admin_permissions=None,
+):
     """Compile trusted role data into the user's allowlisted effective permissions.
 
     Trade Builder remains Super Admin only, and custom roles default deny because
@@ -125,7 +142,17 @@ def compile_effective_permissions(user, custom_role_definition=None):
         return frozenset()
 
     role = str(user.get("role") or "").strip().casefold()
+    if role == "super_admin":
+        return SUPER_ADMIN_PERMISSIONS
+    if is_admin_or_super_admin_role(role):
+        return frozenset()
     if role in _BUILT_IN_ROLE_PERMISSIONS:
+        if non_admin_permissions is not None:
+            return frozenset(
+                permission
+                for permission in non_admin_permissions
+                if isinstance(permission, str) and permission in PERMISSION_IDENTIFIERS
+            )
         return _BUILT_IN_ROLE_PERMISSIONS[role]
 
     if not role:

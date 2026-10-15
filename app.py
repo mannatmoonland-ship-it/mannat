@@ -59,7 +59,12 @@ from owner_scope import (
     get_owner_scope_data,
     update_owner_scope_item,
 )
-from permission_policy import compile_effective_permissions
+from permission_policy import (
+    DEFAULT_NON_ADMIN_PERMISSIONS,
+    PERMISSION_IDENTIFIERS,
+    compile_effective_permissions,
+    is_admin_or_super_admin_role,
+)
 
 load_dotenv()
 
@@ -328,6 +333,7 @@ SMS_OTP_PHONE_LIMIT = 3
 SMS_OTP_TTL_SECONDS = 300
 SMS_OTP_MAX_VERIFY_ATTEMPTS = 5
 PASSWORD_RESET_RESPONSE = "If an eligible account was found, reset instructions will be sent to its saved email address."
+PASSWORD_RESET_SENT_RESPONSE = "Password reset instructions have been sent to {email}. Check your inbox and spam folder."
 LEGACY_SHARED_TEMP_PASSWORD = "password"
 
 if not os.environ.get("FIREBASE_PROJECT_ID") and not IS_PRODUCTION_ENVIRONMENT:
@@ -609,6 +615,77 @@ ROLE_PERMISSIONS = {
     "office_staff": list(OPERATIONAL_PERMISSIONS),
     "supervisor": list(OPERATIONAL_PERMISSIONS),
 }
+STAFF_PERMISSION_GROUPS = (
+    (
+        "Account",
+        (
+            ("dashboard.read", "View Dashboard"),
+            ("profile.edit", "Edit own profile"),
+            ("google_photos.use", "Use Google Photos"),
+            ("camera_upload", "Allow camera uploads"),
+        ),
+    ),
+    (
+        "Daily Reports",
+        (
+            ("daily_reports.read", "View reports"),
+            ("daily_reports.create", "Create reports"),
+            ("daily_reports.edit", "Edit reports"),
+            ("daily_reports.delete", "Delete reports"),
+        ),
+    ),
+    (
+        "Construction",
+        (
+            ("trade_builder.read", "View Trade Builder"),
+            ("trade_builder.write", "Edit Trade Builder"),
+            ("trade_builder.delete", "Delete trades"),
+            ("drawings.read", "View drawings"),
+            ("drawings.write", "Edit drawings"),
+            ("drawings.delete", "Delete drawings"),
+        ),
+    ),
+    (
+        "Finance",
+        (
+            ("labour_payments.read", "View labour payments"),
+            ("labour_payments.create", "Create labour payments"),
+            ("labour_payments.edit", "Edit labour payments"),
+            ("labour_payments.delete", "Delete labour payments"),
+            ("ledger.read", "View ledger"),
+            ("contract_values.edit", "Edit contract values"),
+            ("owner_scope.read", "View Owner Scope"),
+            ("owner_scope.create", "Create Owner Scope entries"),
+            ("owner_scope.edit", "Edit Owner Scope entries"),
+            ("owner_scope.delete", "Delete Owner Scope entries"),
+            ("building_cost_summary.read", "View building cost summaries"),
+        ),
+    ),
+    (
+        "Materials",
+        (
+            ("materials.read", "View materials"),
+            ("materials.write", "Manage materials"),
+            ("materials.delete", "Delete materials"),
+            ("materials.transactions.write", "Create material transactions"),
+            ("materials.transactions.delete", "Delete material transactions"),
+        ),
+    ),
+    (
+        "Red Book",
+        (
+            ("red_book.read", "View Red Book"),
+            ("red_book.create", "Add Red Book entries"),
+            ("red_book.edit", "Edit Red Book entries"),
+            ("red_book.delete", "Delete Red Book entries"),
+        ),
+    ),
+)
+CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS = frozenset(
+    permission_id
+    for _group_name, permissions in STAFF_PERMISSION_GROUPS
+    for permission_id, _permission_label in permissions
+) & PERMISSION_IDENTIFIERS
 CAMERA_AUTH_WINDOW_SECONDS = 900
 CAMERA_AUTH_MAX_ATTEMPTS = 5
 CAMERA_AUTH_GLOBAL_MAX_ATTEMPTS = 200
@@ -1002,6 +1079,7 @@ class InMemoryFirestoreStore:
         self.drawings = {}
         self.red_book_items = {}
         self.custom_staff_types = {}
+        self.non_admin_permissions = set(DEFAULT_NON_ADMIN_PERMISSIONS)
         self.audit_log = []
         self.camera_auth_attempts = {}
         self._password_reset_lock = threading.Lock()
@@ -1650,6 +1728,15 @@ class InMemoryFirestoreStore:
 
     def list_custom_staff_types(self):
         return [dict(item) for item in self.custom_staff_types.values()]
+
+    def get_non_admin_permissions(self):
+        return sorted(self.non_admin_permissions)
+
+    def save_non_admin_permissions(self, permissions):
+        validated = set(permissions)
+        if validated - CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS:
+            raise ValueError("One or more non-admin permissions are not supported.")
+        self.non_admin_permissions = validated
 
     def append_audit(self, entry):
         self.audit_log.append({
@@ -2819,6 +2906,36 @@ class FirebaseFirestoreStore:
         self._collection("custom_staff_types").document(staff_type_id).set(staff_type, merge=True)
         return dict(staff_type)
 
+    def get_non_admin_permissions(self):
+        snapshot = self._collection("application_settings").document(
+            "non_admin_permissions"
+        ).get()
+        if not snapshot.exists:
+            return sorted(DEFAULT_NON_ADMIN_PERMISSIONS)
+        settings = snapshot.to_dict() or {}
+        permissions = settings.get("permissions")
+        if not isinstance(permissions, (list, tuple, set, frozenset)):
+            raise ValueError("Saved non-admin permissions are invalid.")
+        return sorted({
+            permission
+            for permission in permissions
+            if isinstance(permission, str)
+            and permission in CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS
+        })
+
+    def save_non_admin_permissions(self, permissions):
+        validated = sorted(set(permissions))
+        unsupported = set(validated) - CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS
+        if unsupported:
+            raise ValueError("One or more non-admin permissions are not supported.")
+        self._collection("application_settings").document(
+            "non_admin_permissions"
+        ).set({
+            "permissions": validated,
+            "updated_at": iso_now(),
+        })
+        return validated
+
     def delete_custom_staff_type(self, staff_type_id):
         self._collection("custom_staff_types").document(staff_type_id).delete()
 
@@ -3911,7 +4028,13 @@ def firebase_custom_token_api():
     try:
         store = get_user_store()
         custom_role_definition = _custom_role_definition_for_user(user, store)
-        permissions = sorted(compile_effective_permissions(user, custom_role_definition))
+        permissions = sorted(
+            compile_effective_permissions(
+                user,
+                custom_role_definition,
+                get_non_admin_permissions(),
+            )
+        )
         claims = {
             "role": str(user["role"]),
             "perms": permissions,
@@ -4075,6 +4198,66 @@ def is_super_admin(user):
     return bool(user) and str(user.get("role", "")).lower() == "super_admin"
 
 
+def _is_admin_or_super_admin_user(user):
+    return any(
+        is_admin_or_super_admin_role(user.get(field))
+        for field in ("role", "custom_staff_type")
+    )
+
+
+def get_non_admin_permissions():
+    store = get_user_store()
+    permission_loader = getattr(store, "get_non_admin_permissions", None)
+    if not callable(permission_loader):
+        return set(DEFAULT_NON_ADMIN_PERMISSIONS)
+    permissions = permission_loader()
+    if not isinstance(permissions, (list, tuple, set, frozenset)):
+        raise ValueError("Saved non-admin permissions are invalid.")
+    return {
+        permission
+        for permission in permissions
+        if isinstance(permission, str)
+        and permission in CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS
+    }
+
+
+def update_shared_non_admin_permissions(store, permissions, actor_id):
+    validated_permissions = sorted(set(permissions))
+    unsupported = set(validated_permissions) - CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS
+    if unsupported:
+        raise ValueError("One or more non-admin permissions are not supported.")
+
+    previous_permissions = get_non_admin_permissions()
+    if validated_permissions == sorted(previous_permissions):
+        return False
+
+    store.save_non_admin_permissions(validated_permissions)
+    for staff_type in store.list_custom_staff_types():
+        if is_admin_or_super_admin_role(staff_type.get("name")):
+            continue
+        staff_type["permissions"] = list(validated_permissions)
+        staff_type["updated_at"] = iso_now()
+        store.save_custom_staff_type(staff_type)
+
+    for user in store.list_users():
+        if _is_admin_or_super_admin_user(user):
+            continue
+        user["permissions"] = list(validated_permissions)
+        user["default_permissions_version"] = 1
+        invalidate_user_sessions(
+            user.get("id"),
+            user=user,
+            increment_authorization_version=True,
+        )
+    add_audit_log(
+        actor_id,
+        "non_admin_permissions_updated",
+        "Updated shared permissions for all non-admin accounts",
+        None,
+    )
+    return True
+
+
 def get_effective_permissions(user):
     if not user:
         return set()
@@ -4085,6 +4268,17 @@ def get_effective_permissions(user):
     }
     role = str(user.get("role", "")).strip().lower()
     permissions.update(ROLE_PERMISSIONS.get(role, []))
+    if role == "super_admin":
+        permissions.update(PERMISSION_IDENTIFIERS)
+    else:
+        store = get_user_store()
+        permissions.update(
+            compile_effective_permissions(
+                user,
+                _custom_role_definition_for_user(user, store),
+                get_non_admin_permissions(),
+            )
+        )
     return permissions
 
 
@@ -4726,6 +4920,7 @@ def password_reset_request():
         submitted_csrf = request.form.get("csrf_token", "")
         user_identifier = (request.form.get("user_identifier") or request.form.get("user_id") or "").strip()
         csrf_valid = bool(submitted_csrf) and hmac.compare_digest(csrf_token, submitted_csrf)
+        response_message = PASSWORD_RESET_RESPONSE
 
         if csrf_valid and allow_password_reset_request(request.remote_addr, user_identifier):
             try:
@@ -4751,6 +4946,9 @@ def password_reset_request():
                             store,
                             allow_unverified_mobile=bool(user.get("must_change_password")),
                         )
+                        response_message = PASSWORD_RESET_SENT_RESPONSE.format(
+                            email=mask_password_reset_email(saved_email)
+                        )
                     except Exception as error:  # Keep SMTP details and reset tokens out of logs.
                         app.logger.warning("Password reset email delivery failed (%s).", type(error).__name__)
                 elif eligible and not base_url:
@@ -4758,10 +4956,25 @@ def password_reset_request():
             except Exception as error:
                 app.logger.warning("Password reset request could not be processed (%s).", type(error).__name__)
 
-        flash(PASSWORD_RESET_RESPONSE, "success")
+        flash(response_message, "success")
         return redirect(url_for("password_reset_request"))
 
     return render_template("password_reset_request.html", csrf_token=csrf_token)
+
+
+def mask_password_reset_email(email):
+    local_part, separator, domain = str(email or "").strip().rpartition("@")
+    if not separator or not local_part or not domain:
+        raise ValueError("A valid email address is required for password reset confirmation.")
+    if len(local_part) <= 2:
+        masked_local_part = "*" * 8
+    else:
+        masked_local_part = (
+            local_part[0]
+            + "*" * max(8, len(local_part) - 2)
+            + local_part[-1]
+        )
+    return f"{masked_local_part}@{domain}"
 
 
 def _password_reset_csrf_valid(payload):
@@ -5284,7 +5497,42 @@ def user_management_page():
     store = get_user_store()
     users = sorted(store.list_users(), key=lambda item: item.get("username", "").lower())
     custom_types = store.list_custom_staff_types()
-    return render_template("user_management.html", users=users, custom_types=custom_types, current_user=get_current_user())
+    for custom_type in custom_types:
+        custom_type["permissions"] = _normalize_custom_staff_type_permissions(
+            custom_type.get("permissions")
+        )
+    return render_template(
+        "user_management.html",
+        users=users,
+        custom_types=custom_types,
+        permission_groups=STAFF_PERMISSION_GROUPS,
+        default_non_admin_permissions=get_non_admin_permissions(),
+        current_user=get_current_user(),
+    )
+
+
+def _normalize_custom_staff_type_permissions(permissions):
+    if not isinstance(permissions, (list, tuple, set, frozenset)):
+        return []
+    return sorted({
+        permission
+        for permission in permissions
+        if isinstance(permission, str) and permission in CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS
+    })
+
+
+def _custom_staff_type_permissions_from_form(existing_permissions=None):
+    configured = request.form.get("permissions_configured") == "true"
+    if configured:
+        requested_permissions = request.form.getlist("permissions")
+        unsupported = set(requested_permissions) - CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS
+        if unsupported:
+            return None, "One or more selected permissions are not supported."
+        return sorted(set(requested_permissions)), None
+
+    if existing_permissions is None:
+        return sorted(get_non_admin_permissions()), None
+    return _normalize_custom_staff_type_permissions(existing_permissions), None
 
 
 @app.route("/user-management/create", methods=["POST"])
@@ -5343,6 +5591,9 @@ def user_management_create():
         "permissions": list(ROLE_PERMISSIONS.get(role, [])),
         "created_by": get_current_user().get("id"),
     }
+    if not is_admin_or_super_admin_role(role):
+        user["permissions"] = sorted(get_non_admin_permissions())
+        user["default_permissions_version"] = 1
     get_user_store().save_user(user)
     add_audit_log(get_current_user().get("id"), "user_created", f"Created user {username} with role {role}", user["id"])
     try:
@@ -5369,6 +5620,15 @@ def custom_staff_type_create():
     if not type_name:
         flash("Staff type name is required.", "error")
         return redirect(url_for("user_management_page"))
+    permissions, permission_error = _custom_staff_type_permissions_from_form()
+    if permission_error:
+        flash(permission_error, "error")
+        return redirect(url_for("user_management_page"))
+    if (
+        is_admin_or_super_admin_role(type_name)
+        and request.form.get("permissions_configured") != "true"
+    ):
+        permissions = []
     if is_protected_staff_type_name(type_name):
         flash("That name is reserved for a built-in role and cannot be used as a custom staff type.", "error")
         return redirect(url_for("user_management_page"))
@@ -5378,10 +5638,16 @@ def custom_staff_type_create():
     staff_type = {
         "id": uuid.uuid4().hex,
         "name": type_name,
+        "permissions": permissions,
         "created_by": get_current_user().get("id"),
         "created_at": iso_now(),
     }
     get_user_store().save_custom_staff_type(staff_type)
+    update_shared_non_admin_permissions(
+        get_user_store(),
+        permissions,
+        get_current_user().get("id"),
+    )
     add_audit_log(get_current_user().get("id"), "custom_staff_type_created", f"Created custom staff type {type_name}", None)
     flash("Custom staff type created.", "success")
     return redirect(url_for("user_management_page"))
@@ -5425,16 +5691,33 @@ def custom_staff_type_edit(staff_type_id):
         return redirect(url_for("user_management_page"))
 
     previous_name = normalize_staff_type_name(target.get("name", ""))
-    previous_permissions = target.get("permissions")
+    original_permissions = _normalize_custom_staff_type_permissions(target.get("permissions"))
+    new_permissions, permission_error = _custom_staff_type_permissions_from_form(original_permissions)
+    if permission_error:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"success": False, "message": permission_error}), 400
+        flash(permission_error, "error")
+        return redirect(url_for("user_management_page"))
     assigned_users = [
         user for user in store.list_users()
         if staff_type_names_match(user.get("role", ""), previous_name)
         or staff_type_names_match(user.get("custom_staff_type", ""), previous_name)
     ]
     target["name"] = new_name
+    target["permissions"] = new_permissions
     target["updated_at"] = iso_now()
     store.save_custom_staff_type(target)
-    if previous_name != new_name or previous_permissions != target.get("permissions"):
+    shared_permissions_changed = (
+        new_permissions != original_permissions
+        and set(new_permissions) != get_non_admin_permissions()
+    )
+    if shared_permissions_changed:
+        update_shared_non_admin_permissions(
+            store,
+            new_permissions,
+            get_current_user().get("id"),
+        )
+    elif previous_name != new_name:
         for assigned_user in assigned_users:
             invalidate_user_sessions(
                 assigned_user.get("id"),
@@ -5565,6 +5848,26 @@ def user_management_edit(user_id):
         flash(message, "error")
         return redirect(url_for("user_management_details", user_id=user_id))
 
+    non_admin_permissions_update = None
+    current_non_admin_permissions = get_non_admin_permissions()
+    if request.form.get("permissions_configured") == "true":
+        if is_admin_or_super_admin_role(new_role):
+            message = "Admin and Super Admin permissions cannot be changed here."
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return jsonify({"success": False, "message": message}), 400
+            flash(message, "error")
+            return redirect(url_for("user_management_details", user_id=user_id))
+
+        requested_permissions = request.form.getlist("permissions")
+        unsupported_permissions = set(requested_permissions) - CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS
+        if unsupported_permissions:
+            message = "One or more selected permissions are not supported."
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return jsonify({"success": False, "message": message}), 400
+            flash(message, "error")
+            return redirect(url_for("user_management_details", user_id=user_id))
+        non_admin_permissions_update = sorted(set(requested_permissions))
+
     if new_custom_staff_type:
         custom_types = store.list_custom_staff_types()
         if not any(staff_type_names_match(item.get("name", ""), new_custom_staff_type) for item in custom_types):
@@ -5603,7 +5906,10 @@ def user_management_edit(user_id):
                 flash(message, "error")
                 return redirect(url_for("user_management_details", user_id=user_id))
 
-    camera_upload_enabled = request.form.get("camera_upload") == "true"
+    shared_permissions_changed = (
+        non_admin_permissions_update is not None
+        and set(non_admin_permissions_update) != current_non_admin_permissions
+    )
     changes = {}
     for field_name, new_value in {
         "username": new_username,
@@ -5613,11 +5919,8 @@ def user_management_edit(user_id):
         "role": new_role,
         "custom_staff_type": new_custom_staff_type or target.get("custom_staff_type", ""),
         "is_active": new_is_active,
-        "camera_upload": camera_upload_enabled,
     }.items():
         previous_value = target.get(field_name)
-        if field_name == "camera_upload":
-            previous_value = has_permission(target, "camera_upload")
         if previous_value != new_value:
             changes[field_name] = {"previous": previous_value, "updated": new_value}
 
@@ -5640,8 +5943,9 @@ def user_management_edit(user_id):
     target["status"] = "active" if new_is_active else "inactive"
     target["is_active"] = new_is_active
     target["permissions"] = list(ROLE_PERMISSIONS.get(new_role, []))
-    if camera_upload_enabled:
-        target["permissions"].append("camera_upload")
+    if not is_admin_or_super_admin_role(new_role):
+        target["permissions"] = sorted(current_non_admin_permissions)
+        target["default_permissions_version"] = 1
     target["username_lower"] = new_username.lower()
     target["updated_at"] = iso_now()
     updated_authorization = (
@@ -5654,7 +5958,7 @@ def user_management_edit(user_id):
             if isinstance(permission, str)
         })),
     )
-    if previous_authorization != updated_authorization:
+    if previous_authorization != updated_authorization and not shared_permissions_changed:
         invalidate_user_sessions(
             target["id"],
             user=target,
@@ -5663,6 +5967,13 @@ def user_management_edit(user_id):
     else:
         store.save_user(target)
 
+    if shared_permissions_changed:
+        shared_permissions_changed = update_shared_non_admin_permissions(
+            store,
+            non_admin_permissions_update,
+            actor.get("id"),
+        )
+
     details_payload = {
         "changed_fields": list(changes.keys()),
         "changes": changes,
@@ -5670,9 +5981,13 @@ def user_management_edit(user_id):
     add_audit_log(actor.get("id"), "user_updated", json.dumps(details_payload, ensure_ascii=False), target["id"])
 
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-        return jsonify({"success": True, "message": "User details updated.", "redirect": url_for("user_management_details", user_id=user_id)})
+        message = "User details and shared non-admin permissions updated." if shared_permissions_changed else "User details updated."
+        return jsonify({"success": True, "message": message, "redirect": url_for("user_management_details", user_id=user_id)})
 
-    flash("User details updated.", "success")
+    flash(
+        "User details and shared non-admin permissions updated." if shared_permissions_changed else "User details updated.",
+        "success",
+    )
     return redirect(url_for("user_management_details", user_id=user_id))
 
 
@@ -5797,17 +6112,51 @@ def user_management_delete_user(user_id):
 @require_login
 @require_role("super_admin")
 def user_management_details(user_id):
-    user = get_user_store().get_user(user_id)
+    store = get_user_store()
+    user = store.get_user(user_id)
     if not user:
         flash("User not found.", "error")
         return redirect(url_for("user_management_page"))
+
+    custom_types = store.list_custom_staff_types()
+    role_permissions = {}
+    for role_name in list_available_roles():
+        role_user = {
+            "role": role_name,
+            "custom_staff_type": "",
+            "status": "active",
+            "is_active": True,
+        }
+        role_definition = next(
+            (
+                item
+                for item in custom_types
+                if staff_type_names_match(item.get("name", ""), role_name)
+            ),
+            None,
+        )
+        role_permissions[role_name] = sorted(
+            compile_effective_permissions(
+                role_user,
+                role_definition,
+                get_non_admin_permissions(),
+            )
+        )
+
     return render_template(
         "user_details.html",
         user=user,
         current_user=get_current_user(),
         roles=list_available_roles(),
-        custom_types=get_user_store().list_custom_staff_types(),
-        camera_upload_enabled=has_permission(user, "camera_upload"),
+        custom_types=custom_types,
+        permission_groups=STAFF_PERMISSION_GROUPS,
+        default_non_admin_permissions=get_non_admin_permissions(),
+        role_permissions=role_permissions,
+        effective_permissions=compile_effective_permissions(
+            user,
+            _custom_role_definition_for_user(user, store),
+            get_non_admin_permissions(),
+        ),
     )
 
 
@@ -7944,7 +8293,11 @@ def _apply_payment_transaction_mutation(trade, action, transaction_id, payment_d
 def _user_has_compiled_permission(user, permission):
     store = get_user_store()
     role_definition = _custom_role_definition_for_user(user, store)
-    return permission in compile_effective_permissions(user, role_definition)
+    return permission in compile_effective_permissions(
+        user,
+        role_definition,
+        get_non_admin_permissions(),
+    )
 
 
 def _labour_payment_api_response(payload, status=200):
@@ -9137,7 +9490,12 @@ def delete_daily_record(record_id):
         app.logger.error("Daily Report delete authorization failed (%s).", type(error).__name__)
         return jsonify(error="Unable to verify Daily Report permissions."), 503
     if not permitted:
-        return jsonify(error="You do not have permission to delete Daily Reports."), 403
+        return jsonify(
+            error=(
+                "You do not have the required privileges to delete this daily record. "
+                "Please contact a Super Admin or Admin to request deletion."
+            )
+        ), 403
 
     if not _daily_record_api_csrf_valid():
         return jsonify(error="Your session expired. Reload the page and try again."), 403

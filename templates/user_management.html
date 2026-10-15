@@ -37,6 +37,18 @@
         .staff-type-action { padding:8px 10px; border:none; border-radius:8px; font-weight:600; cursor:pointer; }
         .staff-type-action.secondary { background:#334155; color:white; }
         .staff-type-action.danger { background:#dc2626; color:white; }
+        .permission-groups { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; max-height:48vh; overflow:auto; padding:2px; }
+        .permission-group { min-width:0; margin:0; padding:12px; border:1px solid #e2e8f0; border-radius:10px; }
+        .permission-group legend { padding:0 6px; color:#334155; font-size:13px; font-weight:700; }
+        .permission-option { display:flex; align-items:flex-start; gap:8px; margin:8px 0; color:#334155; font-size:13px; font-weight:500; }
+        .permission-option input { width:auto; margin:2px 0 0; }
+        .permission-help { margin:0; color:#64748b; font-size:12px; line-height:1.5; }
+        .staff-type-dialog { width:min(860px, calc(100vw - 32px)); max-height:calc(100vh - 32px); padding:22px; border:0; border-radius:16px; box-shadow:0 20px 50px rgba(15,23,42,.28); }
+        .staff-type-dialog::backdrop { background:rgba(15,23,42,.55); }
+        .staff-type-dialog form { gap:14px; }
+        .staff-type-dialog h2 { margin:0; }
+        .staff-type-dialog input[type="text"] { width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:10px; }
+        .staff-type-dialog-actions { display:flex; justify-content:flex-end; gap:10px; }
         .status-pill { display:inline-block; padding:4px 8px; border-radius:999px; font-size:11px; font-weight:600; }
         .active { background:#dcfce7; color:#166534; }
         .inactive { background:#fee2e2; color:#991b1b; }
@@ -46,13 +58,30 @@
         @media (max-width: 760px) {
             .grid, .field-row { grid-template-columns: 1fr; }
             .staff-type-item { flex-direction:column; align-items:flex-start; }
+            .permission-groups { grid-template-columns:1fr; max-height:44vh; }
         }
     </style>
     <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='user_permissions.css') }}">
 </head>
-<body data-csrf-token="{{ authenticated_form_csrf_token() }}">
+<body class="user-management-page" data-csrf-token="{{ authenticated_form_csrf_token() }}">
+{% macro permission_fields(prefix) %}
+    <div class="permission-groups">
+        {% for group_name, permissions in permission_groups %}
+            <fieldset class="permission-group">
+                <legend>{{ group_name }}</legend>
+                {% for permission_id, permission_label in permissions %}
+                    <label class="permission-option" for="{{ prefix }}-{{ permission_id }}">
+                        <input id="{{ prefix }}-{{ permission_id }}" name="permissions" type="checkbox" value="{{ permission_id }}" {% if permission_id in default_non_admin_permissions %}checked{% endif %}>
+                        <span>{{ permission_label }}</span>
+                    </label>
+                {% endfor %}
+            </fieldset>
+        {% endfor %}
+    </div>
+{% endmacro %}
 {% include "_page_loader.html" %}
     <header class="mm-app-header">
         {% include '_navigation.html' %}
@@ -114,6 +143,7 @@
                                 <input id="custom_staff_type" name="custom_staff_type" type="text" placeholder="Optional custom type">
                             </div>
                         </div>
+                        <p class="permission-help">Select a custom staff type in Role to apply its shared permissions. Create or edit staff types to manage those permissions.</p>
                         <button type="submit">Create User</button>
                     </form>
                 </div>
@@ -126,17 +156,20 @@
                             <label for="type_name">Staff Type Name</label>
                             <input id="type_name" name="type_name" type="text" required>
                         </div>
+                        <input type="hidden" name="permissions_configured" value="true">
+                        <p class="permission-help">These permissions are shared across every non-admin account. Super Admin permissions are managed separately.</p>
+                        {{ permission_fields('create-staff-type') }}
                         <button class="secondary" type="submit">Add Staff Type</button>
                     </form>
 
-                    <h3 style="margin-top:28px;">Custom Staff Types</h3>
+                    <h3 id="customStaffTypes" style="margin-top:28px;">Custom Staff Types</h3>
                     {% if custom_types %}
                         <div class="staff-type-list">
                             {% for item in custom_types %}
                                 <div class="staff-type-item">
-                                    <span>{{ item.name }}</span>
+                                    <span>{{ item.name }} <small>({{ (item.permissions or [])|length }} permissions)</small></span>
                                     <div class="staff-type-actions">
-                                        <button type="button" class="staff-type-action secondary staff-type-edit" data-staff-type-id="{{ item.id }}" data-staff-type-name="{{ item.name }}">Edit</button>
+                                        <button type="button" class="staff-type-action secondary staff-type-edit" data-staff-type-id="{{ item.id }}" data-staff-type-name="{{ item.name }}" data-staff-type-permissions="{{ (item.permissions or [])|tojson|forceescape }}">Edit</button>
                                         <button type="button" class="staff-type-action danger staff-type-delete" data-staff-type-id="{{ item.id }}" data-staff-type-name="{{ item.name }}">Delete</button>
                                     </div>
                                 </div>
@@ -203,13 +236,54 @@
         </section>
     </main>
 
+    <dialog id="staffTypeEditDialog" class="staff-type-dialog" aria-labelledby="staffTypeEditTitle">
+        <form id="staffTypeEditForm">
+            <h2 id="staffTypeEditTitle">Edit Staff Type</h2>
+            <input id="editStaffTypeId" type="hidden">
+            <input type="hidden" name="csrf_token" value="{{ authenticated_form_csrf_token() }}">
+            <input type="hidden" name="permissions_configured" value="true">
+            <div>
+                <label for="editStaffTypeName">Staff Type Name</label>
+                <input id="editStaffTypeName" name="type_name" type="text" required>
+            </div>
+            <p class="permission-help">These permissions are shared across every non-admin account. Changes take effect after affected users sign in again.</p>
+            {{ permission_fields('edit-staff-type') }}
+            <div class="staff-type-dialog-actions">
+                <button type="button" class="secondary" id="cancelStaffTypeEdit">Cancel</button>
+                <button type="submit" id="saveStaffTypeEdit">Save Staff Type</button>
+            </div>
+        </form>
+    </dialog>
+
     <script type="module">
-        import { showConfirm, showConfirmDialog, showError, showPrompt, showSuccess } from "{{ url_for('static', filename='dialogs.js') }}";
+        import { showConfirm, showConfirmDialog, showError, showSuccess } from "{{ url_for('static', filename='dialogs.js') }}";
         import { getAnimalAvatar, renderAnimalAvatar } from "{{ url_for('static', filename='animal_avatars.js') }}";
 
         document.querySelectorAll(".user-animal-avatar").forEach(avatar => {
             const selectedAvatar = getAnimalAvatar(avatar.dataset.animalAvatar);
             avatar.innerHTML = renderAnimalAvatar(selectedAvatar.id);
+        });
+
+        const createStaffTypeName = document.getElementById("type_name");
+        const createStaffTypePermissionInputs = [
+            ...createStaffTypeName.closest("form").querySelectorAll('input[name="permissions"]')
+        ];
+        const defaultNonAdminPermissions = new Set({{ default_non_admin_permissions|list|tojson }});
+        let createStaffTypeIsPrivileged = false;
+        createStaffTypeName.addEventListener("input", () => {
+            const normalizedName = createStaffTypeName.value
+                .replace(/[_-]/g, " ")
+                .trim()
+                .replace(/\s+/g, " ")
+                .toLocaleLowerCase();
+            const isPrivileged = ["admin", "administrator", "super admin", "super administrator"]
+                .includes(normalizedName);
+            if (isPrivileged !== createStaffTypeIsPrivileged) {
+                createStaffTypePermissionInputs.forEach(input => {
+                    input.checked = !isPrivileged && defaultNonAdminPermissions.has(input.value);
+                });
+                createStaffTypeIsPrivileged = isPrivileged;
+            }
         });
 
         document.querySelectorAll("form[data-confirm]").forEach(form => {
@@ -222,46 +296,71 @@
             });
         });
 
-        async function handleCustomStaffTypeEdit(staffTypeId, currentName) {
-            const nextName = await showPrompt("Enter the updated staff type name.", currentName, "Edit Staff Type", "Save", "Cancel");
-            const normalizedName = String(nextName ?? "").replace(/\s+/g, " ").trim();
+        const staffTypeEditDialog = document.getElementById("staffTypeEditDialog");
+        const staffTypeEditForm = document.getElementById("staffTypeEditForm");
+        const staffTypeEditName = document.getElementById("editStaffTypeName");
+        const staffTypeEditId = document.getElementById("editStaffTypeId");
+        const staffTypeEditSave = document.getElementById("saveStaffTypeEdit");
 
-            if (!normalizedName) {
-                await showError("Staff type name is required.", "Staff Type");
-                return;
-            }
-            if (normalizedName === currentName) {
-                return;
-            }
-
-            let response;
+        async function openCustomStaffTypeEdit(button) {
+            staffTypeEditId.value = button.dataset.staffTypeId;
+            staffTypeEditName.value = button.dataset.staffTypeName;
+            let permissions;
             try {
-                response = await fetch(`/user-management/custom-type/${staffTypeId}/edit`, {
+                permissions = JSON.parse(button.dataset.staffTypePermissions || "[]");
+            } catch (error) {
+                console.error("Unable to read staff type permissions.", error);
+                await showError("Unable to load this staff type's permissions.", "Staff Type");
+                return;
+            }
+            if (!Array.isArray(permissions)) {
+                await showError("Unable to load this staff type's permissions.", "Staff Type");
+                return;
+            }
+
+            const selectedPermissions = new Set(permissions);
+            staffTypeEditForm.querySelectorAll('input[name="permissions"]').forEach(input => {
+                input.checked = selectedPermissions.has(input.value);
+            });
+            staffTypeEditDialog.showModal();
+            staffTypeEditName.focus();
+        }
+
+        document.getElementById("cancelStaffTypeEdit").addEventListener("click", () => {
+            staffTypeEditDialog.close();
+        });
+
+        staffTypeEditForm.addEventListener("submit", async event => {
+            event.preventDefault();
+            staffTypeEditSave.disabled = true;
+            staffTypeEditSave.textContent = "Saving...";
+
+            try {
+                const response = await fetch(`/user-management/custom-type/${encodeURIComponent(staffTypeEditId.value)}/edit`, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                         "X-Requested-With": "XMLHttpRequest"
                     },
-                    body: new URLSearchParams({
-                        type_name: normalizedName,
-                        csrf_token: document.body.dataset.csrfToken
-                    }).toString()
+                    body: new URLSearchParams(new FormData(staffTypeEditForm)).toString()
                 });
+                const result = await response.json().catch(() => ({ success: false, message: "Unable to update staff type." }));
+                if (!response.ok || result.success === false) {
+                    await showError(result.message || "Unable to update staff type.", "Staff Type");
+                    return;
+                }
+
+                staffTypeEditDialog.close();
+                await showSuccess(result.message || "Custom staff type updated.", "Staff Type");
+                window.location.reload();
             } catch (error) {
                 console.error("Unable to update staff type:", error);
                 await showError("Unable to update staff type. Please check your connection and try again.", "Staff Type");
-                return;
+            } finally {
+                staffTypeEditSave.disabled = false;
+                staffTypeEditSave.textContent = "Save Staff Type";
             }
-
-            const result = await response.json().catch(() => ({ success: false, message: "Unable to update staff type." }));
-            if (!response.ok || result.success === false) {
-                await showError(result.message || "Unable to update staff type.", "Staff Type");
-                return;
-            }
-
-            await showSuccess(result.message || "Custom staff type updated.", "Staff Type");
-            window.location.reload();
-        }
+        });
 
         async function handleCustomStaffTypeDelete(staffTypeId, currentName) {
             const confirmed = await showConfirmDialog({
@@ -306,7 +405,7 @@
         }
 
         document.querySelectorAll(".staff-type-edit").forEach(button => {
-            button.addEventListener("click", () => handleCustomStaffTypeEdit(button.dataset.staffTypeId, button.dataset.staffTypeName));
+            button.addEventListener("click", () => openCustomStaffTypeEdit(button));
         });
 
         document.querySelectorAll(".staff-type-delete").forEach(button => {

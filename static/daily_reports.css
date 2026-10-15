@@ -624,13 +624,14 @@ h1 {
 
 .dr-modal {
     position: fixed;
-    inset: 0;
+    --dr-modal-top-offset: 82px;
+    inset: var(--dr-modal-top-offset) 0 0;
     background: #0008;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 15px;
-    z-index: 10;
+    z-index: 1001;
 }
 
 .dr-hidden {
@@ -640,10 +641,16 @@ h1 {
 .dr-modalbox {
     background: white;
     width: min(850px, 100%);
-    max-height: 94vh;
+    max-height: calc(100vh - var(--dr-modal-top-offset) - 30px);
     overflow: auto;
     border-radius: 14px;
     padding: 22px;
+}
+
+@media (max-width: 1280px) {
+    .dr-modal {
+        --dr-modal-top-offset: 177px;
+    }
 }
 
 .dr-modalhead {

@@ -1117,7 +1117,16 @@ const DailyReports = (function() {
         }
       });
       if (!response.ok) {
-        throw new Error(`Unable to delete the daily report (${response.status}).`);
+        let errorMessage = `Unable to delete the daily report (${response.status}).`;
+        try {
+          const errorResponse = await response.json();
+          if (typeof errorResponse.error === "string" && errorResponse.error.trim()) {
+            errorMessage = errorResponse.error;
+          }
+        } catch (error) {
+          console.error("Unable to read the Daily Report deletion error response.", error);
+        }
+        throw new Error(errorMessage);
       }
       deletingId = null;
       const deleteModal = $("dr-deleteModal");
@@ -1130,7 +1139,11 @@ const DailyReports = (function() {
       loadCalendarReportDates();
     } catch (error) {
       console.error(error);
-      showToast("Unable to delete the daily report. Please try again.", "error", 5000);
+      showToast(
+        error instanceof Error ? error.message : "Unable to delete the daily report. Please try again.",
+        "error",
+        5000
+      );
     }
   }
 

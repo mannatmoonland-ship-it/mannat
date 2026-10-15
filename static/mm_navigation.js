@@ -5,6 +5,9 @@ document.querySelectorAll("[data-animal-avatar]").forEach(avatar => {
 });
 
 (() => {
+    const supportsNavigationHover = window.matchMedia(
+        "(hover: hover) and (pointer: fine) and (min-width: 1281px)"
+    ).matches;
     const navs = document.querySelectorAll(".mm-top-nav");
 
     navs.forEach(nav => {
@@ -21,8 +24,31 @@ document.querySelectorAll("[data-animal-avatar]").forEach(avatar => {
         parents.forEach(parent => {
             const button = parent.querySelector(".mm-nav-button");
             if (!button) return;
+            let closeTimer;
+
+            if (supportsNavigationHover) {
+                parent.addEventListener("pointerenter", () => {
+                    window.clearTimeout(closeTimer);
+                    closeDropdowns(parent);
+                    parent.classList.add("mm-nav-open");
+                    button.setAttribute("aria-expanded", "true");
+                });
+                parent.addEventListener("pointerleave", () => {
+                    closeTimer = window.setTimeout(() => {
+                        parent.classList.remove("mm-nav-open");
+                        button.setAttribute("aria-expanded", "false");
+                    }, 150);
+                });
+            }
+
             button.addEventListener("click", event => {
                 event.stopPropagation();
+                if (supportsNavigationHover) {
+                    closeDropdowns(parent);
+                    parent.classList.add("mm-nav-open");
+                    button.setAttribute("aria-expanded", "true");
+                    return;
+                }
                 const shouldOpen = !parent.classList.contains("mm-nav-open");
                 closeDropdowns(parent);
                 parent.classList.toggle("mm-nav-open", shouldOpen);
@@ -72,8 +98,23 @@ document.querySelectorAll("[data-animal-avatar]").forEach(avatar => {
             menu.hidden = !shouldOpen;
         };
 
+        let closeTimer;
+        if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+            account.addEventListener("pointerenter", () => {
+                window.clearTimeout(closeTimer);
+                setOpen(true);
+            });
+            account.addEventListener("pointerleave", () => {
+                closeTimer = window.setTimeout(() => setOpen(false), 150);
+            });
+        }
+
         trigger.addEventListener("click", event => {
             event.stopPropagation();
+            if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
+                setOpen(true);
+                return;
+            }
             setOpen(trigger.getAttribute("aria-expanded") !== "true");
         });
 

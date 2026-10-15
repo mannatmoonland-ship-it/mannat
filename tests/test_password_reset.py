@@ -68,7 +68,6 @@ def request_reset_link(client, user_id=USER_ID, base_url="http://office-test.exa
         base_url=base_url,
         headers=headers,
     )
-    assert GENERIC_RESPONSE in response.data
     return response
 
 
@@ -123,8 +122,10 @@ def test_valid_user_id_sends_link_only_to_saved_email_and_stores_hash(client, mo
     sent = []
     monkeypatch.setattr("app.send_email", lambda *args, **kwargs: sent.append((args, kwargs)) or True)
 
-    request_reset_link(client)
+    response = request_reset_link(client)
 
+    assert b"Password reset instructions have been sent to s***********t@example.com." in response.data
+    assert b"saved-account@example.com" not in response.data
     assert len(sent) == 1
     (recipient, subject, body), options = sent[0]
     assert recipient == "saved-account@example.com"
@@ -225,7 +226,7 @@ def test_mismatched_origin_cannot_change_the_reset_link_origin(client, monkeypat
         headers={"Origin": "https://attacker.example.com"},
     )
 
-    assert GENERIC_RESPONSE in response.data
+    assert b"Password reset instructions have been sent to s***********t@example.com." in response.data
     assert len(sent) == 1
     assert f"https://app.example.test/reset-password/{USER_ID}#" in sent[0][2]
     assert "attacker.example.com" not in sent[0][2]
@@ -273,6 +274,30 @@ def test_unknown_user_and_invalid_saved_email_get_same_generic_response(client, 
     assert GENERIC_RESPONSE in unknown.data
     assert all(GENERIC_RESPONSE in response.data for response in invalid_responses)
     assert len(sent) == 0
+
+
+def test_password_reset_email_delivery_failure_keeps_generic_response(client, monkeypatch):
+    def fail_sending_email(*_args, **_kwargs):
+        raise RuntimeError("SMTP unavailable")
+
+    monkeypatch.setattr("app.send_email", fail_sending_email)
+
+    response = request_reset_link(client)
+
+    assert GENERIC_RESPONSE in response.data
+    assert b"saved-account@example.com" not in response.data
+
+
+@pytest.mark.parametrize(
+    ("email", "expected"),
+    [
+        ("hannah.work@gmail.com", "h*********k@gmail.com"),
+        ("ab@example.com", "********@example.com"),
+        ("a@example.com", "********@example.com"),
+    ],
+)
+def test_password_reset_confirmation_masks_email_local_part(email, expected):
+    assert app_module.mask_password_reset_email(email) == expected
 
 
 def test_unverified_mobile_blocks_self_service_and_admin_password_resets(client, monkeypatch):
@@ -470,7 +495,11 @@ def test_reset_request_is_rate_limited_with_generic_response(client, monkeypatch
     monkeypatch.setattr("app.send_email", lambda *args, **kwargs: sent.append((args, kwargs)) or True)
     responses = [request_reset_link(client) for _ in range(app_module.PASSWORD_RESET_USER_LIMIT + 1)]
 
-    assert all(GENERIC_RESPONSE in response.data for response in responses)
+    assert all(
+        b"Password reset instructions have been sent to s***********t@example.com." in response.data
+        for response in responses[:app_module.PASSWORD_RESET_USER_LIMIT]
+    )
+    assert GENERIC_RESPONSE in responses[-1].data
     assert len(sent) == app_module.PASSWORD_RESET_USER_LIMIT
 
 

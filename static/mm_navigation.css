@@ -385,7 +385,7 @@ body:not(.login-page) header.mm-app-header > .mm-app-brand {
 
 .mm-nav-profile-copy { display: grid; gap: 2px; min-width: 0; }
 .mm-nav-profile-copy strong { overflow: hidden; max-width: 150px; color: #000; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.mm-nav-profile-copy small { color: #9db4a8; font-size: 11px; white-space: nowrap; }
+.mm-nav-profile-trigger .mm-nav-profile-copy small { color: #000 !important; font-size: 11px; white-space: nowrap; }
 .mm-nav-account-chevron {
     width: 7px;
     height: 7px;

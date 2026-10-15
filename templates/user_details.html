@@ -19,15 +19,37 @@
         .button-row { display:flex; gap:12px; margin-top:20px; flex-wrap:wrap; }
         a.button, button.button { display:inline-block; text-decoration:none; background:#0ea5e9; color:white; padding:10px 16px; border-radius:10px; border:none; cursor:pointer; font-weight:600; }
         button.button.secondary { background:#334155; }
-        .modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,0.55); display:none; align-items:center; justify-content:center; padding:20px; z-index:50; }
+        .modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,0.55); display:none; align-items:flex-start; justify-content:center; overflow-y:auto; padding:var(--modal-top-offset, 102px) 20px 20px; z-index:1100; }
         .modal-backdrop.open { display:flex; }
-        .modal { width:min(560px, 100%); background:white; border-radius:16px; box-shadow:0 20px 45px rgba(15,23,42,0.18); padding:24px; }
+        .modal { width:min(560px, 100%); max-height:calc(100vh - var(--modal-top-offset, 102px) - 20px); overflow-y:auto; background:white; border-radius:16px; box-shadow:0 20px 45px rgba(15,23,42,0.18); padding:24px; }
         .modal h3 { margin-top:0; margin-bottom:18px; }
         .modal-form { display:grid; gap:14px; }
         .field-row { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:14px; }
         .permission-option { display:flex; align-items:center; gap:8px; }
         .permission-option input { width:auto; margin:0; }
         .permission-option label { margin:0; }
+        .permission-help { margin:18px 0 0; color:#64748b; font-size:13px; line-height:1.5; }
+        .permission-help a { color:#0369a1; font-weight:600; }
+        .permissions-panel { margin-top:24px; padding:18px; border:1px solid #dbe4ee; border-radius:12px; background:#f8fafc; }
+        .permissions-panel h3 { margin:0 0 6px; }
+        .permissions-panel > p { margin:0 0 14px; color:#64748b; font-size:13px; line-height:1.5; }
+        .permissions-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; }
+        .permissions-group { margin:0; padding:12px; border:1px solid #e2e8f0; border-radius:10px; background:white; }
+        .permissions-group legend { padding:0 5px; color:#334155; font-size:12px; font-weight:700; }
+        .permissions-group ul { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
+        .permissions-group li { display:flex; align-items:flex-start; gap:8px; color:#334155; font-size:13px; }
+        .permissions-group li::before { content:"✓"; color:#059669; font-weight:700; }
+        .permissions-group li.permission-unavailable { color:#94a3b8; }
+        .permissions-group li.permission-unavailable::before { content:"–"; color:#94a3b8; }
+        .role-permissions-preview { padding:12px; border:1px solid #dbe4ee; border-radius:10px; background:#f8fafc; }
+        .role-permissions-preview h4 { margin:0 0 8px; }
+        .role-permissions-preview p { margin:0 0 8px; color:#64748b; font-size:12px; }
+        .role-permissions-preview .permissions-grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px; max-height:32vh; overflow-y:auto; }
+        .role-permissions-preview .permissions-group { min-width:0; margin:0; padding:8px; border:1px solid #e2e8f0; border-radius:8px; }
+        .role-permissions-preview .permissions-group legend { padding:0 4px; font-size:11px; font-weight:700; }
+        .role-permissions-preview .permission-option { display:flex; align-items:flex-start; gap:7px; margin:6px 0; font-size:12px; line-height:1.35; }
+        .role-permissions-preview .permission-option input { width:15px; height:15px; flex:0 0 15px; margin:1px 0 0; }
+        .role-permissions-preview .permission-option input:disabled { opacity:.75; }
         label { display:block; margin-bottom:6px; font-size:13px; color:#475569; font-weight:600; }
         input, select { width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:10px; background:white; }
         .modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
@@ -38,11 +60,13 @@
         .flash.warning { background:#fef3c7; color:#92400e; }
         @media (max-width: 760px) {
             .field-row, .grid { grid-template-columns: 1fr; }
+            .permissions-grid, .role-permissions-preview ul { grid-template-columns:1fr; }
         }
     </style>
     <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='user_permissions.css') }}">
 </head>
 <body class="user-details-page">
 {% include "_page_loader.html" %}
@@ -71,6 +95,28 @@
                 <div><div class="label">Status</div><div class="value">{{ 'Active' if user.is_active else 'Inactive' }}</div></div>
                 <div><div class="label">Must Change Password</div><div class="value">{{ 'Yes' if user.must_change_password else 'No' }}</div></div>
             </div>
+            <section class="permissions-panel" aria-labelledby="effectivePermissionsTitle">
+                <h3 id="effectivePermissionsTitle">Current Permissions</h3>
+                <p>These permissions come from the user's role. Custom staff type permissions are shared with everyone assigned that role; camera uploads are managed separately per user.</p>
+                <div class="permissions-grid">
+                    {% for group_name, permissions in permission_groups %}
+                        <fieldset class="permissions-group">
+                            <legend>{{ group_name }}</legend>
+                            <ul>
+                                {% for permission_id, permission_label in permissions %}
+                                    <li{% if permission_id not in effective_permissions %} class="permission-unavailable"{% endif %}>
+                                        {{ permission_label }}{% if permission_id not in effective_permissions %} (not allowed){% endif %}
+                                    </li>
+                                {% endfor %}
+                            </ul>
+                        </fieldset>
+                    {% endfor %}
+                </div>
+            </section>
+            <p class="permission-help">
+                To change this user's permissions, choose a different role below. Custom role permissions apply to everyone assigned that role; create a separate custom staff type for different access.
+                <a href="{{ url_for('user_management_page') }}#customStaffTypes">Manage staff type permissions</a>.
+            </p>
             <div class="button-row">
                 <a class="button secondary" href="{{ url_for('user_management_page') }}">Back to User Management</a>
                 <button type="button" class="button" id="editUserBtn">Edit User</button>
@@ -122,10 +168,24 @@
                         </select>
                     </div>
                 </div>
-                <div class="permission-option">
-                    <input id="editCameraUpload" name="camera_upload" type="checkbox" value="true" {% if camera_upload_enabled %}checked{% endif %}>
-                    <label for="editCameraUpload">Allow camera uploads</label>
-                </div>
+                <input type="hidden" id="permissionsConfigured" name="permissions_configured" value="">
+                <section class="role-permissions-preview" aria-labelledby="rolePermissionsPreviewTitle">
+                    <h4 id="rolePermissionsPreviewTitle">Permissions for selected role</h4>
+                    <p id="rolePermissionsPreviewHelp">Non-admin permissions are shared across all non-admin accounts. Admin and Super Admin access is protected.</p>
+                    <div class="permissions-grid" id="rolePermissionsPreviewList">
+                        {% for group_name, permissions in permission_groups %}
+                            <fieldset class="permissions-group">
+                                <legend>{{ group_name }}</legend>
+                                {% for permission_id, permission_label in permissions %}
+                                    <label class="permission-option" for="rolePermission-{{ permission_id }}">
+                                        <input id="rolePermission-{{ permission_id }}" name="permissions" type="checkbox" value="{{ permission_id }}" disabled>
+                                        <span>{{ permission_label }}</span>
+                                    </label>
+                                {% endfor %}
+                            </fieldset>
+                        {% endfor %}
+                    </div>
+                </section>
                 <div>
                     <label for="editAccountStatus">Account Status</label>
                     <select id="editAccountStatus" name="is_active">
@@ -149,9 +209,48 @@
         const cancelButton = document.getElementById("cancelEditUser");
         const form = document.getElementById("editUserForm");
         const saveButton = document.getElementById("saveUserChanges");
+        const roleSelect = document.getElementById("editRole");
+        const rolePermissions = {{ role_permissions|tojson }};
+        const permissionsConfigured = document.getElementById("permissionsConfigured");
+        const rolePermissionsPreviewHelp = document.getElementById("rolePermissionsPreviewHelp");
+        const rolePermissionsPreviewList = document.getElementById("rolePermissionsPreviewList");
+        const rolePermissionInputs = [...rolePermissionsPreviewList.querySelectorAll('input[name="permissions"]')];
         let unregisterModalEscClose = null;
 
+        function updateRolePermissionsPreview() {
+            const selectedRole = roleSelect.value;
+            const roleKey = Object.keys(rolePermissions).find(role => role.trim().toLocaleLowerCase() === selectedRole.trim().toLocaleLowerCase());
+            const selectedPermissions = new Set(rolePermissions[roleKey] || []);
+            const normalizedRole = selectedRole.trim().replace(/[_-]/g, " ").replace(/\s+/g, " ").toLocaleLowerCase();
+            const canEditPermissions = !["admin", "administrator", "super admin", "super administrator"]
+                .includes(normalizedRole);
+            permissionsConfigured.value = canEditPermissions ? "true" : "";
+            rolePermissionsPreviewHelp.textContent = canEditPermissions
+                ? "Select permissions for this role. Changes apply to all non-admin accounts, now and in the future."
+                : "Admin and Super Admin permissions are protected and cannot be changed here.";
+            rolePermissionInputs.forEach(input => {
+                input.checked = selectedPermissions.has(input.value);
+                input.disabled = !canEditPermissions;
+            });
+        }
+
+        rolePermissionInputs.forEach(input => {
+            input.addEventListener("change", () => {
+                const selectedRole = roleSelect.value;
+                const roleKey = Object.keys(rolePermissions).find(role => role.trim().toLocaleLowerCase() === selectedRole.trim().toLocaleLowerCase());
+                const selectedPermissions = new Set(rolePermissions[roleKey] || []);
+                if (input.checked) selectedPermissions.add(input.value);
+                else selectedPermissions.delete(input.value);
+                if (roleKey) rolePermissions[roleKey] = [...selectedPermissions];
+            });
+        });
+
         function toggleModal(show) {
+            if (show) {
+                const navigation = document.querySelector("header.mm-app-header");
+                const navigationBottom = navigation ? navigation.getBoundingClientRect().bottom : 82;
+                modal.style.setProperty("--modal-top-offset", `${Math.ceil(navigationBottom + 16)}px`);
+            }
             modal.classList.toggle("open", show);
             modal.setAttribute("aria-hidden", String(!show));
             if (show && !unregisterModalEscClose) {
@@ -165,10 +264,12 @@
         }
 
         editButton.addEventListener("click", () => toggleModal(true));
+        roleSelect.addEventListener("change", updateRolePermissionsPreview);
         cancelButton.addEventListener("click", () => toggleModal(false));
         modal.addEventListener("click", event => {
             if (event.target === modal) toggleModal(false);
         });
+        updateRolePermissionsPreview();
 
         form.addEventListener("submit", async event => {
             event.preventDefault();

@@ -1,0 +1,157 @@
+body.user-management-page .permission-help {
+    color: #a9c2b4 !important;
+}
+
+body.user-management-page .permission-group {
+    color: #edf8f2 !important;
+    border-color: rgba(123, 224, 182, .24) !important;
+    background: linear-gradient(145deg, rgba(18, 34, 26, .96), rgba(8, 16, 12, .98)) !important;
+}
+
+body.user-management-page .permission-group legend {
+    color: #edf8f2 !important;
+}
+
+body.user-management-page .permission-group .permission-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    margin: 9px 0;
+    color: #dcebe2 !important;
+    line-height: 1.4;
+    cursor: pointer;
+}
+
+body.user-management-page .permission-group .permission-option input[type="checkbox"] {
+    width: 16px !important;
+    height: 16px;
+    flex: 0 0 16px;
+    margin: 2px 0 0;
+    accent-color: #43d3a6;
+    cursor: pointer;
+}
+
+body.user-management-page .staff-type-dialog {
+    color: #edf8f2;
+    border: 1px solid rgba(123, 224, 182, .24);
+    background: linear-gradient(145deg, #12221a, #08100c);
+}
+
+body.user-management-page .staff-type-dialog h2 {
+    color: #f1faf5 !important;
+}
+
+body.user-management-page .staff-type-dialog input[type="text"] {
+    color: #edf8f2 !important;
+    border-color: rgba(144, 184, 159, .3) !important;
+    background: #0b1710 !important;
+}
+
+body.user-management-page .staff-type-dialog .staff-type-dialog-actions button.secondary {
+    color: #e2eee7;
+    border: 1px solid rgba(123, 224, 182, .2);
+    background: rgba(255, 255, 255, .06);
+}
+
+body.user-details-page .permissions-panel {
+    color: #dcebe2 !important;
+    border-color: rgba(123, 224, 182, .2) !important;
+    background: linear-gradient(145deg, rgba(18, 34, 26, .96), rgba(8, 16, 12, .98)) !important;
+}
+
+body.user-details-page .permissions-panel h3 {
+    color: #f1faf5 !important;
+}
+
+body.user-details-page .permissions-panel > p {
+    color: #b4c8ba !important;
+}
+
+body.user-details-page .permissions-group {
+    color: #dcebe2 !important;
+    border-color: rgba(123, 224, 182, .2) !important;
+    background: rgba(5, 15, 10, .72) !important;
+}
+
+body.user-details-page .permissions-group legend {
+    color: #edf8f2 !important;
+}
+
+body.user-details-page .permissions-group li {
+    color: #dcebe2 !important;
+}
+
+body.user-details-page .permissions-group li::before {
+    color: #66d9a7 !important;
+}
+
+body.user-details-page .permissions-group li.permission-unavailable {
+    color: #a9b8af !important;
+}
+
+body.user-details-page .permissions-group li.permission-unavailable::before {
+    color: #e2aa68 !important;
+}
+
+body.user-details-page .role-permissions-preview {
+    color: #dcebe2 !important;
+    border-color: rgba(123, 224, 182, .2) !important;
+    background: rgba(5, 15, 10, .72) !important;
+}
+
+body.user-details-page .role-permissions-preview .permissions-group {
+    min-width: 0;
+    margin: 0;
+    padding: 8px;
+}
+
+body.user-details-page .role-permissions-preview .permission-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    margin: 6px 0;
+    color: #dcebe2 !important;
+    line-height: 1.35;
+    cursor: pointer;
+}
+
+body.user-details-page .role-permissions-preview .permission-option input[type="checkbox"] {
+    width: 15px !important;
+    height: 15px;
+    flex: 0 0 15px;
+    margin: 1px 0 0;
+    accent-color: #43d3a6;
+    cursor: pointer;
+}
+
+body.user-details-page .role-permissions-preview .permission-option input[type="checkbox"]:disabled {
+    cursor: not-allowed;
+}
+
+body.user-details-page .role-permissions-preview h4 {
+    color: #f1faf5 !important;
+}
+
+body.user-details-page .role-permissions-preview p {
+    color: #b4c8ba !important;
+}
+
+body.user-details-page .role-permissions-preview .permissions-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    max-height: 32vh;
+    overflow-y: auto;
+}
+
+body.user-details-page .role-permissions-preview a {
+    color: #65d9b4 !important;
+    font-weight: 700;
+}
+
+@media (max-width: 760px) {
+    body.user-details-page .permissions-grid,
+    body.user-details-page .role-permissions-preview .permissions-grid {
+        grid-template-columns: 1fr;
+    }
+}

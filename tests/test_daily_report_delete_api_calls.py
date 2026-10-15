@@ -40,9 +40,12 @@ def test_daily_report_delete_confirmation_and_success_refresh_remain():
 
     assert "registerEscClose(deleteModal, cancelDelete)" in confirm_source
     assert 'if (!response.ok)' in delete_source
+    assert "const errorResponse = await response.json()" in delete_source
+    assert "errorMessage = errorResponse.error" in delete_source
     assert delete_source.index("if (!response.ok)") < delete_source.index("deletingId = null")
     assert delete_source.index("deletingId = null") < delete_source.index('showToast("Record deleted successfully."')
     assert delete_source.index('showToast("Record deleted successfully."') < delete_source.index("await loadRecords()")
+    assert "error instanceof Error ? error.message" in delete_source
     assert "Unable to delete the daily report. Please try again." in delete_source
 
 

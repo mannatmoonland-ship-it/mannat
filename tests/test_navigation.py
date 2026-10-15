@@ -202,6 +202,9 @@ def test_shared_navigation_renders_animals_and_has_account_menu_behavior():
     assert 'document.querySelectorAll("[data-animal-avatar]")' in script
     assert 'querySelector(".mm-nav-profile-trigger")' in script
     assert 'querySelector(".mm-nav-account-menu")' in script
+    assert 'addEventListener("pointerenter"' in script
+    assert 'addEventListener("pointerleave"' in script
+    assert "(hover: hover) and (pointer: fine)" in script
     assert 'event.key !== "Escape"' in script
     assert ".mm-nav-account-menu[hidden] { display: none; }" in stylesheet
     assert 'class="mm-nav-button{% if nav_endpoint in settings_endpoints %} is-active{% endif %}"' not in template

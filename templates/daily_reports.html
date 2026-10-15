@@ -52,7 +52,7 @@
 
         </div>
 
-        <button id="dr-addBtn" class="dr-icon-button" type="button">
+        <button id="dr-addBtn" class="dr-icon-button" type="button" aria-label="Add Daily Record" title="Add Daily Record">
             <svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
             <span>Daily Record</span>
         </button>
@@ -71,7 +71,7 @@
 
     <section class="dr-date-navigation" aria-label="Daily report date controls">
 
-        <button type="button" id="dr-prevDay" class="dr-date-button dr-icon-button"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg><span>Previous Day</span></button>
+        <button type="button" id="dr-prevDay" class="dr-date-button dr-icon-button" aria-label="Previous day" title="Previous day"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg><span>Previous Day</span></button>
 
         <div class="dr-selected-date">
             <span>Selected Date</span>
@@ -79,12 +79,12 @@
         </div>
 
         <div class="dr-calendar-control">
-            <button type="button" id="dr-calendarToggle" class="dr-date-button dr-icon-button" aria-expanded="false" aria-controls="dr-calendar"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 10h16"/></svg><span>Go to Date</span></button>
+            <button type="button" id="dr-calendarToggle" class="dr-date-button dr-icon-button" aria-label="Go to date" title="Go to date" aria-expanded="false" aria-controls="dr-calendar"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 10h16"/></svg><span>Go to Date</span></button>
             <section id="dr-calendar" class="dr-calendar" aria-label="Daily Reports calendar" hidden>
                 <div class="dr-calendar-header">
-                    <button type="button" id="dr-prevMonth" class="dr-calendar-month-button" aria-label="Previous month"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+                    <button type="button" id="dr-prevMonth" class="dr-calendar-month-button" aria-label="Previous month" title="Previous month"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
                     <strong id="dr-calendarMonthLabel" aria-live="polite"></strong>
-                    <button type="button" id="dr-nextMonth" class="dr-calendar-month-button" aria-label="Next month"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+                    <button type="button" id="dr-nextMonth" class="dr-calendar-month-button" aria-label="Next month" title="Next month"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
                 </div>
                 <div class="dr-calendar-weekdays" aria-hidden="true">
                     <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
@@ -93,18 +93,18 @@
             </section>
         </div>
 
-        <button type="button" id="dr-todayBtn" class="dr-date-button dr-icon-button"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg><span>Today</span></button>
+        <button type="button" id="dr-todayBtn" class="dr-date-button dr-icon-button" aria-label="Today" title="Today"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg><span>Today</span></button>
 
-        <button type="button" id="dr-nextDay" class="dr-date-button dr-icon-button"><span>Next Day</span><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+        <button type="button" id="dr-nextDay" class="dr-date-button dr-icon-button" aria-label="Next day" title="Next day"><span>Next Day</span><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
 
         <div class="dr-day-actions">
             <div class="dr-share-actions" aria-label="Daily report sharing actions">
-                <button type="button" id="shareDailyReportBtn" class="dr-secondary dr-icon-button"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.7 10.7 6.6-4.4M8.7 13.3l6.6 4.4"/></svg><span>Share Daily Report</span></button>
-                <button type="button" id="downloadDailyReportImageBtn" class="dr-secondary dr-icon-button"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 19h16"/></svg><span>Download Image</span></button>
+                <button type="button" id="shareDailyReportBtn" class="dr-secondary dr-icon-button" aria-label="Share Daily Report" title="Share Daily Report"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.7 10.7 6.6-4.4M8.7 13.3l6.6 4.4"/></svg><span>Share Daily Report</span></button>
+                <button type="button" id="downloadDailyReportImageBtn" class="dr-secondary dr-icon-button" aria-label="Download Image" title="Download Image"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 19h16"/></svg><span>Download Image</span></button>
                 <span id="shareStatus" class="dr-share-status" role="status" aria-live="polite"></span>
             </div>
-            <button type="button" id="dr-printDayBtn" class="dr-secondary dr-icon-button"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V3h10v5M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M7 14h10v7H7zM17 11h.01"/></svg><span>Print Daily Page</span></button>
-            <button type="button" id="dr-exportPdfBtn" class="dr-secondary dr-icon-button" title="Opens the print dialog; choose Save as PDF"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8z"/><path d="M13 3v8h7M8 16h8M8 19h5"/></svg><span>Export PDF</span></button>
+            <button type="button" id="dr-printDayBtn" class="dr-secondary dr-icon-button" aria-label="Print Daily Page" title="Print Daily Page"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 8V3h10v5M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M7 14h10v7H7zM17 11h.01"/></svg><span>Print Daily Page</span></button>
+            <button type="button" id="dr-exportPdfBtn" class="dr-secondary dr-icon-button" aria-label="Export PDF" title="Export PDF — opens the print dialog; choose Save as PDF"><svg class="dr-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8z"/><path d="M13 3v8h7M8 16h8M8 19h5"/></svg><span>Export PDF</span></button>
         </div>
 
     </section>
@@ -121,9 +121,9 @@
 
         <div class="dr-modalhead">
 
-            <h2>New Daily Record</h2>
+            <h2><span>New Daily Record</span></h2>
 
-            <button id="dr-closeBtn" class="dr-x" type="button" aria-label="Close daily record form">&times;</button>
+            <button id="dr-closeBtn" class="dr-x" type="button" aria-label="Close daily record form" title="Close">&times;</button>
 
         </div>
 
@@ -131,22 +131,42 @@
 
             <div class="dr-twocol">
 
-                <label>Date<input id="dr-date" type="date" required></label>
+                <label><span class="dr-field-label">Date</span><input id="dr-date" type="date" required></label>
 
-                <label>Floor / Location<input id="dr-floor" placeholder="Ground Floor / Grid C-D"></label>
+                <label>
+                    <span class="dr-field-label">Floor / Location</span>
+                    <select id="dr-floor">
+                        <option value="">Select a floor / location</option>
+                        <option value="SITE">SITE</option>
+                        <option value="CELLAR">CELLAR</option>
+                        <option value="GROUND FLOOR">GROUND FLOOR</option>
+                        <option value="FIRST FLOOR">FIRST FLOOR</option>
+                        <option value="SECOND FLOOR">SECOND FLOOR</option>
+                        <option value="THIRD FLOOR">THIRD FLOOR</option>
+                        <option value="FOURTH FLOOR">FOURTH FLOOR</option>
+                        <option value="FIFTH FLOOR">FIFTH FLOOR</option>
+                        <option value="OTHER">OTHER</option>
+                    </select>
+                </label>
+
+                <div id="dr-floorCustomWrapper" class="dr-floor-custom" hidden>
+                    <label for="dr-floorCustom"><span class="dr-field-label">Other Floor / Location</span>
+                        <input id="dr-floorCustom" type="text" maxlength="120" placeholder="Enter floor or location">
+                    </label>
+                </div>
 
             </div>
 
-            <label>Work / Activity<input id="dr-activity" placeholder="Slab reinforcement" required></label>
+            <label><span class="dr-field-label">Work / Activity</span><input id="dr-activity" placeholder="Slab reinforcement" required></label>
 
-            <label>Trade
+            <label><span class="dr-field-label">Trade</span>
                 <select id="dr-tradeSelect" required>
                     <option value="">Select a trade</option>
                 </select>
                 <div id="dr-tradeStatus" class="dr-trade-status" aria-live="polite"></div>
             </label>
 
-            <label>Weather Condition
+            <label><span class="dr-field-label">Weather Condition</span>
                 <select id="dr-weatherCondition">
                     <option value="">Select weather condition</option>
                     <option value="Sunny">☀️ Sunny</option>
@@ -161,7 +181,7 @@
             </label>
 
             <div id="dr-weatherCustomWrapper" class="dr-weather-custom" style="display: none;">
-                <label>Weather Details
+                <label><span class="dr-field-label">Weather Details</span>
                     <input id="dr-weatherDescription" type="text" maxlength="120" placeholder="Describe the weather condition">
                 </label>
             </div>
@@ -170,6 +190,7 @@
 
                 <div class="dr-workforce-box">
 
+                    <h3 class="dr-section-label">Workforce</h3>
                     <div id="dr-workerCategories"></div>
 
                 </div>
@@ -184,18 +205,18 @@
 
             </div>
 
-            <label>Materials<textarea id="dr-materials" placeholder="Cement - 65 bags&#10;Steel - 2.4 tonnes"></textarea></label>
+            <label><span class="dr-field-label">Materials</span><textarea id="dr-materials" placeholder="Cement - 65 bags&#10;Steel - 2.4 tonnes"></textarea></label>
 
-            <label>Work Done Today<textarea id="dr-notes" placeholder="Describe the construction work completed today."></textarea></label>
+            <label><span class="dr-field-label">Work Done Today</span><textarea id="dr-notes" placeholder="Describe the construction work completed today."></textarea></label>
 
             <div class="dr-evidenceHead">
 
-                <h3>Visual Evidence</h3>
+                <h3 class="dr-section-label">Visual Evidence</h3>
 
                 <div class="dr-evidence-controls">
                     <span id="dr-driveStatus" role="status" aria-live="polite"></span>
-                    <button type="button" id="dr-connectDrive" class="dr-secondary">Connect Google Drive</button>
-                    <button type="button" id="dr-addEvidence" class="dr-secondary">+ Add Evidence</button>
+                    <button type="button" id="dr-connectDrive" class="dr-secondary dr-form-action"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3 4 0 7 12h-4L9 3Z"/><path d="M9 3 2 15l2 4 7-12M4 19h14l2-4"/></svg>Connect Google Drive</button>
+                    <button type="button" id="dr-addEvidence" class="dr-secondary dr-form-action"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add Evidence</button>
                 </div>
 
             </div>
@@ -204,13 +225,13 @@
 
             <div class="dr-previewBox">
 
-                <h3>Preview</h3>
+                <h3 class="dr-section-label">Preview</h3>
 
                 <div id="dr-livePreview" class="dr-muted">Paste a YouTube, Google Drive, or Google Photos link above.</div>
 
             </div>
 
-            <button class="dr-save" type="submit">Save Daily Record</button>
+            <button class="dr-save dr-form-action" type="submit"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3.5h12l3.5 3.5v13H3.5v-15A1.5 1.5 0 0 1 5 3.5Z"/><path d="M7 3.5v6h9v-6M7 20v-7h10v7"/></svg>Save Daily Record</button>
 
         </form>
 

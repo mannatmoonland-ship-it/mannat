@@ -55,6 +55,14 @@ def test_financial_only_page_permission_gates_contract_edit_controls():
     assert 'document.body.dataset.canEditContractValues === "true"' in APP_JS
     assert "canEditContractValues ? `<td" in contract_table
     assert '${canEditContractValues ? `<button' in render_trade
+    assert 'class="btn-secondary btn-small contract-edit-btn contract-icon-only"' in contract_table
+    assert 'class="btn-danger btn-small contract-delete-btn contract-icon-only"' in contract_table
+    assert 'aria-label="Edit contract item"' in contract_table
+    assert 'title="Delete contract item"' in contract_table
+    assert '<svg viewBox="0 0 24 24" width="22" height="22"' in contract_table
+    assert "width: 36px;" in INDEX_TEMPLATE
+    assert "height: 34px;" in INDEX_TEMPLATE
+    assert "stroke-width: 1.35;" in INDEX_TEMPLATE
     assert 'card.querySelector(\n        ".add-contract-btn"\n    )?.addEventListener' in render_trade
 
 

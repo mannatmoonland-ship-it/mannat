@@ -1380,6 +1380,7 @@ def test_new_user_inherits_permissions_from_selected_custom_staff_type(client, m
         "name": "Report Maintainer",
         "permissions": ["daily_reports.delete"],
     })
+    store.non_admin_permissions.discard("camera_upload")
     monkeypatch.setattr("app.send_email", lambda *args, **kwargs: True)
 
     response = client.post(
@@ -1400,6 +1401,7 @@ def test_new_user_inherits_permissions_from_selected_custom_staff_type(client, m
     assert created_user
     assert app_module._user_has_compiled_permission(created_user, "daily_reports.delete")
     assert "camera_upload" in created_user["permissions"]
+    assert app_module.has_permission(created_user, "camera_upload")
     assert created_user["default_permissions_version"] == 1
 
 

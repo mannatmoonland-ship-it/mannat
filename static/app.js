@@ -1317,7 +1317,9 @@ function renderContractTable(
 
                                         <button
                                             type="button"
-                                            class="btn-secondary btn-small contract-edit-btn"
+                                            class="btn-secondary btn-small contract-edit-btn contract-icon-only"
+                                            aria-label="Edit contract item"
+                                            title="Edit contract item"
                                             data-trade-id="${escapeHtml(
                                                 trade.id
                                             )}"
@@ -1325,13 +1327,15 @@ function renderContractTable(
                                                 item.id
                                             )}"
                                         >
-                                            Edit
+                                            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="m4 16.5-.8 4.3 4.3-.8L20 7.5 16.5 4 4 16.5Z"/><path d="m14.5 6 3.5 3.5"/></svg>
                                         </button>
 
 
                                         <button
                                             type="button"
-                                            class="btn-danger btn-small contract-delete-btn"
+                                            class="btn-danger btn-small contract-delete-btn contract-icon-only"
+                                            aria-label="Delete contract item"
+                                            title="Delete contract item"
                                             data-trade-id="${escapeHtml(
                                                 trade.id
                                             )}"
@@ -1339,7 +1343,7 @@ function renderContractTable(
                                                 item.id
                                             )}"
                                         >
-                                            Delete
+                                            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3"/></svg>
                                         </button>
 
                                     </td>

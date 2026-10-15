@@ -61,7 +61,6 @@
 {% include "_page_loader.html" %}
     <header class="mm-app-header">
         {% include '_navigation.html' %}
-        <a class="guide-top-link" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
     </header>
 
     <section class="mm-page-heading" aria-labelledby="developerGuidePageTitle">
@@ -253,12 +252,13 @@ python -m playwright install chromium</code></pre>
                     <div><dt><code>custom_staff_types</code></dt><dd>Custom role-name documents with string fields <code>id</code>, <code>name</code>, and <code>created_by</code>, plus ISO date-time strings <code>created_at</code> and, after edits, <code>updated_at</code>.</dd></div>
                     <div><dt><code>audit_log</code></dt><dd>Audit entries with string fields <code>actor_id</code>, <code>target_user_id</code>, <code>action</code>, <code>details</code>, and <code>timestamp</code>. The document ID is generated separately from the entry payload.</dd></div>
                 </dl>
-                <h3>Trades, reports, and payments</h3>
+                <h3>Trades, reports, payments, and site instructions</h3>
                 <dl class="guide-config">
                     <div><dt><code>trades</code></dt><dd>One document per trade. <code>name</code> is a string; <code>workerCategories</code>, <code>commonFields</code>, <code>contractItems</code>, and <code>paymentTransactions</code> are arrays. Trade timestamps are ISO date-time strings. A worker category is an object with string <code>id</code>/<code>name</code>/<code>payment_type</code> and date strings; daily-wage categories have numeric <code>currentWage</code> and a <code>wageHistory</code> array of objects with numeric <code>dailyWage</code> and date/time strings. Lump-sum categories have numeric <code>lump_sum_amount</code> and optional string <code>work_description</code>.</dd></div>
                     <div><dt><code>trades.contractItems[]</code></dt><dd>Nested under a trade, not a separate collection. Each object has string <code>id</code>/<code>name</code>, numeric <code>amount</code>, and ISO date-time strings <code>createdAt</code>/<code>updatedAt</code>.</dd></div>
                     <div><dt><code>trades.paymentTransactions[]</code></dt><dd>Also nested under the trade document, not a separate collection. Entries use string <code>id</code>, <code>type</code>, <code>date</code>, <code>paymentMode</code>, and <code>remarks</code>; numeric <code>amount</code>, <code>labourEarned</code>, <code>advanceAdjustment</code>, and <code>outstandingBalance</code>; and ISO date-time strings <code>createdAt</code>/<code>updatedAt</code>. Lump-sum entries may include string <code>workerCategoryId</code> and <code>workerCategoryName</code>.</dd></div>
                     <div><dt><code>daily_records</code></dt><dd>One site record per document. Dates, location/activity, trade ID/name, weather descriptions, materials, and notes are strings. <code>workerCounts</code> is an object mapping category names to numeric counts; totals and legacy worker-count fields are numbers. <code>evidence</code> is an array of objects with string <code>type</code>, <code>title</code>, and <code>url</code>. The server adds creator identity, ISO date-time strings, and edit attribution fields.</dd></div>
+                    <div><dt><code>red_book_items</code></dt><dd>One shared instruction per document. <code>text</code>, legacy-compatible <code>image_url</code>, creator/editor IDs, and timestamps are strings; <code>image_urls</code> is an array of Google Drive URL strings, and <code>sort_order</code> is numeric. <code>image_url</code> mirrors the first entry in <code>image_urls</code>; older documents with only <code>image_url</code> remain readable.</dd></div>
                 </dl>
                 <h3>Materials and drawings</h3>
                 <dl class="guide-config">
@@ -292,7 +292,7 @@ python -m playwright install chromium</code></pre>
                 </ul>
                 <h3>Roles and route checks</h3>
                 <p>Built-in roles are <code>super_admin</code>, <code>office_staff</code>, and <code>supervisor</code>. Additional staff-type names can be configured. <code>@require_login</code> checks for a valid signed-in session; <code>@require_role(...)</code> checks a role. User Management, Snapshot, and Developer Guide routes are restricted to Super Admins. The <code>ROLE_PERMISSIONS</code> constants describe role capability labels, but individual Flask decorators remain the route-level checks.</p>
-                <p>Super Admins configure the shared non-admin permission set in the Edit User permission panel. Changes apply to every non-admin account, including custom staff types, and invalidate affected sessions; Admin and Super Admin permissions are protected. New non-admin accounts inherit the saved set. The initial set includes dashboard/profile/Google Photos and camera uploads, daily-report view/create/edit, drawing view, labour-payment view/create, ledger view, Owner Scope view/create, material view/manage/create transactions, and Red Book view/add entries. Existing accounts and custom roles can be aligned with this initial set using <code>python scripts/migrate_non_admin_permissions.py</code>; add <code>--apply</code> to write changes. Custom permissions do not bypass Super Admin-only route checks.</p>
+                <p>Super Admins configure the shared non-admin permission set in the Edit User permission panel. Changes apply to every non-admin account, including custom staff types, and invalidate affected sessions; Admin and Super Admin permissions are protected. New accounts always receive camera-upload permission in addition to their role permissions, so a changed shared role set does not prevent photo uploads from Daily Reports. Other new non-admin permissions inherit the saved set. The initial set includes dashboard/profile/Google Photos and camera uploads, daily-report view/create/edit, drawing view, labour-payment view/create, ledger view, Owner Scope view/create, material view/manage/create transactions, and Red Book view/add entries. Existing accounts and custom roles can be aligned with this initial set using <code>python scripts/migrate_non_admin_permissions.py</code>; add <code>--apply</code> to write changes. Custom permissions do not bypass Super Admin-only route checks.</p>
                 <p>The permissions list contains a <code>labour_muster</code> label, but there is no distinct attendance page or route in the active route/template set. Do not treat that label as an implemented muster workflow.</p>
                 <h3>Password change and recovery</h3>
                 <ul>
@@ -307,6 +307,7 @@ python -m playwright install chromium</code></pre>
                 <h2 id="dailyReportsTitle">10. Daily Reports Architecture</h2>
                 <h3>Data model and trade relationship</h3>
                 <p>The supported editable payload is defined by <code>DAILY_RECORD_EDITABLE_FIELDS</code> in <code>app.py</code>. It includes the date, floor/location, activity, trade ID/name, worker counts and totals, weather, materials, notes, and evidence. The server adds creator identity and timestamps; edits add last-editor attribution. The corresponding Firestore collection is <code>daily_records</code>.</p>
+                <p>The Floor / Location control offers SITE, CELLAR, GROUND FLOOR through FIFTH FLOOR, and OTHER. OTHER reveals a required custom text input, but the selected or custom location is stored in the existing string field <code>floor</code>; no additional schema field is introduced. When editing, known choices are selected directly and older/custom location strings are restored under OTHER.</p>
                 <p><code>static/daily_reports.js</code> reads <code>trades</code> to populate the trade selector and load that trade's worker categories. It saves category counts in <code>workerCounts</code> and keeps legacy count fields such as <code>masonCount</code>, <code>manMazdoorCount</code>, and <code>womanMazdoorCount</code> in the payload. Reports refer to the trade by <code>tradeId</code> and also store <code>tradeName</code>.</p>
                 <h3>Read and write paths</h3>
                 <ul>
@@ -316,7 +317,11 @@ python -m playwright install chromium</code></pre>
                 </ul>
                 <h3>Visual evidence and output</h3>
                 <p><code>evidence</code> is an array on each daily record. The editor builds entries with <code>type</code>, <code>title</code>, and <code>url</code>; available types in the form are Photo, Video, Document, and Drawing. Links may point to YouTube, Google Drive, or Google Photos. Photo previews use direct image links or the Google Photos helper when possible; the saved evidence remains the link information.</p>
-                <p>Daily Reports print and export use the browser print dialog. <strong>Export PDF</strong> does not call a server PDF API: the user selects Save as PDF from the browser's print options.</p>
+                <p>The Daily Reports toolbar uses icon-only buttons with 32px SVG icons, native <code>title</code> tooltips, and <code>aria-label</code> accessible names. Controls remain in one horizontal row and can scroll horizontally at narrow widths. Calendar date buttons expose matching tooltip and accessible-label text.</p>
+                <p>The Daily Record modal adds inline SVG cues to its field labels, section headings, and evidence/save actions. Visible text labels remain in place for clarity and accessibility; upload progress updates preserve the action icon.</p>
+                <p>Daily Reports print and export use the browser print dialog. The PDF icon opens print options; the user selects Save as PDF. This does not call a server PDF API.</p>
+                <h3>Red Book image links</h3>
+                <p>Red Book entries are stored in <code>red_book_items</code>. New and edited entries support multiple Google Drive image URLs in <code>image_urls</code>; the legacy <code>image_url</code> field remains synchronized to the first URL for compatibility. Older documents containing only <code>image_url</code> are normalized to a one-element list when returned to clients. Images are displayed on the Red Book and pinned dashboard views.</p>
             </section>
 
             <section class="guide-chapter" id="materials" aria-labelledby="materialsTitle">

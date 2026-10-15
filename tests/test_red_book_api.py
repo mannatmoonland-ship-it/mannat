@@ -157,6 +157,76 @@ def test_red_book_image_link_can_be_added_updated_and_removed(red_book_client):
     assert saved["image_url"] == ""
 
 
+def test_red_book_supports_multiple_image_links_on_create_update_and_pin(red_book_client):
+    store, client = red_book_client
+    image_urls = [
+        "https://drive.google.com/file/d/first-image-id/view",
+        "https://drive.google.com/open?id=second-image-id",
+    ]
+    response = client.post(
+        "/api/red-book/items",
+        json={"text": "Check the finished wall.", "image_urls": image_urls},
+        headers=headers(),
+    )
+    assert response.status_code == 201
+    item_id = response.get_json()["id"]
+
+    saved = client.get("/api/red-book/items").get_json()["items"][0]
+    assert saved["image_urls"] == image_urls
+    assert saved["image_url"] == image_urls[0]
+    assert store.red_book_items[item_id]["image_urls"] == image_urls
+
+    updated_urls = [image_urls[1]]
+    updated = client.patch(
+        f"/api/red-book/items/{item_id}",
+        json={"text": "Check the finished wall.", "image_urls": updated_urls},
+        headers=headers(),
+    )
+    assert updated.status_code == 200
+    saved = client.get("/api/red-book/items").get_json()["items"][0]
+    assert saved["image_urls"] == updated_urls
+    assert saved["image_url"] == updated_urls[0]
+
+    pinned = client.put(
+        f"/api/red-book/items/{item_id}/pin",
+        json={"pinned": True},
+        headers=headers(),
+    )
+    assert pinned.status_code == 200
+    pinned_item = client.get("/api/red-book/pinned").get_json()["items"][0]
+    assert pinned_item["image_urls"] == updated_urls
+
+    removed = client.patch(
+        f"/api/red-book/items/{item_id}",
+        json={"text": "Check the finished wall.", "image_urls": []},
+        headers=headers(),
+    )
+    assert removed.status_code == 200
+    saved = client.get("/api/red-book/items").get_json()["items"][0]
+    assert saved["image_urls"] == []
+    assert saved["image_url"] == ""
+
+
+@pytest.mark.parametrize(
+    "image_urls",
+    [
+        "https://drive.google.com/file/d/example-image-id/view",
+        ["https://drive.google.com/file/d/good-image-id/view", "https://example.com/bad"],
+        [None],
+    ],
+)
+def test_red_book_rejects_invalid_multiple_image_links(red_book_client, image_urls):
+    _store, client = red_book_client
+    response = client.post(
+        "/api/red-book/items",
+        json={"text": "Inspect the retaining wall.", "image_urls": image_urls},
+        headers=headers(),
+    )
+
+    assert response.status_code == 400
+    assert client.get("/api/red-book/items").get_json()["items"] == []
+
+
 def test_red_book_pin_is_shared_idempotent_and_keeps_the_original_item(red_book_client):
     store, client = red_book_client
     image_url = "https://drive.google.com/file/d/pinned-image-id/view"

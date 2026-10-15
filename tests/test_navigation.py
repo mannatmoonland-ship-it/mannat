@@ -111,6 +111,9 @@ def test_authenticated_pages_share_navigation_partial_and_styles():
 
     brand_source = (templates_dir / "_navigation.html").read_text(encoding="utf-8")
     assert 'include "_brand.html"' in brand_source
+    icon_script = (Path(__file__).resolve().parents[1] / "static" / "button_action_icons.js").read_text(encoding="utf-8")
+    assert "mm-nav-profile-trigger" in icon_script
+    assert "button_action_icons.js" in (templates_dir / "_brand.html").read_text(encoding="utf-8")
 
     for template_name in ("password_reset_request.html", "reset_password.html", "super_admin_recovery.html", "daily_reports_viewer.html"):
         source = (templates_dir / template_name).read_text(encoding="utf-8")
@@ -125,6 +128,8 @@ def test_authenticated_pages_share_navigation_partial_and_styles():
 
     labour_template = (templates_dir / "labour_payments.html").read_text(encoding="utf-8")
     assert 'include "index.html"' in labour_template
+    login_template = (templates_dir / "login.html").read_text(encoding="utf-8")
+    assert "button_action_icons.js" in login_template
 
 
 def test_mobile_navigation_has_accessible_open_close_behavior():
@@ -147,6 +152,20 @@ def test_mobile_navigation_has_accessible_open_close_behavior():
     assert "@media (prefers-reduced-motion: reduce)" in css
     assert 'event.key !== "Escape"' in javascript
     assert 'setAttribute("aria-expanded", String(shouldOpen))' in javascript
+
+
+def test_user_guide_contents_links_match_dark_site_theme():
+    user_guide = (Path(__file__).resolve().parents[1] / "templates" / "user_guide.html").read_text(encoding="utf-8")
+
+    assert ".guide-toc a { color: #70e3bd; font-weight: 600;" in user_guide
+    assert ".guide-toc a:hover { color: #a4f0d5; }" in user_guide
+    assert 'class="guide-top-link"' not in user_guide
+
+
+def test_developer_guide_has_no_top_right_back_to_dashboard_link():
+    developer_guide = (Path(__file__).resolve().parents[1] / "templates" / "developer_guide.html").read_text(encoding="utf-8")
+
+    assert 'class="guide-top-link"' not in developer_guide
 
 
 def test_page_titles_follow_the_shared_header_and_brand_stays_left_aligned():

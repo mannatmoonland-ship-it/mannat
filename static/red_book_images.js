@@ -53,5 +53,10 @@
     content.append(link, unavailable);
   }
 
-  window.MannatRedBookImages = { appendImage, candidates };
+  function appendImages(content, imageUrls) {
+    const urls = Array.isArray(imageUrls) ? imageUrls : [];
+    urls.forEach(imageUrl => appendImage(content, imageUrl));
+  }
+
+  window.MannatRedBookImages = { appendImage, appendImages, candidates };
 })();

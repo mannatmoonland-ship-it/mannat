@@ -57,7 +57,10 @@
       text.className = "pinned-instruction-text";
       text.textContent = item.text;
       card.append(text);
-      window.MannatRedBookImages.appendImage(card, item.image_url);
+      window.MannatRedBookImages.appendImages(
+        card,
+        Array.isArray(item.image_urls) ? item.image_urls : (item.image_url ? [item.image_url] : [])
+      );
 
       grid.append(card);
     });
@@ -86,7 +89,7 @@
         { action: "open", label: "Open in Red Book" },
         { action: "copy-text", label: "Copy Text" }
       ];
-      if (item.image_url) actions.push({ action: "view-image", label: "View Image" });
+      if (item.image_urls?.length || item.image_url) actions.push({ action: "view-image", label: "View Image" });
       return actions;
     },
     async onAction(action, card) {

@@ -68,6 +68,16 @@ const DailyReports = (function() {
     "Windy",
     "Other"
   ];
+  const DAILY_REPORT_FLOOR_OPTIONS = [
+    "SITE",
+    "CELLAR",
+    "GROUND FLOOR",
+    "FIRST FLOOR",
+    "SECOND FLOOR",
+    "THIRD FLOOR",
+    "FOURTH FLOOR",
+    "FIFTH FLOOR"
+  ];
 
   const WEATHER_ICONS = {
     Sunny: "☀️",
@@ -200,7 +210,7 @@ const DailyReports = (function() {
       if (dateValue === today) classes.push("is-today");
       const hasReport = calendarReportDates.has(dateValue);
       const label = `${formatSelectedDate(dateValue)}${hasReport ? ", has Daily Reports" : ""}`;
-      cells.push(`<button type="button" class="${classes.join(" ")}" data-date="${dateValue}" aria-label="${escapeHtml(label)}" aria-pressed="${dateValue === selectedDate}"><span>${day}</span>${hasReport ? '<i class="dr-calendar-report-dot" aria-hidden="true"></i>' : ""}</button>`);
+      cells.push(`<button type="button" class="${classes.join(" ")}" data-date="${dateValue}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}" aria-pressed="${dateValue === selectedDate}"><span>${day}</span>${hasReport ? '<i class="dr-calendar-report-dot" aria-hidden="true"></i>' : ""}</button>`);
     }
     $("dr-calendarDays").innerHTML = cells.join("");
   }
@@ -281,7 +291,7 @@ const DailyReports = (function() {
       ? categoryNames.map(name => {
         const key = name.toLowerCase();
         const value = counts[name] ?? counts[key] ?? 0;
-        return `<label>${escapeHtml(name)}<input class="dr-worker-count" data-category="${escapeHtml(name)}" type="number" min="0" value="${clampNonNegative(value)}"></label>`;
+        return `<label><span class="dr-field-label">${escapeHtml(name)}</span><input class="dr-worker-count" data-category="${escapeHtml(name)}" type="number" min="0" value="${clampNonNegative(value)}"></label>`;
       }).join("")
       : '<div class="dr-workforce-empty">Select a trade with saved worker categories.</div>';
     container.querySelectorAll(".dr-worker-count").forEach(input => {
@@ -457,6 +467,35 @@ const DailyReports = (function() {
     if (!isOtherSelected) {
       weatherDescription.value = "";
     }
+  }
+
+  function updateFloorCustomField() {
+    const floorSelect = $("dr-floor");
+    const floorCustom = $("dr-floorCustom");
+    const customWrapper = $("dr-floorCustomWrapper");
+    if (!floorSelect || !floorCustom || !customWrapper) return;
+
+    const isOtherSelected = floorSelect.value === "OTHER";
+    customWrapper.hidden = !isOtherSelected;
+    floorCustom.required = isOtherSelected;
+    if (!isOtherSelected) floorCustom.value = "";
+  }
+
+  function setFloorForEditing(floor) {
+    const floorSelect = $("dr-floor");
+    const floorCustom = $("dr-floorCustom");
+    const normalizedFloor = String(floor || "").trim();
+    if (DAILY_REPORT_FLOOR_OPTIONS.includes(normalizedFloor)) {
+      floorSelect.value = normalizedFloor;
+      floorCustom.value = "";
+    } else if (normalizedFloor) {
+      floorSelect.value = "OTHER";
+      floorCustom.value = normalizedFloor === "OTHER" ? "" : normalizedFloor;
+    } else {
+      floorSelect.value = "";
+      floorCustom.value = "";
+    }
+    updateFloorCustomField();
   }
 
   function getWorkforceValues() {
@@ -903,8 +942,8 @@ const DailyReports = (function() {
         placeholder="YouTube, Google Drive, or Google Photos link"
         value="${escapeHtml(data.url || "")}">
       <input class="dr-evupload-input" type="file" accept="image/*" capture="environment" hidden>
-      <button type="button" class="dr-evupload">Take / Upload Photo</button>
-      <button type="button" class="dr-remove">×</button>
+      <button type="button" class="dr-evupload dr-form-action"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-5 5 5-5 5 5M4 15v5h16v-5"/></svg><span>Take / Upload Photo</span></button>
+      <button type="button" class="dr-remove" aria-label="Remove evidence" title="Remove evidence"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
     `;
 
     if (data.type) {
@@ -926,7 +965,7 @@ const DailyReports = (function() {
       const photo = uploadInput.files?.[0];
       if (!photo) return;
       uploadButton.disabled = true;
-      uploadButton.textContent = "Uploading...";
+      uploadButton.querySelector("span").textContent = "Uploading...";
       try {
         const formData = new FormData();
         formData.append("photo", photo, photo.name);
@@ -956,7 +995,7 @@ const DailyReports = (function() {
       } finally {
         uploadInput.value = "";
         uploadButton.disabled = false;
-        uploadButton.textContent = "Take / Upload Photo";
+        uploadButton.querySelector("span").textContent = "Take / Upload Photo";
       }
     });
 
@@ -1045,6 +1084,7 @@ const DailyReports = (function() {
   function openAddModal() {
     editingId = null;
     $("dr-recordForm").reset();
+    updateFloorCustomField();
     $("dr-tradeSelect").disabled = false;
     $("dr-tradeSelect").required = true;
     $("dr-tradeStatus").textContent = "";
@@ -1064,12 +1104,12 @@ const DailyReports = (function() {
 
     const submitButton = $("dr-recordForm").querySelector('button[type="submit"]');
     if (submitButton) {
-      submitButton.textContent = "Save Daily Record";
+      submitButton.querySelector("span").textContent = "Save Daily Record";
     }
 
     const title = $("dr-modal").querySelector("h2");
     if (title) {
-      title.textContent = "New Daily Record";
+      title.querySelector("span").textContent = "New Daily Record";
     }
   }
 
@@ -1165,7 +1205,7 @@ const DailyReports = (function() {
 
     editingId = id;
     $("dr-date").value = record.date || "";
-    $("dr-floor").value = record.floor || "";
+    setFloorForEditing(record.floor);
     $("dr-activity").value = record.activity || "";
 
     setWorkerFieldsForRecord(record);
@@ -1199,12 +1239,12 @@ const DailyReports = (function() {
 
     const submitButton = $("dr-recordForm").querySelector('button[type="submit"]');
     if (submitButton) {
-      submitButton.textContent = "Update Daily Record";
+      submitButton.querySelector("span").textContent = "Update Daily Record";
     }
 
     const title = $("dr-modal").querySelector("h2");
     if (title) {
-      title.textContent = "Edit Daily Record";
+      title.querySelector("span").textContent = "Edit Daily Record";
     }
   }
 
@@ -1233,7 +1273,9 @@ const DailyReports = (function() {
 
       const recordData = {
         date: $("dr-date").value,
-        floor: $("dr-floor").value,
+        floor: $("dr-floor").value === "OTHER"
+          ? $("dr-floorCustom").value.trim()
+          : $("dr-floor").value,
         activity: $("dr-activity").value,
         tradeId: selectedTrade?.id || existingRecord?.tradeId || "",
         tradeName: selectedTrade?.name || existingRecord?.tradeName || "",
@@ -1284,6 +1326,7 @@ const DailyReports = (function() {
         modal.classList.add("dr-hidden");
       }
       e.target.reset();
+      updateFloorCustomField();
       $("dr-tradeSelect").disabled = false;
       $("dr-tradeSelect").required = true;
       $("dr-tradeStatus").textContent = "";
@@ -1295,12 +1338,12 @@ const DailyReports = (function() {
 
       const submitButton = $("dr-recordForm").querySelector('button[type="submit"]');
       if (submitButton) {
-        submitButton.textContent = "Save Daily Record";
+        submitButton.querySelector("span").textContent = "Save Daily Record";
       }
 
       const title = $("dr-modal").querySelector("h2");
       if (title) {
-        title.textContent = "New Daily Record";
+        title.querySelector("span").textContent = "New Daily Record";
       }
 
       await loadRecords();
@@ -2034,6 +2077,7 @@ const DailyReports = (function() {
       updateWorkforceTotal();
     };
     $("dr-weatherCondition").onchange = updateWeatherCustomField;
+    $("dr-floor").onchange = updateFloorCustomField;
     $("dr-cancelDeleteBtn").onclick = cancelDelete;
     $("dr-confirmDeleteBtn").onclick = confirmDeleteRecord;
     $("dr-recordForm").onsubmit = handleFormSubmit;

@@ -60,7 +60,8 @@
 }
 
 .red-book-add-form label,
-.red-book-edit-fields label {
+.red-book-edit-fields label,
+.red-book-image-heading {
     color: #d9eee5;
     font-size: 14px;
     font-weight: 700;
@@ -68,8 +69,31 @@
 
 .red-book-image-field {
     display: grid;
-    gap: 8px;
+    gap: 10px;
     margin-top: 14px;
+}
+
+.red-book-image-fields {
+    display: grid;
+    gap: 8px;
+}
+
+.red-book-image-url-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.red-book-image-url-row label {
+    flex: 0 0 82px;
+}
+
+.red-book-image-url-row input {
+    flex: 1 1 auto;
+}
+
+.red-book-remove-image {
+    min-height: 40px;
 }
 
 .red-book-image-field small {
@@ -285,6 +309,15 @@
     .red-book-add-row {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .red-book-image-url-row {
+        align-items: stretch;
+        flex-wrap: wrap;
+    }
+
+    .red-book-image-url-row label {
+        flex-basis: 100%;
     }
 
     .red-book-item {

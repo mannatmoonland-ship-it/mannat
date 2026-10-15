@@ -19,10 +19,10 @@
         .guide-toc { margin: 22px 0 8px; padding: 20px; border: 1px solid #dbeafe; border-radius: 8px; background: #f8fbff; }
         .guide-toc h2 { margin: 0 0 12px; font-size: 17px; }
         .guide-toc ol { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 26px; margin: 0; padding-left: 22px; }
-        .guide-toc li { padding-left: 2px; color: #0f766e; line-height: 1.5; }
+        .guide-toc li { padding-left: 2px; color: #70e3bd; line-height: 1.5; }
         a { color: #0369a1; }
-        .guide-toc a { text-decoration-thickness: 1px; text-underline-offset: 3px; }
-        .guide-toc a:hover { color: #0f766e; }
+        .guide-toc a { color: #70e3bd; font-weight: 600; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+        .guide-toc a:hover { color: #a4f0d5; }
         .guide-toc a:focus-visible, .guide-button:focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }
         .guide-chapter { padding: 24px 0; border-bottom: 1px solid #e2e8f0; scroll-margin-top: 20px; }
         .guide-chapter:last-of-type { border-bottom: 0; }
@@ -57,7 +57,6 @@
 {% include "_page_loader.html" %}
     <header class="mm-app-header">
         {% include '_navigation.html' %}
-        <a class="guide-top-link" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
     </header>
 
     <section class="mm-page-heading" aria-labelledby="userGuidePageTitle">
@@ -84,6 +83,7 @@
                     <li><a href="#labour-muster">Labour Muster</a></li>
                     <li><a href="#labour-payments">Labour Payments</a></li>
                     <li><a href="#drawings">Drawings Library</a></li>
+                    <li><a href="#red-book">Red Book</a></li>
                     <li><a href="#troubleshooting">Troubleshooting</a></li>
                 </ol>
             </nav>
@@ -130,21 +130,21 @@
                 <h3>Choose a date and view reports</h3>
                 <ol>
                     <li>Open <strong>Daily Reports</strong> from the Dashboard.</li>
-                    <li>Use <strong>Previous Day</strong> or <strong>Next Day</strong> to move one day, or select <strong>Today</strong>.</li>
-                    <li>Select <strong>Go to Date</strong> to open the calendar, then choose a date. Reports for that date appear below.</li>
+                    <li>Use the arrow icons to move to the previous or next day. Select the calendar icon to open the date picker, or the clock icon to return to today. Hover over an icon to see its tooltip; assistive technology can read its accessible name.</li>
+                    <li>Choose a date in the calendar to view its reports. The selected date appears beside the date controls.</li>
                 </ol>
                 <h3>Add or edit a daily record</h3>
                 <ol>
-                    <li>Select <strong>+ Daily Record</strong>.</li>
-                    <li>Enter the date, work or activity, and trade. Add location, weather, worker counts, materials, and work notes as needed.</li>
+                    <li>Select the plus icon to add a Daily Record.</li>
+                    <li>Enter the date, work or activity, and trade. Icons beside form labels help identify each section. Choose a Floor / Location from SITE, CELLAR, GROUND FLOOR, FIRST FLOOR, SECOND FLOOR, THIRD FLOOR, FOURTH FLOOR, or FIFTH FLOOR. Choose <strong>OTHER</strong> to reveal a required field for a custom location. Add weather, worker counts, materials, and work notes as needed.</li>
                     <li>Under <strong>Visual Evidence</strong>, add a Photo or Video item. Each user can select <strong>Connect Google Drive</strong> and authorize their own Google account, then select <strong>Take / Upload Photo</strong> to capture or choose a photo. Uploaded files remain restricted to accounts with access to that Drive; the link is added to the evidence row. You can still paste a link for other evidence.</li>
                     <li>Select <strong>Save Daily Record</strong>. To change a saved record, select <strong>Edit</strong> on that record, make changes, and save again.</li>
                 </ol>
                 <p>Use <strong>Delete</strong> on a record only when it should be removed; confirm the prompt to proceed. Daily Reports record worker counts by category, not a named attendance list.</p>
                 <h3>Print or export</h3>
                 <ol>
-                    <li>Select <strong>Print Daily Page</strong> to print the selected date.</li>
-                    <li>Select <strong>Export PDF</strong> to open the print dialog. Choose <strong>Save as PDF</strong> in the browser to save a PDF file.</li>
+                    <li>Use the share, download, or printer icons to share the daily report, download its image, or print the selected date. Hover over an icon to see its tooltip; assistive technology can read its accessible name.</li>
+                    <li>Select the document icon to open the print dialog, then choose <strong>Save as PDF</strong> in the browser to save a PDF file.</li>
                 </ol>
             </section>
 
@@ -213,8 +213,19 @@
                 <p>Use the up and down arrow buttons beside a category to move it. Use the arrows beside a drawing to reorder it within its own category. The first and last items cannot move farther in that direction. The saved order remains after refresh.</p>
             </section>
 
+            <section class="guide-chapter" id="red-book" aria-labelledby="redBookTitle">
+                <h2 id="redBookTitle">10. Red Book</h2>
+                <p>The Red Book is a shared, ordered list of site instructions and construction checks.</p>
+                <ol>
+                    <li>Open <strong>Red Book</strong> from the Dashboard. Enter an instruction and select <strong>Add Item</strong>.</li>
+                    <li>To attach images, paste a Google Drive file link into an image field. Select <strong>Add another image</strong> to add more links, or <strong>Remove</strong> to remove a link. Set each image's Drive access to <strong>Anyone with the link</strong> so other users can view it.</li>
+                    <li>Select <strong>Edit</strong> on an instruction to update its text or image links. Older instructions with one image continue to display; you can add more links while editing.</li>
+                    <li>Use the up/down controls or drag an instruction to change its order. Use the print controls to print with or without images.</li>
+                </ol>
+            </section>
+
             <section class="guide-chapter" id="troubleshooting" aria-labelledby="troubleshootingTitle">
-                <h2 id="troubleshootingTitle">10. Troubleshooting</h2>
+                <h2 id="troubleshootingTitle">11. Troubleshooting</h2>
                 <h3>Sign-in problems</h3>
                 <ul>
                     <li>Check that the username and password are entered correctly. Passwords are case-sensitive.</li>

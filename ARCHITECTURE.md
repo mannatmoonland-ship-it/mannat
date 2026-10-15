@@ -105,7 +105,8 @@ from data access in the workflows below.
 |---|---|---|---|
 | Dashboard | `templates/dashboard.html` | Inline module, shared navigation and page assets | Flask-rendered page; supporting APIs/read paths as implemented |
 | Trade Builder | `templates/index.html` | `static/app.js`, `static/contract_payment_summary.mjs`, `static/trade_payment_history.mjs`, `static/payment_sort.mjs` | Firebase Web reads; Flask trade/contract/payment mutations |
-| Daily Reports | `templates/daily_reports.html` | `static/daily_reports.js`, `static/daily_report_sharing.js` | Firestore reads; authenticated Flask Daily Records and Google Drive APIs |
+| Daily Reports | `templates/daily_reports.html` | `static/daily_reports.js`, `static/daily_report_sharing.js`, `static/daily_reports.css` | Firestore reads; authenticated Flask Daily Records and Google Drive APIs |
+| Red Book | `templates/red_book.html` | `static/red_book.js`, `static/red_book_images.js`, `static/red_book.css` | Authenticated Flask CRUD/reorder APIs; shared Firestore `red_book_items` documents |
 | Daily Report viewer template | `templates/daily_reports_viewer.html` | `static/daily_report_sharing.js` | Currently not rendered by any Flask route; the active share link targets the authenticated Daily Reports page |
 | Drawings | `templates/drawings.html` | `static/drawings.js` | Firestore reads; Flask category/drawing mutations |
 | Materials | `templates/materials.html` | `static/materials.js`, `static/materials_logic.mjs` | Firestore reads; Flask master-data and transaction mutations |
@@ -509,16 +510,27 @@ flowchart TD
     D --> F["GET dates / trades / author avatars via Flask"]
     E --> G["Render calendar, records, filters and editor"]
     F --> G
-    G --> H{"User action"}
-    H -- create --> I["POST /api/daily-records + CSRF"]
-    H -- edit --> J["PATCH /api/daily-records/{record_id} + CSRF"]
-    H -- delete --> K["DELETE /api/daily-records/{record_id} + CSRF"]
-    I --> L["Flask validates permission/payload; Admin SDK writes"]
-    J --> L
-    K --> L
-    L --> M["Refresh selected date/list"]
-    G --> N["Optional share-image SVG route"]
+    G --> H["Icon-only toolbar: date navigation, share, download, print"]
+    G --> I["Floor selector: fixed choices or OTHER custom text"]
+    H --> J{"User action"}
+    J -- create --> K["POST /api/daily-records + CSRF"]
+    J -- edit --> L["PATCH /api/daily-records/{record_id} + CSRF"]
+    J -- delete --> M["DELETE /api/daily-records/{record_id} + CSRF"]
+    K --> N["Flask validates permission/payload; Admin SDK writes"]
+    L --> N
+    M --> N
+    N --> O["Refresh selected date/list"]
+    G --> P["Optional share-image SVG route"]
 ```
+
+The Floor / Location dropdown offers SITE, CELLAR, GROUND FLOOR, FIRST FLOOR,
+SECOND FLOOR, THIRD FLOOR, FOURTH FLOOR, FIFTH FLOOR, and OTHER. Selecting
+OTHER requires a custom text value; the chosen location is stored in the
+existing `floor` string field. Toolbar controls are icon-only, use 32px SVGs
+with native tooltips and accessible names, and remain on one row with
+horizontal scrolling on narrow screens. The record-entry modal uses inline
+SVG icons alongside its field labels, section headings, and evidence/save
+actions while retaining visible text labels.
 
 ### 6.3 Drawings
 
@@ -784,7 +796,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    Item["red_book_items/{itemId}<br/>text, sort_order, timestamps,<br/>created_by, updated_by"]
+    Item["red_book_items/{itemId}<br/>text, image_urls[], image_url (legacy first link),<br/>sort_order, timestamps, created_by, updated_by"]
     Flask["Flask Red Book API<br/>role + CSRF checks"]
     Browser["Red Book page<br/>numbered list + saved ordering"]
     Browser -->|"same-origin API requests"| Flask
@@ -794,6 +806,10 @@ flowchart LR
 Red Book is a shared site checklist. Each instruction is an individual
 Firestore document; its `sort_order` is persisted transactionally. Browser
 mutations go through Flask and do not write directly to Firestore.
+Entries may include multiple Drive image URLs in `image_urls`; the legacy
+`image_url` field mirrors the first URL for compatibility. Existing documents
+with only `image_url` continue to be read as a single-image entry. Image
+rendering is shared with pinned dashboard instructions.
 
 ### 7.6 Owner Scope
 

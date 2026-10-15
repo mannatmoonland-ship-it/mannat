@@ -1357,16 +1357,20 @@ class InMemoryFirestoreStore:
             })
             return True
 
-    def create_red_book_item(self, item_id, text, actor_id, image_url=""):
+    def create_red_book_item(self, item_id, text, actor_id, image_url="", image_urls=None):
         with self._red_book_mutation_lock:
             if item_id in self.red_book_items:
                 raise RedBookMutationError("This item request ID has already been used.", 409)
             if len(self.red_book_items) >= RED_BOOK_MAX_ITEMS:
                 raise RedBookMutationError("The Red Book has reached its item limit.", 409)
+            saved_image_urls = list(image_urls) if image_urls is not None else (
+                [image_url] if image_url else []
+            )
             now = iso_now()
             self.red_book_items[item_id] = {
                 "text": text,
-                "image_url": image_url,
+                "image_url": saved_image_urls[0] if saved_image_urls else "",
+                "image_urls": saved_image_urls,
                 "sort_order": len(self.red_book_items),
                 "created_at": now,
                 "updated_at": now,
@@ -1375,14 +1379,19 @@ class InMemoryFirestoreStore:
             }
             return {"id": item_id}
 
-    def update_red_book_item(self, item_id, text, actor_id, image_url=None):
+    def update_red_book_item(self, item_id, text, actor_id, image_url=None, image_urls=None):
         with self._red_book_mutation_lock:
             item = self.red_book_items.get(item_id)
             if item is None:
                 return False
             changes = {"text": text, "updated_at": iso_now(), "updated_by": actor_id}
-            if image_url is not None:
+            if image_urls is not None:
+                saved_image_urls = list(image_urls)
+                changes["image_urls"] = saved_image_urls
+                changes["image_url"] = saved_image_urls[0] if saved_image_urls else ""
+            elif image_url is not None:
                 changes["image_url"] = image_url
+                changes["image_urls"] = [image_url] if image_url else []
             item.update(changes)
             return True
 
@@ -2362,7 +2371,7 @@ class FirebaseFirestoreStore:
 
         return set_pinned(firestore_transaction)
 
-    def create_red_book_item(self, item_id, text, actor_id, image_url=""):
+    def create_red_book_item(self, item_id, text, actor_id, image_url="", image_urls=None):
         items = self._collection("red_book_items")
         reference = items.document(item_id)
         firestore_transaction = self.db.transaction()
@@ -2387,9 +2396,13 @@ class FirebaseFirestoreStore:
                 default=-1,
             ) + 1
             now = iso_now()
+            saved_image_urls = list(image_urls) if image_urls is not None else (
+                [image_url] if image_url else []
+            )
             transaction.create(reference, {
                 "text": text,
-                "image_url": image_url,
+                "image_url": saved_image_urls[0] if saved_image_urls else "",
+                "image_urls": saved_image_urls,
                 "sort_order": next_order,
                 "created_at": now,
                 "updated_at": now,
@@ -2400,7 +2413,7 @@ class FirebaseFirestoreStore:
 
         return create(firestore_transaction)
 
-    def update_red_book_item(self, item_id, text, actor_id, image_url=None):
+    def update_red_book_item(self, item_id, text, actor_id, image_url=None, image_urls=None):
         reference = self._collection("red_book_items").document(item_id)
         firestore_transaction = self.db.transaction()
 
@@ -2414,8 +2427,13 @@ class FirebaseFirestoreStore:
                 "updated_at": iso_now(),
                 "updated_by": actor_id,
             }
-            if image_url is not None:
+            if image_urls is not None:
+                saved_image_urls = list(image_urls)
+                changes["image_urls"] = saved_image_urls
+                changes["image_url"] = saved_image_urls[0] if saved_image_urls else ""
+            elif image_url is not None:
                 changes["image_url"] = image_url
+                changes["image_urls"] = [image_url] if image_url else []
             transaction.update(reference, changes)
             return True
 
@@ -5598,11 +5616,11 @@ def user_management_create():
         "last_password_change": None,
         "recovery_code_hash": None,
         "recovery_code_used": False,
-        "permissions": list(ROLE_PERMISSIONS.get(role, [])),
+        "permissions": sorted(set(ROLE_PERMISSIONS.get(role, [])) | {"camera_upload"}),
         "created_by": get_current_user().get("id"),
     }
     if not is_admin_or_super_admin_role(role):
-        user["permissions"] = sorted(get_non_admin_permissions())
+        user["permissions"] = sorted(get_non_admin_permissions() | {"camera_upload"})
         user["default_permissions_version"] = 1
     get_user_store().save_user(user)
     add_audit_log(get_current_user().get("id"), "user_created", f"Created user {username} with role {role}", user["id"])
@@ -6728,8 +6746,12 @@ def _sort_red_book_items(items):
 def _pinned_red_book_items():
     return [
         {
-            field: item.get(field)
-            for field in ("id", "text", "image_url", "sort_order", "pinned_at")
+            "id": item.get("id"),
+            "text": item.get("text"),
+            "image_url": (item.get("image_urls") or [item.get("image_url", "")])[0],
+            "image_urls": _red_book_image_urls(item),
+            "sort_order": item.get("sort_order"),
+            "pinned_at": item.get("pinned_at"),
         }
         for item in get_user_store().list_red_book_items()
         if item.get("pinned") is True
@@ -6793,6 +6815,24 @@ def _validate_red_book_image_url(value):
             "Use a Google Drive file link, such as https://drive.google.com/file/d/..."
         )
     return normalized
+
+
+def _validate_red_book_image_urls(value):
+    if not isinstance(value, list):
+        raise RedBookMutationError("Enter a list of Google Drive image links.")
+    image_urls = []
+    for image_url in value:
+        normalized = _validate_red_book_image_url(image_url)
+        if normalized:
+            image_urls.append(normalized)
+    return image_urls
+
+
+def _red_book_image_urls(item):
+    image_urls = item.get("image_urls")
+    if isinstance(image_urls, list) and image_urls:
+        return image_urls
+    return [item["image_url"]] if item.get("image_url") else []
 
 
 def _valid_red_book_item_id(value):
@@ -6883,13 +6923,16 @@ def red_book_items_api():
                 {"error": "Red Book items are temporarily unavailable."}, 503
             )
         public_items = [
-            {
-                field: item.get(field)
-                for field in (
-                    "id", "text", "image_url", "sort_order", "created_at", "updated_at",
-                    "pinned", "pinned_at",
-                )
-            }
+            dict(
+                {
+                    field: item.get(field)
+                    for field in (
+                        "id", "text", "image_url", "sort_order", "created_at", "updated_at",
+                        "pinned", "pinned_at",
+                    )
+                },
+                image_urls=_red_book_image_urls(item),
+            )
             for item in items
         ]
         return _red_book_api_response({"items": public_items})
@@ -6898,15 +6941,28 @@ def red_book_items_api():
     if denied:
         return denied
     payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or set(payload) not in ({"text"}, {"text", "image_url"}):
+    if (
+        not isinstance(payload, dict)
+        or "text" not in payload
+        or not set(payload).issubset({"text", "image_url", "image_urls"})
+        or {"image_url", "image_urls"}.issubset(payload)
+    ):
         return _red_book_api_response(
             {"error": "Provide the construction instruction and optional image link."}, 400
         )
     try:
         text = _validate_red_book_text(payload["text"])
-        image_url = _validate_red_book_image_url(payload.get("image_url", ""))
+        image_urls = (
+            _validate_red_book_image_urls(payload["image_urls"])
+            if "image_urls" in payload
+            else (
+                _validate_red_book_image_urls([payload["image_url"]])
+                if "image_url" in payload
+                else []
+            )
+        )
         result = get_user_store().create_red_book_item(
-            str(uuid.uuid4()), text, user.get("id"), image_url
+            str(uuid.uuid4()), text, user.get("id"), image_urls=image_urls
         )
     except RedBookMutationError as error:
         return _red_book_api_response({"error": str(error)}, error.status)
@@ -6930,20 +6986,26 @@ def red_book_item_api(item_id):
         store = get_user_store()
         if request.method == "PATCH":
             payload = request.get_json(silent=True)
-            if not isinstance(payload, dict) or set(payload) not in (
-                {"text"}, {"text", "image_url"}
+            if (
+                not isinstance(payload, dict)
+                or "text" not in payload
+                or not set(payload).issubset({"text", "image_url", "image_urls"})
+                or {"image_url", "image_urls"}.issubset(payload)
             ):
                 return _red_book_api_response(
                     {"error": "Provide the construction instruction and optional image link."},
                     400,
                 )
             text = _validate_red_book_text(payload["text"])
-            image_url = (
-                _validate_red_book_image_url(payload["image_url"])
-                if "image_url" in payload else None
-            )
+            image_urls = None
+            image_url = None
+            if "image_urls" in payload:
+                image_urls = _validate_red_book_image_urls(payload["image_urls"])
+            elif "image_url" in payload:
+                image_url = _validate_red_book_image_urls([payload["image_url"]])
+                image_url = image_url[0] if image_url else ""
             updated = store.update_red_book_item(
-                item_id, text, user.get("id"), image_url
+                item_id, text, user.get("id"), image_url, image_urls=image_urls
             )
             if not updated:
                 return _red_book_api_response({"error": "Red Book item not found."}, 404)

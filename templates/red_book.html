@@ -46,16 +46,11 @@
                 <button class="red-book-button red-book-primary" type="submit">Add Item</button>
             </div>
             <div class="red-book-image-field">
-                <label for="redBookNewImageUrl">Add image (Google Drive link)</label>
-                <input
-                    id="redBookNewImageUrl"
-                    name="image_url"
-                    type="url"
-                    maxlength="2048"
-                    inputmode="url"
-                    autocomplete="url"
-                    placeholder="https://drive.google.com/file/d/..."
-                >
+                <span class="red-book-image-heading">Add image (Google Drive link)</span>
+                <div id="redBookNewImageUrls" class="red-book-image-fields"></div>
+                <button id="redBookAddImageUrl" class="red-book-button" type="button">
+                    Add another image
+                </button>
                 <small>Set Google Drive access to “Anyone with the link” so other users can view the image.</small>
             </div>
         </form>

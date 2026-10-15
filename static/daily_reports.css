@@ -145,7 +145,8 @@ h1 {
     display: flex;
     align-items: center;
     gap: 12px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
     margin-bottom: 20px;
     padding: 14px;
     background: #fff;
@@ -158,10 +159,43 @@ h1 {
     min-height: 42px;
 }
 
+.dr-date-navigation .dr-icon-button {
+    flex: 0 0 48px;
+    width: 48px;
+    height: 48px;
+    padding: 7px;
+    gap: 0;
+    overflow: hidden;
+}
+
+.dr-date-navigation .dr-icon-button > span {
+    display: none;
+}
+
+.dr-date-navigation .dr-icon-button .dr-icon,
+#dr-addBtn .dr-icon {
+    flex: 0 0 32px;
+    width: 32px;
+    height: 32px;
+}
+
+#dr-addBtn {
+    width: 48px;
+    height: 48px;
+    min-height: 48px;
+    padding: 7px;
+    overflow: hidden;
+}
+
+#dr-addBtn > span {
+    display: none;
+}
+
 .dr-selected-date {
     display: flex;
     flex-direction: column;
     gap: 3px;
+    flex: 0 0 190px;
     min-width: 190px;
 }
 
@@ -289,11 +323,11 @@ h1 {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
 }
 
 .dr-share-status {
-    flex-basis: 100%;
+    flex: 0 0 auto;
     color: #667085;
     font-size: 12px;
 }
@@ -301,6 +335,8 @@ h1 {
     display: flex;
     gap: 8px;
     margin-left: auto;
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 .dr-empty-day {
@@ -659,6 +695,49 @@ h1 {
     align-items: center;
 }
 
+.dr-modalhead h2,
+.dr-section-label,
+.dr-field-label,
+.dr-workforce-total-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.dr-section-label {
+    margin: 0;
+}
+
+.dr-form-icon {
+    display: inline-block;
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vertical-align: middle;
+}
+
+.dr-field-label,
+.dr-section-label {
+    color: #18212b;
+}
+
+.dr-form-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.dr-form-action .dr-form-icon {
+    width: 18px;
+    height: 18px;
+}
+
 .dr-x {
     background: #eef2f6;
     color: #18212b;
@@ -684,6 +763,11 @@ h1 {
     display: grid;
     grid-template-columns: 1fr;
     gap: 12px;
+}
+
+.dr-workforce-box > .dr-section-label {
+    margin: 0;
+    font-size: 16px;
 }
 
 .dr-workforce-total-box {
@@ -737,6 +821,14 @@ label {
     margin-top: 8px;
 }
 
+.dr-floor-custom {
+    min-width: 0;
+}
+
+.dr-floor-custom[hidden] {
+    display: none !important;
+}
+
 input,
 textarea,
 select {
@@ -762,6 +854,10 @@ textarea {
     justify-content: space-between;
     align-items: center;
     margin-top: 20px;
+}
+
+.dr-evidenceHead > .dr-section-label {
+    font-size: 18px;
 }
 
 .dr-evidence-controls {
@@ -1432,8 +1528,9 @@ textarea {
     }
 
     .dr-selected-date {
-        min-width: 0;
-        flex: 1 1 100%;
+        align-self: center;
+        min-width: 190px;
+        flex: 0 0 190px;
     }
 
     .dr-calendar {
@@ -1441,11 +1538,11 @@ textarea {
     }
 
     .dr-day-actions {
-        width: 100%;
+        width: auto;
         margin-left: 0;
     }
 
     .dr-day-actions button {
-        flex: 1;
+        flex: 0 0 48px;
     }
 }

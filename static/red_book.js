@@ -8,9 +8,12 @@
   const status = document.getElementById("redBookStatus");
   const emptyMessage = document.getElementById("redBookEmpty");
   const addForm = document.getElementById("redBookAddForm");
+  const newImageUrls = document.getElementById("redBookNewImageUrls");
+  const addImageUrlButton = document.getElementById("redBookAddImageUrl");
   const printWithImagesButton = document.getElementById("redBookPrintWithImages");
   const printWithoutImagesButton = document.getElementById("redBookPrintWithoutImages");
   let items = [];
+  let imageFieldId = 0;
   let draggedItemId = null;
   let orderIsSaving = false;
   let isRefreshingPinStates = false;
@@ -98,13 +101,54 @@
     return button;
   }
 
+  function setImageUrlFields(container, urls = [""]) {
+    container.replaceChildren();
+    urls.forEach(url => {
+      const row = document.createElement("div");
+      row.className = "red-book-image-url-row";
+      const input = document.createElement("input");
+      const inputId = `redBookImageUrl${imageFieldId++}`;
+      input.id = inputId;
+      input.name = "image_urls";
+      input.type = "url";
+      input.maxLength = 2048;
+      input.inputMode = "url";
+      input.autocomplete = "url";
+      input.placeholder = "https://drive.google.com/file/d/...";
+      input.value = url || "";
+      const label = document.createElement("label");
+      label.htmlFor = inputId;
+      const removeButton = actionButton("Remove", () => {
+        row.remove();
+        if (!container.children.length) setImageUrlFields(container);
+        updateImageUrlLabels(container);
+      }, false, "Remove image link");
+      removeButton.classList.add("red-book-remove-image");
+      row.append(label, input, removeButton);
+      container.append(row);
+    });
+    updateImageUrlLabels(container);
+  }
+
+  function updateImageUrlLabels(container) {
+    [...container.querySelectorAll(".red-book-image-url-row label")].forEach((label, index) => {
+      label.textContent = `Image ${index + 1}`;
+    });
+  }
+
+  function getImageUrls(item) {
+    if (Array.isArray(item.image_urls)) return item.image_urls;
+    return item.image_url ? [item.image_url] : [];
+  }
+
   function renderItems() {
     list.replaceChildren();
     emptyMessage.hidden = items.length !== 0;
     if (addForm) {
       addForm.elements.text.disabled = orderIsSaving;
-      const imageUrlInput = addForm.elements.namedItem("image_url");
-      if (imageUrlInput) imageUrlInput.disabled = orderIsSaving;
+      addForm.querySelectorAll('input[name="image_urls"], .red-book-remove-image')
+        .forEach(field => { field.disabled = orderIsSaving; });
+      if (addImageUrlButton) addImageUrlButton.disabled = orderIsSaving;
       addForm.querySelector('button[type="submit"]').disabled = orderIsSaving;
     }
     items.forEach((item, index) => {
@@ -152,7 +196,7 @@
       text.className = "red-book-text";
       text.textContent = item.text;
       content.append(text);
-      window.MannatRedBookImages.appendImage(content, item.image_url);
+      window.MannatRedBookImages.appendImages(content, getImageUrls(item));
       row.append(content);
 
       const actions = document.createElement("div");
@@ -183,16 +227,18 @@
     input.className = "red-book-edit-input";
     input.setAttribute("aria-label", "Construction instruction");
 
-    const imageLabel = document.createElement("label");
-    imageLabel.textContent = "Image (Google Drive link)";
-    const imageInput = document.createElement("input");
-    imageInput.type = "url";
-    imageInput.maxLength = 2048;
-    imageInput.value = item.image_url || "";
-    imageInput.placeholder = "https://drive.google.com/file/d/...";
-    imageInput.className = "red-book-edit-image-input";
-    imageLabel.append(imageInput);
-    fields.append(input, imageLabel);
+    const imageHeading = document.createElement("span");
+    imageHeading.className = "red-book-image-heading";
+    imageHeading.textContent = "Images (Google Drive links)";
+    const imageFields = document.createElement("div");
+    imageFields.className = "red-book-image-fields";
+    const addImageButton = actionButton("Add another image", () => {
+      const urls = [...imageFields.querySelectorAll('input[name="image_urls"]')].map(field => field.value);
+      urls.push("");
+      setImageUrlFields(imageFields, urls);
+    });
+    fields.append(input, imageHeading, imageFields, addImageButton);
+    setImageUrlFields(imageFields, getImageUrls(item).length ? getImageUrls(item) : [""]);
     contentNode.replaceWith(fields);
     input.focus();
     input.select();
@@ -201,12 +247,15 @@
     actions.replaceChildren(
       actionButton("Save", async () => {
         try {
+          const imageUrls = [...imageFields.querySelectorAll('input[name="image_urls"]')]
+            .map(field => field.value);
           await apiRequest(`/api/red-book/items/${encodeURIComponent(item.id)}`, {
             method: "PATCH",
-            body: JSON.stringify({ text: input.value, image_url: imageInput.value })
+            body: JSON.stringify({ text: input.value, image_urls: imageUrls })
           });
           item.text = input.value.trim();
-          item.image_url = imageInput.value.trim();
+          item.image_urls = imageUrls.map(url => url.trim()).filter(Boolean);
+          item.image_url = item.image_urls[0] || "";
           renderItems();
           showStatus("Red Book item updated.");
         } catch (error) {
@@ -235,22 +284,30 @@
   }
 
   if (addForm && canCreate) {
+    setImageUrlFields(newImageUrls);
+    addImageUrlButton.addEventListener("click", () => {
+      const urls = [...newImageUrls.querySelectorAll('input[name="image_urls"]')].map(field => field.value);
+      urls.push("");
+      setImageUrlFields(newImageUrls, urls);
+    });
     addForm.addEventListener("submit", async event => {
       event.preventDefault();
       const input = addForm.elements.text;
-      const imageUrlInput = addForm.elements.namedItem("image_url");
+      const imageUrls = [...newImageUrls.querySelectorAll('input[name="image_urls"]')]
+        .map(field => field.value);
       try {
         await apiRequest("/api/red-book/items", {
           method: "POST",
-          body: JSON.stringify({ text: input.value, image_url: imageUrlInput?.value || "" })
+          body: JSON.stringify({ text: input.value, image_urls: imageUrls })
         });
         input.value = "";
-        if (imageUrlInput) imageUrlInput.value = "";
+        setImageUrlFields(newImageUrls);
         await loadItems();
         showStatus("Red Book item added.");
       } catch (error) {
         showStatus(error.message, "error");
       }
+
     });
   }
 
@@ -284,7 +341,7 @@
         );
       }
       if (canCreate) actions.push({ action: "duplicate", label: "Duplicate", disabled: orderIsSaving });
-      if (item.image_url) actions.push({ action: "view-image", label: "View Image" });
+      if (getImageUrls(item).length) actions.push({ action: "view-image", label: "View Image" });
       actions.push({ action: "copy-text", label: "Copy Text" });
       if (canDelete) actions.push({ action: "delete", label: "Delete", disabled: orderIsSaving });
       return actions;
@@ -312,7 +369,7 @@
         try {
           await apiRequest("/api/red-book/items", {
             method: "POST",
-            body: JSON.stringify({ text: item.text, image_url: item.image_url || "" })
+            body: JSON.stringify({ text: item.text, image_urls: getImageUrls(item) })
           });
           await loadItems();
           showStatus("Red Book item duplicated.");
@@ -325,7 +382,7 @@
         await moveItem(item.id, 1);
       } else if (action === "view-image") {
         const imageLink = document.createElement("a");
-        imageLink.href = item.image_url;
+        imageLink.href = getImageUrls(item)[0];
         imageLink.target = "_blank";
         imageLink.rel = "noopener noreferrer";
         imageLink.click();

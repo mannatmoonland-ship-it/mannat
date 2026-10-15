@@ -10,7 +10,10 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
 </head>
-<body data-drawings-csrf="{{ drawings_csrf }}">
+<body
+  data-drawings-csrf="{{ drawings_csrf }}"
+  data-can-write="{{ 'true' if can_write_drawings else 'false' }}"
+  data-can-delete="{{ 'true' if can_delete_drawings else 'false' }}">
 {% include "_page_loader.html" %}
   <header class="drawings-header mm-app-header">
     {% include '_navigation.html' %}
@@ -31,7 +34,9 @@
           <option value="">All categories</option>
         </select>
       </label>
+      {% if can_write_drawings %}
       <button id="createCategoryButton" class="drawings-primary" type="button">+ Create Category</button>
+      {% endif %}
     </div>
 
     <div id="drawingsStatus" class="drawings-status" role="status">Loading drawings...</div>

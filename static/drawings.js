@@ -39,6 +39,8 @@ const status = document.getElementById("drawingsStatus");
 const search = document.getElementById("drawingSearch");
 const categoryFilter = document.getElementById("categoryFilter");
 const drawingModal = document.getElementById("drawingModal");
+const canWriteDrawings = document.body.dataset.canWrite === "true";
+const canDeleteDrawings = document.body.dataset.canDelete === "true";
 let categories = [];
 let drawings = [];
 let savingDrawing = false;
@@ -173,19 +175,26 @@ function renderCategories() {
     return;
   }
 
+  const drawingActionsHeading = canWriteDrawings || canDeleteDrawings ? "Actions" : "PDF";
   categoryList.innerHTML = visibleGroups.map(({ category, categoryIndex, categoryDrawings, drawings: visibleDrawings }) => `
     <article class="category-card">
       <div class="category-header">
         <div><h2>${escapeHtml(category.name)}</h2><div class="category-count">${categoryDrawings.length} drawing${categoryDrawings.length === 1 ? "" : "s"}</div></div>
+        ${canWriteDrawings || canDeleteDrawings ? `
         <div class="category-actions">
+          ${canWriteDrawings ? `
           <button type="button" class="drawings-action small drawings-order-button" data-action="move-category-up" data-id="${escapeHtml(category.id)}" aria-label="Move Up" title="Move Up" ${savingOrder || categoryIndex === 0 ? "disabled" : ""}>↑</button>
           <button type="button" class="drawings-action small drawings-order-button" data-action="move-category-down" data-id="${escapeHtml(category.id)}" aria-label="Move Down" title="Move Down" ${savingOrder || categoryIndex === categories.length - 1 ? "disabled" : ""}>↓</button>
           <button type="button" class="drawings-action small" data-action="edit-category" data-id="${escapeHtml(category.id)}">Edit Category</button>
-          <button type="button" class="drawings-action small danger" data-action="delete-category" data-id="${escapeHtml(category.id)}">Delete Category</button>
           <button type="button" class="drawings-action small" data-action="add-drawing" data-id="${escapeHtml(category.id)}">Add Drawing</button>
+          ` : ""}
+          ${canDeleteDrawings ? `
+          <button type="button" class="drawings-action small danger" data-action="delete-category" data-id="${escapeHtml(category.id)}">Delete Category</button>
+          ` : ""}
         </div>
+        ` : ""}
       </div>
-      <div class="drawing-list category-drawings">${categoryDrawings.length ? '<div class="drawing-table-head"><span>Drawing</span><span>Number / Revision</span><span>Description</span><span>Last Updated</span><span>Actions</span></div>' + visibleDrawings.map(drawing => renderDrawing(drawing, categoryDrawings.findIndex(item => item.id === drawing.id), categoryDrawings.length)).join("") : '<div class="category-empty">No drawings in this category.</div>'}</div>
+      <div class="drawing-list category-drawings">${categoryDrawings.length ? `<div class="drawing-table-head"><span>Drawing</span><span>Number / Revision</span><span>Description</span><span>Last Updated</span><span>${drawingActionsHeading}</span></div>` + visibleDrawings.map(drawing => renderDrawing(drawing, categoryDrawings.findIndex(item => item.id === drawing.id), categoryDrawings.length)).join("") : '<div class="category-empty">No drawings in this category.</div>'}</div>
     </article>
   `).join("");
 }
@@ -197,11 +206,17 @@ function renderDrawing(drawing, orderIndex, orderCount) {
     <div class="drawing-description">${escapeHtml(drawing.description || "No description")}</div>
     <div class="drawing-updated">${escapeHtml(formatUpdatedDate(drawing))}</div>
     <div class="drawing-actions">
+      ${canWriteDrawings ? `
       <button type="button" class="drawings-action small drawings-order-button" data-action="move-drawing-up" data-id="${escapeHtml(drawing.id)}" aria-label="Move Up" title="Move Up" ${savingOrder || orderIndex === 0 ? "disabled" : ""}>↑</button>
       <button type="button" class="drawings-action small drawings-order-button" data-action="move-drawing-down" data-id="${escapeHtml(drawing.id)}" aria-label="Move Down" title="Move Down" ${savingOrder || orderIndex === orderCount - 1 ? "disabled" : ""}>↓</button>
+      ` : ""}
       <a class="drawings-action small" href="${escapeHtml(drawing.googleDriveUrl)}" target="_blank" rel="noopener noreferrer">Open PDF</a>
+      ${canWriteDrawings ? `
       <button type="button" class="drawings-action small" data-action="edit-drawing" data-id="${escapeHtml(drawing.id)}">Edit</button>
+      ` : ""}
+      ${canDeleteDrawings ? `
       <button type="button" class="drawings-action small danger" data-action="delete-drawing" data-id="${escapeHtml(drawing.id)}">Delete</button>
+      ` : ""}
     </div>
   </div>`;
 }
@@ -412,8 +427,8 @@ async function moveCategory(categoryId, direction) {
     categories = previousOrder.map(({ category }) => category);
     savingOrder = false;
     renderCategories();
-    setStatus("Unable to save the category order. The previous order has been restored. Please try again.", true);
-    await showError("The category order could not be saved. The previous order has been restored.", "Drawings Library");
+    setStatus("Unable to save the category order. The previous order has been restored. Please contact an administrator to change the order.", true);
+    await showError("The category order could not be saved. The previous order has been restored. Please contact an administrator to change the order.", "Drawings Library");
     return;
   }
   savingOrder = false;
@@ -454,10 +469,10 @@ async function persistDrawingOrder(categoryDrawings, previousOrder) {
   } catch (error) {
     console.error(error);
     previousOrder.forEach(({ drawing, sortOrder }) => { drawing.sortOrder = sortOrder; });
-    setStatus("Unable to save the drawing order. The previous order has been restored. Please try again.", true);
+    setStatus("Unable to save the drawing order. The previous order has been restored. Please contact an administrator to change the order.", true);
     savingOrder = false;
     renderCategories();
-    await showError("The drawing order could not be saved. The previous order has been restored.", "Drawings Library");
+    await showError("The drawing order could not be saved. The previous order has been restored. Please contact an administrator to change the order.", "Drawings Library");
     return;
   }
   savingOrder = false;
@@ -466,7 +481,7 @@ async function persistDrawingOrder(categoryDrawings, previousOrder) {
   await showSuccess("Drawing order saved.", "Drawings Library");
 }
 
-document.getElementById("createCategoryButton").addEventListener("click", createCategory);
+document.getElementById("createCategoryButton")?.addEventListener("click", createCategory);
 document.getElementById("drawingForm").addEventListener("submit", saveDrawing);
 document.getElementById("closeDrawingModal").addEventListener("click", closeDrawingForm);
 document.getElementById("cancelDrawing").addEventListener("click", closeDrawingForm);

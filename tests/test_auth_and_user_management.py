@@ -20,6 +20,7 @@ class FakeFirestoreStore:
         self.non_admin_permissions = set(DEFAULT_NON_ADMIN_PERMISSIONS)
         self.audit_log = []
         self.fail_user_deletion = False
+        self.sms_otp_challenges = {}
 
     def get_user_by_username(self, username):
         for user in self.users.values():
@@ -59,6 +60,9 @@ class FakeFirestoreStore:
 
     def append_audit(self, action):
         self.audit_log.append(action)
+
+    def delete_sms_otp_challenge(self, challenge_id):
+        self.sms_otp_challenges.pop(challenge_id, None)
 
 
 @pytest.fixture
@@ -526,6 +530,10 @@ def test_new_user_receives_unique_password_setup_link_instead_of_shared_password
     assert response.status_code == 200
     assert user["must_change_password"] is True
     assert not check_password_hash(user["password_hash"], "password")
+    assert user["mobile_phone_verified_at"]
+    assert user["mobile_phone_verified_by_admin"] is True
+    assert b"(Admin verified)" in response.data
+    assert b"treated as verified" in response.data
     assert user["password_reset_token_hash"]
     assert len(sent) == 1
     assert sent[0][0][0] == "new-staff@example.com"
@@ -1530,6 +1538,94 @@ def test_super_admin_can_edit_user_details(client):
     assert updated["recovery_email"] == "alpha.recovery+updated@example.com"
     assert updated["role"] == "supervisor"
     assert updated["username"] == "alpha"
+
+
+def test_super_admin_can_confirm_or_change_user_mobile_number(client):
+    from app import ensure_initial_super_admin
+
+    ensure_initial_super_admin()
+    client.post(
+        "/login",
+        data={"username": "Rahim", "password": BOOTSTRAP_TEST_PASSWORD},
+        follow_redirects=False,
+    )
+    store = app.config["FIRESTORE_STORE"]
+    store.save_user({
+        "id": "phone-user",
+        "username": "phone-user",
+        "full_name": "Phone User",
+        "email": "phone-user@example.com",
+        "mobile_phone": "9876541234",
+        "mobile_phone_verified_at": None,
+        "role": "office_staff",
+        "is_active": True,
+        "active_sessions": [],
+        "permissions": [],
+    })
+
+    details = client.get("/user-management/phone-user")
+    assert b"Mobile Number" in details.data
+    assert b"verification required" in details.data
+    assert b'name="mobile_phone"' in details.data
+    assert b'value="9876541234"' in details.data
+
+    invalid_update = client.post(
+        "/user-management/phone-user/edit",
+        data={
+            "username": "phone-user",
+            "full_name": "Phone User",
+            "email": "phone-user@example.com",
+            "role": "office_staff",
+            "is_active": "true",
+            "mobile_phone": "123",
+        },
+        headers={"X-Requested-With": "XMLHttpRequest"},
+    )
+    assert invalid_update.status_code == 400
+    assert store.get_user("phone-user")["mobile_phone"] == "9876541234"
+    assert store.get_user("phone-user")["mobile_phone_verified_at"] is None
+
+    confirm_number = client.post(
+        "/user-management/phone-user/edit",
+        data={
+            "username": "phone-user",
+            "full_name": "Phone User",
+            "email": "phone-user@example.com",
+            "role": "office_staff",
+            "is_active": "true",
+            "mobile_phone": "9876541234",
+        },
+        follow_redirects=False,
+    )
+    assert confirm_number.status_code == 302
+    confirmed_user = store.get_user("phone-user")
+    assert confirmed_user["mobile_phone_verified_at"]
+    assert confirmed_user["mobile_phone_verified_by_admin"] is True
+    assert b"admin verified" in client.get("/user-management/phone-user").data
+
+    update = client.post(
+        "/user-management/phone-user/edit",
+        data={
+            "username": "phone-user",
+            "full_name": "Phone User",
+            "email": "phone-user@example.com",
+            "role": "office_staff",
+            "is_active": "true",
+            "mobile_phone": "9123456780",
+        },
+        follow_redirects=False,
+    )
+    assert update.status_code == 302
+    updated_user = store.get_user("phone-user")
+    assert updated_user["mobile_phone"] == "9123456780"
+    assert updated_user["mobile_phone_verified_at"]
+    assert updated_user["mobile_phone_verified_by_admin"] is True
+    audit_log = store.audit_log[-1]
+    assert audit_log["action"] == "user_updated"
+    assert "9876541234" not in audit_log["details"]
+    assert "9123456780" not in audit_log["details"]
+    assert "••••••1234" in audit_log["details"]
+    assert "••••••6780" in audit_log["details"]
 
 
 def test_super_admin_can_grant_and_revoke_camera_upload(client):

@@ -91,6 +91,40 @@ if (root) {
   const mobileStatus = document.getElementById("profile-mobile-status");
   const sendMobileCode = document.getElementById("profile-send-phone-code");
   const verifyMobileCode = document.getElementById("profile-verify-mobile");
+  const mobileForm = document.getElementById("profile-mobile-form");
+  const changeMobile = document.getElementById("profile-change-mobile");
+
+  function setMobileFormOpen(isOpen) {
+    mobileForm.hidden = !isOpen;
+    if (changeMobile) {
+      changeMobile.setAttribute("aria-expanded", String(isOpen));
+      changeMobile.textContent = isOpen ? "Cancel" : "Change number";
+    }
+    if (isOpen) mobileInput.focus();
+  }
+
+  changeMobile?.addEventListener("click", () => {
+    const isOpen = mobileForm.hidden;
+    if (isOpen) {
+      mobileStatus.textContent = "";
+      mobileStatus.removeAttribute("data-state");
+      sendMobileCode.disabled = false;
+      mobileCode.value = "";
+      mobileCode.disabled = true;
+      verifyMobileCode.disabled = true;
+      setMobileFormOpen(true);
+      return;
+    }
+    const currentMobileNumber = document.getElementById("profile-mobile-current-number");
+    if (currentMobileNumber) mobileInput.value = currentMobileNumber.textContent.trim();
+    mobileStatus.textContent = "";
+    mobileStatus.removeAttribute("data-state");
+    sendMobileCode.disabled = true;
+    mobileCode.value = "";
+    mobileCode.disabled = true;
+    verifyMobileCode.disabled = true;
+    setMobileFormOpen(false);
+  });
 
   function setMobileStatus(message, isError = false) {
     mobileStatus.textContent = message;
@@ -149,11 +183,24 @@ if (root) {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Unable to verify this mobile number.");
-      document.getElementById("profile-mobile-current").textContent = `Verified number: ${result.mobile_phone}`;
-      setMobileStatus("Mobile number verified and saved. Password resets now require an SMS code.");
+      const formattedMobileNumber = result.mobile_phone.slice(-10);
+      document.getElementById("profile-mobile-current").replaceChildren(
+        document.createTextNode("Verified number: "),
+        Object.assign(document.createElement("strong"), {
+          id: "profile-mobile-current-number",
+          textContent: formattedMobileNumber,
+        }),
+      );
+      mobileStatus.textContent = "";
+      mobileStatus.removeAttribute("data-state");
+      mobileStatus.setAttribute("role", "status");
       mobileCode.value = "";
-      mobileInput.value = result.mobile_phone.slice(-10);
+      mobileInput.value = formattedMobileNumber;
       sendMobileCode.disabled = true;
+      if (changeMobile) {
+        changeMobile.hidden = false;
+        setMobileFormOpen(false);
+      }
     } catch (error) {
       setMobileStatus(error.message || "Unable to verify this mobile number. Please try again.", true);
       verifyMobileCode.disabled = false;

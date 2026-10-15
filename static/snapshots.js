@@ -55,8 +55,20 @@ function formatSize(bytes) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const actionIcons = {
+    verify: '<circle cx="12" cy="12" r="8.5"></circle><path d="m8 12 2.5 2.5L16.5 9"></path>',
+    restore: '<path d="M4 11a8 8 0 1 1 2.3 5.7"></path><path d="M4 5v6h6"></path><path d="M12 8v4l2.5 1.5"></path>',
+    folder: '<path d="M3.5 7.5h6l2 2h9v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"></path><path d="M3.5 7.5v-2a2 2 0 0 1 2-2h4l2 2h5"></path>',
+    delete: '<path d="M4 7h16"></path><path d="M10 11v6M14 11v6"></path><path d="m6 7 1 13h10l1-13M9 7V4h6v3"></path>',
+    download: '<path d="M12 3v12"></path><path d="m7 11 5 5 5-5"></path><path d="M4 19v2h16v-2"></path>'
+};
+
 function actionButton(action, filename, label) {
-    return `<button type="button" class="button secondary" data-action="${action}" data-filename="${escapeHtml(filename)}">${label}</button>`;
+    return `<button type="button" class="snapshot-icon-button" data-action="${action}" data-filename="${escapeHtml(filename)}" aria-label="${label}" title="${label}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${actionIcons[action]}</svg></button>`;
+}
+
+function downloadLink(filename) {
+    return `<a class="snapshot-icon-button" href="/api/snapshots/${encodeURIComponent(filename)}/download" aria-label="Download verified snapshot" title="Download verified snapshot"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${actionIcons.download}</svg></a>`;
 }
 
 function renderSnapshots(snapshots) {
@@ -79,7 +91,7 @@ function renderSnapshots(snapshots) {
             <td class="${snapshot.verified ? "status-verified" : "status-failed"}" title="${snapshot.verified ? "" : "Contact your administrator for help checking this backup."}">${escapeHtml(snapshot.verification_status)}</td>
             <td><div class="table-actions">
                 ${actionButton("verify", snapshot.filename, "Verify")}
-                ${snapshot.verified ? actionButton("restore", snapshot.filename, "Restore") : ""}
+                ${snapshot.verified ? actionButton("restore", snapshot.filename, "Restore") + downloadLink(snapshot.filename) : ""}
                 ${actionButton("folder", snapshot.filename, "Open Folder")}
                 ${actionButton("delete", snapshot.filename, "Delete")}
             </div></td>

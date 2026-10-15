@@ -85,14 +85,16 @@
                 <p>Verify a mobile number to protect password resets with an SMS one-time code.</p>
                 <p id="profile-mobile-current">
                     {% if profile.mobile_phone_verified %}
-                        Verified number: {{ profile.mobile_phone[3:] if profile.mobile_phone.startswith('+91') else profile.mobile_phone }}
+                        Verified number:
+                        <strong id="profile-mobile-current-number">{{ profile.mobile_phone[3:] if profile.mobile_phone.startswith('+91') else profile.mobile_phone }}</strong>
                     {% elif profile.mobile_phone %}
                         Setup number: {{ profile.mobile_phone[3:] if profile.mobile_phone.startswith('+91') else profile.mobile_phone }} (verification required)
                     {% else %}
                         No mobile number is verified yet.
                     {% endif %}
                 </p>
-                <div class="profile-mobile-form">
+                <button id="profile-change-mobile" type="button" aria-expanded="false" aria-controls="profile-mobile-form"{% if not profile.mobile_phone_verified %} hidden{% endif %}>Change number</button>
+                <div id="profile-mobile-form" class="profile-mobile-form"{% if profile.mobile_phone_verified %} hidden{% endif %}>
                     <label for="profile-mobile-number">10-digit Indian mobile number</label>
                     <input id="profile-mobile-number" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="10" pattern="[6-9][0-9]{9}" placeholder="9876543210" value="{{ profile.mobile_phone[3:] if profile.mobile_phone.startswith('+91') else profile.mobile_phone }}" required>
                     <button id="profile-send-phone-code" type="button">Send SMS Code</button>

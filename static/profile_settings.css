@@ -137,6 +137,12 @@ body.profile-page .profile-card h2 {
     display: grid;
     gap: 9px;
 }
+.profile-mobile-form[hidden] { display: none; }
+#profile-mobile-current strong { color: #eaf5ef; }
+#profile-change-mobile {
+    min-height: 38px;
+    margin: 0 0 14px;
+}
 .profile-mobile-form label {
     margin-top: 7px;
     color: #a4b7ad;

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, current_app, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from snapshot_service import (
     SNAPSHOT_PREFIX,
@@ -359,6 +359,42 @@ def verify_snapshot_route(filename):
     result = verify_snapshot(path)
     _write_local_event("snapshot_verified", session.get("user_id"), result.get("metadata", {}).get("project_id"), filename, "verified" if result["verified"] else "failed")
     return jsonify(result), 200 if result["verified"] else 422
+
+
+@snapshot_blueprint.route("/api/snapshots/<filename>/download")
+@_admin_required
+def download_snapshot_route(filename):
+    path = _snapshot_path(filename)
+    if path is None:
+        return jsonify(error="Snapshot file not found."), 404
+
+    result = verify_snapshot(path)
+    if not result["verified"]:
+        _write_local_event(
+            "snapshot_download_rejected",
+            session.get("user_id"),
+            filename=filename,
+            result="verification_failed",
+        )
+        return jsonify(error="This snapshot failed verification and cannot be downloaded."), 422
+
+    _write_local_event(
+        "snapshot_downloaded",
+        session.get("user_id"),
+        result.get("metadata", {}).get("project_id"),
+        filename,
+        "verified",
+    )
+    response = send_file(
+        path,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=filename,
+        max_age=0,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @snapshot_blueprint.route("/api/snapshots/<filename>", methods=["DELETE"])

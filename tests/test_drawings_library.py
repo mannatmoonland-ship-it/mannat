@@ -21,7 +21,14 @@ assert 'id="drawingForm"' in template
 assert 'id="drawingCategoryId"' in template
 assert 'dialogs.css' in template
 assert 'data-drawings-csrf="{{ drawings_csrf }}"' in template
+assert 'data-can-write="{{ \'true\' if can_write_drawings else \'false\' }}"' in template
+assert 'data-can-delete="{{ \'true\' if can_delete_drawings else \'false\' }}"' in template
+assert 'if can_write_drawings' in template
 assert 'drawings_categories' in js
+assert 'const canWriteDrawings = document.body.dataset.canWrite === "true";' in js
+assert 'const canDeleteDrawings = document.body.dataset.canDelete === "true";' in js
+assert '${canWriteDrawings ? `' in js
+assert '${canDeleteDrawings ? `' in js
 assert 'collection(db, "drawings")' in js
 assert 'sortCategoriesByCreationOrder' in js
 assert 'sortDrawingsByCreationOrder' in js
@@ -68,6 +75,7 @@ assert 'data-id="${escapeHtml(drawing.id)}"' in js
 assert '`/api/drawings/categories/${encodeURIComponent(category.id)}/order`' not in js
 assert '`/api/drawings/categories/${encodeURIComponent(categoryId)}/order`' in js
 assert 'previous order has been restored.' in js
+assert 'Please contact an administrator to change the order.' in js
 assert 'sortCategoriesByOrder' in js
 assert 'title="Move Up"' in js and 'title="Move Down"' in js
 assert '.drawings-order-button:disabled' in css

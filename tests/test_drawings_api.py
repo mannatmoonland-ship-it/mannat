@@ -145,6 +145,28 @@ def test_unauthenticated_mutations_are_rejected(drawings_client):
     assert response.status_code == 401
 
 
+@pytest.mark.parametrize(
+    ("permissions", "can_write", "can_delete"),
+    [([], False, False), (["drawings.write"], True, False)],
+)
+def test_drawings_page_exposes_only_permitted_management_controls(
+    drawings_client, monkeypatch, permissions, can_write, can_delete
+):
+    _store, client = drawings_client
+    monkeypatch.setattr(
+        app_module,
+        "_user_has_compiled_permission",
+        lambda _user, permission: permission in permissions,
+    )
+
+    response = client.get("/drawings")
+
+    assert response.status_code == 200
+    assert f'data-can-write="{"true" if can_write else "false"}"'.encode() in response.data
+    assert f'data-can-delete="{"true" if can_delete else "false"}"'.encode() in response.data
+    assert (b'id="createCategoryButton"' in response.data) is can_write
+
+
 @pytest.mark.parametrize("csrf", [None, "invalid-token"])
 def test_missing_or_invalid_csrf_is_rejected(drawings_client, csrf):
     _store, client = drawings_client

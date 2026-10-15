@@ -123,7 +123,7 @@
                                 <input id="mobile_phone" name="mobile_phone" type="tel" required pattern="[6-9][0-9]{9}" maxlength="10" placeholder="9876543210" autocomplete="tel-national">
                             </div>
                         </div>
-                        <p class="form-hint">Enter 10 digits only. The user must verify the number by SMS before setting their first password.</p>
+                        <p class="form-hint">Enter 10 digits only. Numbers entered by an admin are treated as verified; the user must be able to receive an SMS code there to set or reset their password.</p>
                         <label for="recovery_email">Recovery Email (optional)</label>
                         <input id="recovery_email" name="recovery_email" type="email" autocomplete="email">
                         <div class="field-row">
@@ -192,7 +192,7 @@
                         <th>Role</th>
                         <th>Type</th>
                         <th>Status</th>
-                        <th>Mobile OTP</th>
+                        <th>Mobile Number</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -213,7 +213,7 @@
                                     {{ 'Active' if user.is_active else 'Inactive' }}
                                 </span>
                             </td>
-                            <td>{{ (user.mobile_phone[3:] if user.mobile_phone.startswith('+91') else user.mobile_phone) if user.mobile_phone else 'No number' }} ({{ 'Verified' if user.mobile_phone_verified_at and user.mobile_phone else 'Pending' }})</td>
+                            <td>{{ (user.mobile_phone[3:] if user.mobile_phone.startswith('+91') else user.mobile_phone) if user.mobile_phone else 'No number' }} ({{ 'Admin verified' if user.mobile_phone_verified_at and user.mobile_phone and user.mobile_phone_verified_by_admin else 'OTP verified' if user.mobile_phone_verified_at and user.mobile_phone else 'Pending' }})</td>
                             <td class="actions">
                                 <a href="{{ url_for('user_management_details', user_id=user.id) }}"><button type="button">View</button></a>
                                 <form method="post" action="{{ url_for('user_management_toggle_status', user_id=user.id) }}" data-confirm="Toggle this user account status?">

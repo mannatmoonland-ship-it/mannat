@@ -89,12 +89,34 @@ def test_profile_settings_shows_safe_authenticated_user_information(profile_clie
     assert 'datetime="2026-09-25T22:57:25Z"' in html
     assert 'data-profile-timestamp' in html
     assert '2026-09-25T22:57:25Z</time>' in html
+    assert 'id="profile-change-mobile"' in html
+    assert 'id="profile-mobile-form" class="profile-mobile-form"' in html
     profile_script = Path(app_module.app.root_path, "static", "profile_settings.js").read_text(encoding="utf-8")
     assert 'import { formatDate, formatDateTime } from "./date_format.js";' in profile_script
     assert "formatDateTime(value)" in profile_script
     assert "password_hash" not in html
     assert "Example1!Password" not in html
     assert "profile_avatar_csrf" not in html
+
+
+def test_verified_mobile_number_hides_sms_controls_until_change_is_requested(profile_client):
+    client, store = profile_client
+    user = store.get_user("profile-user")
+    user["mobile_phone"] = "9876543210"
+    user["mobile_phone_verified_at"] = "2026-10-15T00:00:00Z"
+    store.save_user(user)
+
+    response = client.get("/profile-settings")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Verified number:" in html
+    assert "9876543210" in html
+    assert 'id="profile-change-mobile"' in html
+    assert "Change number" in html
+    assert 'id="profile-mobile-form" class="profile-mobile-form" hidden' in html
+    assert 'id="profile-send-phone-code"' in html
+    assert 'id="profile-verify-mobile"' in html
 
 
 def test_profile_fields_are_prefilled_and_controlled_fields_remain_read_only(profile_client):

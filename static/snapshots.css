@@ -78,7 +78,23 @@ th, td { padding: 10px 9px; border-bottom: 1px solid #e7ebef; vertical-align: mi
 th { color: #475467; background: #f8fafc; white-space: nowrap; }
 td:first-child { min-width: 220px; overflow-wrap: anywhere; font-weight: 650; }
 .table-actions { display: flex; flex-wrap: wrap; gap: 5px; min-width: 210px; }
-.table-actions .button { min-height: 32px; padding: 5px 8px; font-size: 11px; }
+.snapshot-icon-button {
+    display: inline-grid;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    color: #344054;
+    background: #f8fafc;
+    cursor: pointer;
+    text-decoration: none;
+}
+.snapshot-icon-button:hover { border-color: #98a2b3; background: #eef2f6; }
+.snapshot-icon-button:focus-visible { outline: 2px solid #1677a7; outline-offset: 2px; }
+.snapshot-icon-button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
 .status-verified { color: var(--green); font-weight: 700; }
 .status-failed { color: var(--red); font-weight: 700; }
 .restore-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 16px 0; }

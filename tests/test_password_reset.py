@@ -318,9 +318,78 @@ def test_unverified_mobile_blocks_self_service_and_admin_password_resets(client,
     )
 
     assert GENERIC_RESPONSE in response.data
-    assert b"verified Indian (+91) mobile number in Profile Settings" in admin_response.data
+    assert b"valid 10-digit Indian mobile number in User Management" in admin_response.data
     assert sent == []
     assert store.get_user(USER_ID)["password_reset_token_hash"] is None
+
+
+def test_admin_can_resend_setup_link_for_user_with_pending_mobile_verification(client, monkeypatch):
+    store = app.config["FIRESTORE_STORE"]
+    user = store.get_user(USER_ID)
+    user["mobile_phone_verified_at"] = None
+    user["must_change_password"] = True
+    store.save_user(user)
+    sent = []
+    monkeypatch.setattr("app.send_email", lambda *args, **kwargs: sent.append((args, kwargs)) or True)
+    base_url = "http://office-test.example:5020"
+    sign_in_as_admin(client, base_url)
+
+    response = client.post(
+        f"/user-management/{USER_ID}/reset-password",
+        data={"csrf_token": authenticated_form_csrf(client, base_url)},
+        follow_redirects=True,
+        base_url=base_url,
+    )
+
+    assert response.status_code == 200
+    assert b"password-reset link was sent" in response.data
+    assert len(sent) == 1
+    (recipient, _subject, body), _options = sent[0]
+    assert recipient == "saved-account@example.com"
+    raw_token = body.rsplit("#", 1)[1].splitlines()[0]
+    client.get(f"/reset-password/{USER_ID}", base_url=base_url)
+    csrf = csrf_token(client, base_url)
+    valid_link = client.post(
+        f"/reset-password/{USER_ID}/validate",
+        json={"token": raw_token, "csrf_token": csrf},
+        base_url=base_url,
+    )
+
+    assert valid_link.status_code == 200
+    assert valid_link.get_json()["valid"] is True
+    assert valid_link.get_json()["setup_required"] is True
+
+
+def test_admin_entered_ten_digit_mobile_allows_reset_link_validation(client):
+    store = app.config["FIRESTORE_STORE"]
+    user = store.get_user(USER_ID)
+    user["mobile_phone"] = "9876543210"
+    user["mobile_phone_verified_at"] = "2026-10-15T00:00:00Z"
+    user["mobile_phone_verified_by_admin"] = True
+    user["must_change_password"] = True
+    raw_token = "admin-entered-number-reset-token"
+    user["password_reset_token_hash"] = hashlib.sha256(raw_token.encode()).hexdigest()
+    user["password_reset_expires_at"] = (
+        datetime.now(timezone.utc) + timedelta(minutes=30)
+    ).isoformat()
+    store.save_user(user)
+    base_url = "http://office-test.example:5020"
+    client.get("/reset-password/" + USER_ID, base_url=base_url)
+    csrf = csrf_token(client, base_url)
+
+    response = client.post(
+        f"/reset-password/{USER_ID}/validate",
+        json={"token": raw_token, "csrf_token": csrf},
+        base_url=base_url,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "valid": True,
+        "username": "recovery-user",
+        "masked_mobile_phone": "••••••3210",
+        "setup_required": True,
+    }
 
 
 def test_expired_and_reused_tokens_are_rejected(client, monkeypatch):

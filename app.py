@@ -1427,6 +1427,7 @@ class InMemoryFirestoreStore:
             "recovery_email": user.get("recovery_email"),
             "mobile_phone": user.get("mobile_phone"),
             "mobile_phone_verified_at": user.get("mobile_phone_verified_at"),
+            "mobile_phone_verified_by_admin": bool(user.get("mobile_phone_verified_by_admin", False)),
             "role": user.get("role"),
             "custom_staff_type": user.get("custom_staff_type", ""),
             "password_hash": user.get("password_hash", ""),
@@ -1714,6 +1715,7 @@ class InMemoryFirestoreStore:
             })
             if mobile_phone_verified_at:
                 user["mobile_phone_verified_at"] = mobile_phone_verified_at
+                user["mobile_phone_verified_by_admin"] = False
             self.users[user_id] = self._normalize_user(user)
             return True
 
@@ -2894,6 +2896,7 @@ class FirebaseFirestoreStore:
             }
             if mobile_phone_verified_at:
                 changes["mobile_phone_verified_at"] = mobile_phone_verified_at
+                changes["mobile_phone_verified_by_admin"] = False
             transaction.update(reference, changes)
             return True
 
@@ -4731,6 +4734,7 @@ def verify_profile_mobile_phone():
             return jsonify({"error": "Your profile could not be found."}), 404
         updated_user["mobile_phone"] = mobile_phone
         updated_user["mobile_phone_verified_at"] = iso_now()
+        updated_user["mobile_phone_verified_by_admin"] = False
         store.save_user(updated_user)
         _clear_sms_otp_challenge("profile-mobile", user["id"])
     except ValueError as error:
@@ -5089,7 +5093,7 @@ def validate_password_reset_link(user_id):
         return jsonify(valid=False, error="This reset link is invalid or expired."), 400
     username = str(user.get("username") or "").strip()
     mobile_phone = user.get("mobile_phone")
-    if not username or not _valid_mobile_phone(mobile_phone):
+    if not username or not _valid_fast2sms_mobile_phone(mobile_phone):
         return jsonify(valid=False, error="This reset link is invalid or expired."), 400
     return jsonify(
         valid=True,
@@ -5406,11 +5410,16 @@ def forgot_password():
             flash("Use the dedicated Super Admin recovery process for the Super Admin account.", "error")
             return redirect(url_for("forgot_password"))
         try:
-            saved_email = send_password_reset_link(target, get_request_base_url(), store)
+            saved_email = send_password_reset_link(
+                target,
+                get_request_base_url(),
+                store,
+                allow_unverified_mobile=bool(target.get("must_change_password")),
+            )
         except Exception as error:
             app.logger.warning("Admin password reset email failed (%s).", type(error).__name__)
             if isinstance(error, ValueError):
-                flash("Unable to send a password-reset link. Check the saved email and public origin, and ensure the user has a verified Indian (+91) mobile number in Profile Settings.", "error")
+                flash("Unable to send a password-reset link. Check the saved email and public origin, and ensure the user has a valid 10-digit Indian mobile number in User Management.", "error")
             else:
                 flash("Unable to send the password-reset email. No password change was made; check the mail configuration and try again.", "error")
             return redirect(url_for("forgot_password"))
@@ -5574,7 +5583,8 @@ def user_management_create():
         "email": email,
         "recovery_email": (request.form.get("recovery_email") or "").strip(),
         "mobile_phone": mobile_phone,
-        "mobile_phone_verified_at": None,
+        "mobile_phone_verified_at": iso_now(),
+        "mobile_phone_verified_by_admin": True,
         "role": role,
         "custom_staff_type": custom_staff_type,
         "password_hash": generate_password_hash(secrets.token_urlsafe(48)),
@@ -5796,6 +5806,17 @@ def user_management_edit(user_id):
     new_full_name = (request.form.get("full_name") or "").strip()
     new_email = (request.form.get("email") or "").strip()
     new_recovery_email = (request.form.get("recovery_email") or "").strip()
+    submitted_mobile_phone = request.form.get("mobile_phone")
+    new_mobile_phone = target.get("mobile_phone") or ""
+    if submitted_mobile_phone is not None and submitted_mobile_phone.strip():
+        submitted_mobile_phone = submitted_mobile_phone.strip()
+        if not re.fullmatch(r"[6-9][0-9]{9}", submitted_mobile_phone):
+            message = "Enter a valid 10-digit Indian mobile number, such as 9876543210."
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return jsonify({"success": False, "message": message}), 400
+            flash(message, "error")
+            return redirect(url_for("user_management_details", user_id=user_id))
+        new_mobile_phone = submitted_mobile_phone
     new_role = normalize_staff_type_name(request.form.get("role"))
     new_custom_staff_type = normalize_staff_type_name(request.form.get("custom_staff_type"))
     is_active_requested = str(request.form.get("is_active") or "true").strip().lower()
@@ -5924,6 +5945,29 @@ def user_management_edit(user_id):
         if previous_value != new_value:
             changes[field_name] = {"previous": previous_value, "updated": new_value}
 
+    previous_mobile_digits = _fast2sms_phone_digits(target.get("mobile_phone"))
+    new_mobile_digits = _fast2sms_phone_digits(new_mobile_phone)
+    mobile_phone_changed = (
+        previous_mobile_digits != new_mobile_digits
+        if previous_mobile_digits is not None and new_mobile_digits is not None
+        else (target.get("mobile_phone") or "") != new_mobile_phone
+    )
+    mobile_phone_admin_confirmed = (
+        submitted_mobile_phone is not None
+        and bool(submitted_mobile_phone.strip())
+        and (mobile_phone_changed or not _mobile_phone_is_verified(target))
+    )
+    if mobile_phone_changed:
+        changes["mobile_phone"] = {
+            "previous": _mask_mobile_phone(target.get("mobile_phone")) or "Not configured",
+            "updated": _mask_mobile_phone(new_mobile_phone) or "Not configured",
+        }
+    if mobile_phone_admin_confirmed and not mobile_phone_changed:
+        changes["mobile_phone_verification"] = {
+            "previous": "pending",
+            "updated": "admin-verified",
+        }
+
     previous_authorization = (
         str(target.get("role") or "").strip().casefold(),
         str(target.get("custom_staff_type") or "").strip().casefold(),
@@ -5938,6 +5982,13 @@ def user_management_edit(user_id):
     target["full_name"] = new_full_name
     target["email"] = new_email
     target["recovery_email"] = new_recovery_email or target.get("recovery_email", "")
+    target["mobile_phone"] = new_mobile_phone
+    if mobile_phone_admin_confirmed:
+        target["mobile_phone_verified_at"] = iso_now()
+        target["mobile_phone_verified_by_admin"] = True
+    if mobile_phone_changed or mobile_phone_admin_confirmed:
+        _clear_sms_otp_challenge("profile-mobile", target["id"])
+        _clear_sms_otp_challenge("password-reset", target["id"])
     target["role"] = new_role
     target["custom_staff_type"] = new_custom_staff_type or target.get("custom_staff_type", "")
     target["status"] = "active" if new_is_active else "inactive"
@@ -6034,11 +6085,16 @@ def user_management_reset_password(user_id):
         return redirect(url_for("user_management_page"))
 
     try:
-        saved_email = send_password_reset_link(target, get_request_base_url(), store)
+        saved_email = send_password_reset_link(
+            target,
+            get_request_base_url(),
+            store,
+            allow_unverified_mobile=bool(target.get("must_change_password")),
+        )
     except Exception as error:
         app.logger.warning("Admin password reset email failed (%s).", type(error).__name__)
         if isinstance(error, ValueError):
-            flash("Unable to send a password-reset link. Check the saved email and public origin, and ensure the user has a verified Indian (+91) mobile number in Profile Settings.", "error")
+            flash("Unable to send a password-reset link. Check the saved email and public origin, and ensure the user has a valid 10-digit Indian mobile number in User Management.", "error")
         else:
             flash("Unable to send the password-reset email. No password change was made; check the mail configuration and try again.", "error")
         return redirect(url_for("user_management_page"))
@@ -6094,9 +6150,13 @@ def user_management_delete_user(user_id):
 
     destroyed_user = dict(target)
     try:
+        preserve_daily_report_user_attribution(destroyed_user)
         deleted = store.delete_user(target_id)
     except Exception as error:
-        app.logger.error("User account deletion failed (%s).", type(error).__name__)
+        app.logger.error(
+            "User account deletion or Daily Reports attribution preservation failed (%s).",
+            type(error).__name__,
+        )
         flash("User could not be deleted. Please try again.", "error")
         return redirect(url_for("user_management_page"))
     if not deleted:
@@ -6222,14 +6282,28 @@ def ledger_prints():
 @app.route("/drawings")
 @require_login
 def drawings():
+    user = get_current_user()
+    try:
+        can_write_drawings = _user_has_compiled_permission(user, "drawings.write")
+        can_delete_drawings = _user_has_compiled_permission(user, "drawings.delete")
+    except Exception as error:
+        app.logger.error("Drawings page authorization failed (%s).", type(error).__name__)
+        return Response(
+            "Unable to verify Drawings permissions.",
+            status=503,
+            mimetype="text/plain",
+        )
+
     csrf_token = session.get("drawings_csrf")
     if not csrf_token:
         csrf_token = secrets.token_urlsafe(32)
         session["drawings_csrf"] = csrf_token
     return render_template(
         "drawings.html",
-        current_user=get_current_user(),
+        current_user=user,
         drawings_csrf=csrf_token,
+        can_write_drawings=can_write_drawings,
+        can_delete_drawings=can_delete_drawings,
     )
 
 
@@ -8420,6 +8494,44 @@ def _format_daily_report_date_for_display(date_value):
         return parsed.strftime("%d/%m/%Y")
     except ValueError:
         return ""
+
+
+def preserve_daily_report_user_attribution(user):
+    user_id = str(user.get("id") or "").strip()
+    if not user_id:
+        raise ValueError("A user ID is required to preserve Daily Reports attribution.")
+    if getattr(get_user_store(), "db", None) is None:
+        return
+
+    full_name = str(user.get("full_name") or "").strip()
+    username = str(user.get("username") or "").strip()
+    display_name = full_name or username or "Unknown"
+    collection = get_daily_records_collection()
+    records_by_id = {}
+
+    for user_id_field in ("createdByUserId", "last_edited_by_user_id"):
+        records = collection.where(
+            filter=FieldFilter(user_id_field, "==", user_id)
+        ).stream()
+        for record in records:
+            record_data = record.to_dict()
+            if isinstance(record_data, dict):
+                records_by_id[record.id] = record_data
+
+    for record_id, record_data in records_by_id.items():
+        attribution_updates = {}
+        if record_data.get("createdByUserId") == user_id:
+            if not str(record_data.get("createdByName") or "").strip():
+                attribution_updates["createdByName"] = display_name
+            if not str(record_data.get("createdByUsername") or "").strip() and username:
+                attribution_updates["createdByUsername"] = username
+        if record_data.get("last_edited_by_user_id") == user_id:
+            if not str(record_data.get("last_edited_by_name") or "").strip():
+                attribution_updates["last_edited_by_name"] = display_name
+            if not str(record_data.get("last_edited_by_username") or "").strip() and username:
+                attribution_updates["last_edited_by_username"] = username
+        if attribution_updates:
+            collection.document(record_id).update(attribution_updates)
 
 
 def _sanitize_daily_report_for_view(record_data):

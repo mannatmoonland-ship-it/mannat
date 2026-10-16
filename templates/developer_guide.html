@@ -174,6 +174,7 @@ python -m playwright install chromium</code></pre>
                     <div><dt><code>FIRESTORE_MODE</code> and <code>ALLOW_IN_MEMORY_FIRESTORE</code></dt><dd>Control the configured store mode and explicit in-memory development/test fallback. Do not use in-memory mode when persistent production data is required.</dd></div>
                     <div><dt><code>MAIL_SERVER</code>, <code>MAIL_PORT</code>, <code>MAIL_USE_TLS</code>, <code>MAIL_USERNAME</code>, <code>MAIL_PASSWORD</code>, <code>MAIL_DEFAULT_SENDER</code></dt><dd>Configure Flask-Mail for password reset and test email workflows. Keep mail credentials private.</dd></div>
                     <div><dt><code>FAST2SMS_API_KEY</code>, <code>FAST2SMS_SENDER_ID</code>, <code>FAST2SMS_MESSAGE_ID</code></dt><dd>Configure the Fast2SMS DLT API with a server-side API key and the approved sender ID and DLT message ID from the Fast2SMS dashboard.</dd></div>
+                    <div><dt><code>SMS_OTP_DEBUG_MODE</code></dt><dd>Local testing only: when enabled, password-reset OTP requests from localhost bypass Fast2SMS and show a test code in a popup on the reset page. No SMS is sent. Production always disables this code response; never enable this setting on Render.</dd></div>
                 </dl>
                 <p>Snapshot project switching writes active project details under <code>instance/</code>. Treat runtime files in that folder as deployment state; do not copy credential values into source control.</p>
             </section>
@@ -396,6 +397,7 @@ python -m playwright install chromium</code></pre>
                     <div><dt><code>ALLOW_IN_MEMORY_FIRESTORE</code></dt><dd>Explicit opt-in to the in-memory fallback when enabled with a true-like value. In-memory data is not durable and is not appropriate where persistent production records are required.</dd></div>
                     <div><dt><code>MAIL_SERVER</code>, <code>MAIL_PORT</code>, <code>MAIL_USE_TLS</code>, <code>MAIL_USERNAME</code>, <code>MAIL_PASSWORD</code>, <code>MAIL_DEFAULT_SENDER</code></dt><dd>Configure Flask-Mail for password reset and the Super Admin test-email page. Keep mail credentials private.</dd></div>
                     <div><dt><code>FAST2SMS_API_KEY</code>, <code>FAST2SMS_SENDER_ID</code>, <code>FAST2SMS_MESSAGE_ID</code></dt><dd>Configure the Fast2SMS DLT API with a server-side API key and the approved sender ID and DLT message ID from the Fast2SMS dashboard.</dd></div>
+                    <div><dt><code>SMS_OTP_DEBUG_MODE</code></dt><dd>Local testing only: when enabled, password-reset OTP requests from localhost bypass Fast2SMS and show a test code in a popup on the reset page. No SMS is sent. Production always disables this code response; never enable this setting on Render.</dd></div>
                 </dl>
                 <p>Snapshot project switching can write active project data to <code>instance/firebase_active_project.json</code>. This runtime file and credential files are excluded by the repository's <code>.gitignore</code>; preserve that separation and never commit secret values.</p>
             </section>

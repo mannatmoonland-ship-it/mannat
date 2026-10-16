@@ -90,6 +90,7 @@
     <main class="shell">
         <section class="panel">
             <h2>User Management</h2>
+            <p class="form-hint">Reset Password emails a reset link. The SMS code is requested from that link; when local <code>SMS_OTP_DEBUG_MODE=true</code> is enabled, a development test code appears in a popup on the reset page and no SMS is sent. Never enable this mode in production.</p>
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}

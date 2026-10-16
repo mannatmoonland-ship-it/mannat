@@ -326,6 +326,8 @@ app.config.update(
     FAST2SMS_API_KEY=os.environ.get("FAST2SMS_API_KEY", ""),
     FAST2SMS_SENDER_ID=os.environ.get("FAST2SMS_SENDER_ID", "JJROBO"),
     FAST2SMS_MESSAGE_ID=os.environ.get("FAST2SMS_MESSAGE_ID", "144137"),
+    SMS_OTP_DEBUG_MODE=os.environ.get("SMS_OTP_DEBUG_MODE", "").strip().lower()
+    in {"1", "true", "yes", "on"},
 )
 mail = Mail(app)
 PASSWORD_RESET_LOCK = threading.Lock()
@@ -993,6 +995,17 @@ def _sms_otp_challenge_record_matches(challenge, expected, challenge_id, now):
     )
 
 
+def _local_sms_otp_debug_enabled():
+    if IS_PRODUCTION_ENVIRONMENT or not app.config.get("SMS_OTP_DEBUG_MODE"):
+        return False
+    try:
+        host = urlsplit(request.host_url).hostname
+        remote_addr = ipaddress.ip_address(request.remote_addr or "")
+    except ValueError:
+        return False
+    return host in {"localhost", "127.0.0.1", "::1"} and remote_addr.is_loopback
+
+
 def _clear_sms_otp_challenge(purpose, user_id):
     get_user_store().delete_sms_otp_challenge(
         _sms_otp_challenge_document_id(purpose, user_id)
@@ -1000,7 +1013,9 @@ def _clear_sms_otp_challenge(purpose, user_id):
     session.pop("sms_otp_challenge", None)
 
 
-def _issue_sms_otp(purpose, user_id, phone, token_hash=None):
+def _issue_sms_otp(
+    purpose, user_id, phone, token_hash=None, *, allow_local_debug_code=False
+):
     phone_digits = _fast2sms_phone_digits(phone)
     if not phone_digits:
         raise ValueError("Enter a valid 10-digit Indian mobile number.")
@@ -1008,7 +1023,14 @@ def _issue_sms_otp(purpose, user_id, phone, token_hash=None):
     if not _allow_sms_otp_send(request.remote_addr, phone):
         raise ValueError("Too many SMS code requests. Please wait before requesting another code.")
     code = f"{secrets.randbelow(1_000_000):06d}"
-    provider_request_id = _send_fast2sms_otp(phone, code)
+    debug_code = (
+        code
+        if allow_local_debug_code and _local_sms_otp_debug_enabled()
+        else None
+    )
+    provider_request_id = (
+        None if debug_code else _send_fast2sms_otp(phone, code)
+    )
     challenge_id = secrets.token_urlsafe(24)
     challenge = {
         "id": challenge_id,
@@ -1024,7 +1046,7 @@ def _issue_sms_otp(purpose, user_id, phone, token_hash=None):
     challenge_document_id = _sms_otp_challenge_document_id(purpose, user_id)
     get_user_store().save_sms_otp_challenge(challenge_document_id, challenge)
     session["sms_otp_challenge"] = challenge_id
-    return provider_request_id
+    return provider_request_id, debug_code
 
 
 def _sms_otp_challenge_matches(
@@ -4794,7 +4816,9 @@ def send_profile_mobile_phone_code():
     if not isinstance(mobile_phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", mobile_phone):
         return jsonify({"error": "Enter a valid 10-digit Indian mobile number."}), 400
     try:
-        provider_request_id = _issue_sms_otp("profile-mobile", user["id"], mobile_phone)
+        provider_request_id, _debug_code = _issue_sms_otp(
+            "profile-mobile", user["id"], mobile_phone
+        )
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
     except Fast2SMSConfigurationError:
@@ -5145,8 +5169,12 @@ def send_password_reset_sms_code(user_id):
     if not _mobile_phone_is_verified(user) and not _mobile_phone_can_be_used_for_setup(user):
         return jsonify({"error": "This reset link is invalid or expired."}), 400
     try:
-        provider_request_id = _issue_sms_otp(
-            "password-reset", user_id, user["mobile_phone"], token_hash
+        provider_request_id, debug_code = _issue_sms_otp(
+            "password-reset",
+            user_id,
+            user["mobile_phone"],
+            token_hash,
+            allow_local_debug_code=True,
         )
     except ValueError as error:
         return jsonify({"error": str(error)}), 400
@@ -5159,11 +5187,17 @@ def send_password_reset_sms_code(user_id):
     except Exception as error:
         app.logger.error("Fast2SMS password-reset OTP send failed (%s).", type(error).__name__)
         return jsonify({"error": "Unable to send the SMS code. Check the Fast2SMS API key, sender ID, and DLT message ID."}), 503
-    return jsonify({
+    response = {
         "sent": True,
         "masked_mobile_phone": _mask_mobile_phone(user["mobile_phone"]),
         "provider_request_id": provider_request_id,
-    })
+    }
+    if debug_code:
+        response["delivery_mode"] = "local-test"
+        response["debug_code"] = debug_code
+    result = jsonify(response)
+    result.headers["Cache-Control"] = "no-store"
+    return result
 
 
 @app.route("/api/reset-password/<user_id>/verify-code", methods=["POST"])

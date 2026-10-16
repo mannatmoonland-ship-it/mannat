@@ -5,6 +5,9 @@ const challenge = document.getElementById("phoneChallenge");
 const sendCodeButton = document.getElementById("sendResetPhoneCode");
 const verifyCodeButton = document.getElementById("verifyResetPhoneCode");
 const codeInput = document.getElementById("resetPhoneCode");
+const localOtpDialog = document.getElementById("localOtpDialog");
+const localOtpCode = document.getElementById("localOtpCode");
+const useLocalOtpButton = document.getElementById("useLocalOtpCode");
 let resetToken = "";
 
 function showError(message) {
@@ -59,6 +62,13 @@ sendCodeButton.addEventListener("click", async () => {
     });
     codeInput.disabled = false;
     verifyCodeButton.disabled = false;
+    if (result.delivery_mode === "local-test" && /^[0-9]{6}$/.test(result.debug_code || "")) {
+      localOtpCode.textContent = result.debug_code;
+      localOtpDialog.showModal();
+      status.textContent = "Local test mode is active. No SMS was sent.";
+      status.classList.remove("error");
+      return;
+    }
     const requestReference = result.provider_request_id
       ? ` Fast2SMS request ID: ${result.provider_request_id}.`
       : "";
@@ -70,6 +80,12 @@ sendCodeButton.addEventListener("click", async () => {
   } finally {
     sendCodeButton.disabled = false;
   }
+});
+
+useLocalOtpButton.addEventListener("click", () => {
+  codeInput.value = localOtpCode.textContent;
+  localOtpDialog.close();
+  verifyCodeButton.focus();
 });
 
 verifyCodeButton.addEventListener("click", async () => {

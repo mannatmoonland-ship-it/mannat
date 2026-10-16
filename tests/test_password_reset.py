@@ -1,6 +1,7 @@
 import hashlib
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -36,6 +37,7 @@ def client(monkeypatch):
     monkeypatch.setitem(app.config, "TESTING", True)
     monkeypatch.setitem(app.config, "SECRET_KEY", "password-reset-test-secret")
     monkeypatch.setitem(app.config, "PUBLIC_BASE_URL", "https://app.example.test")
+    monkeypatch.setitem(app.config, "SMS_OTP_DEBUG_MODE", False)
     monkeypatch.setitem(app.config, "FIRESTORE_STORE", store)
     monkeypatch.setitem(app.config, "MAIL_PASSWORD", "mock-smtp-only")
     monkeypatch.setattr(app_module, "PASSWORD_RESET_ATTEMPTS", {})
@@ -93,6 +95,119 @@ def verify_reset_otp(client, token, csrf, base_url, monkeypatch):
     )
     assert verified.status_code == 200
     assert verified.get_json() == {"verified": True}
+
+
+def prepare_sms_reset_link(client, base_url):
+    raw_token = "local-development-reset-token"
+    user = app.config["FIRESTORE_STORE"].get_user(USER_ID)
+    user["password_reset_token_hash"] = hashlib.sha256(raw_token.encode()).hexdigest()
+    user["password_reset_expires_at"] = (
+        datetime.now(timezone.utc) + timedelta(minutes=30)
+    ).isoformat()
+    app.config["FIRESTORE_STORE"].save_user(user)
+    client.get(f"/reset-password/{USER_ID}", base_url=base_url)
+    csrf = csrf_token(client, base_url)
+    return raw_token, csrf
+
+
+def test_local_password_reset_debug_mode_shows_test_code_and_verifies_without_sms(
+    client, monkeypatch
+):
+    base_url = "http://localhost:5020"
+    raw_token, csrf = prepare_sms_reset_link(client, base_url)
+    monkeypatch.setitem(app.config, "SMS_OTP_DEBUG_MODE", True)
+    monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", False)
+    monkeypatch.setattr(
+        app_module,
+        "_send_fast2sms_otp",
+        lambda *_args: pytest.fail("Local test mode must not call the SMS provider."),
+    )
+
+    sent = client.post(
+        f"/api/reset-password/{USER_ID}/send-code",
+        json={"token": raw_token, "csrf_token": csrf},
+        base_url=base_url,
+    )
+
+    assert sent.status_code == 200
+    result = sent.get_json()
+    assert result["delivery_mode"] == "local-test"
+    assert re.fullmatch(r"[0-9]{6}", result["debug_code"])
+    assert result["provider_request_id"] is None
+    assert sent.headers["Cache-Control"] == "no-store"
+
+    verified = client.post(
+        f"/api/reset-password/{USER_ID}/verify-code",
+        json={
+            "token": raw_token,
+            "csrf_token": csrf,
+            "code": result["debug_code"],
+        },
+        base_url=base_url,
+    )
+    assert verified.status_code == 200
+    assert verified.get_json() == {"verified": True}
+
+
+def test_password_reset_debug_code_is_never_returned_in_production(
+    client, monkeypatch
+):
+    base_url = "http://localhost:5020"
+    raw_token, csrf = prepare_sms_reset_link(client, base_url)
+    monkeypatch.setitem(app.config, "SMS_OTP_DEBUG_MODE", True)
+    monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", True)
+    provider_calls = []
+    monkeypatch.setattr(
+        app_module,
+        "_send_fast2sms_otp",
+        lambda _phone, _code: provider_calls.append(True) or "sms-request",
+    )
+
+    sent = client.post(
+        f"/api/reset-password/{USER_ID}/send-code",
+        json={"token": raw_token, "csrf_token": csrf},
+        base_url=base_url,
+    )
+
+    assert sent.status_code == 200
+    assert provider_calls == [True]
+    assert sent.get_json()["provider_request_id"] == "sms-request"
+    assert "debug_code" not in sent.get_json()
+
+
+def test_password_reset_debug_code_is_not_returned_to_nonlocal_clients(
+    client, monkeypatch
+):
+    base_url = "http://office-test.example:5020"
+    raw_token, csrf = prepare_sms_reset_link(client, base_url)
+    monkeypatch.setitem(app.config, "SMS_OTP_DEBUG_MODE", True)
+    monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", False)
+    monkeypatch.setattr(
+        app_module, "_send_fast2sms_otp", lambda _phone, _code: "sms-request"
+    )
+
+    sent = client.post(
+        f"/api/reset-password/{USER_ID}/send-code",
+        json={"token": raw_token, "csrf_token": csrf},
+        base_url=base_url,
+    )
+
+    assert sent.status_code == 200
+    assert sent.get_json()["provider_request_id"] == "sms-request"
+    assert "debug_code" not in sent.get_json()
+
+
+def test_reset_page_has_local_test_code_popup():
+    response = app.test_client().get("/reset-password/account-user-123")
+
+    assert response.status_code == 200
+    assert b'id="localOtpDialog"' in response.data
+    assert b"No SMS was sent. Use this code for local development only." in response.data
+    javascript = (
+        Path(__file__).parents[1] / "static" / "password_reset.js"
+    ).read_text(encoding="utf-8")
+    assert 'result.delivery_mode === "local-test"' in javascript
+    assert "localOtpDialog.showModal();" in javascript
 
 
 def sign_in_as_admin(client, base_url="http://office-test.example:5020"):

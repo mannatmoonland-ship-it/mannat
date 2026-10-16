@@ -97,6 +97,8 @@ def test_profile_settings_shows_safe_authenticated_user_information(profile_clie
     assert "Red Book notifications" in html
     profile_script = Path(app_module.app.root_path, "static", "profile_settings.js").read_text(encoding="utf-8")
     web_push_script = Path(app_module.app.root_path, "static", "web_push_notifications.js").read_text(encoding="utf-8")
+    chime_script = Path(app_module.app.root_path, "static", "red_book_notification_sound.js").read_text(encoding="utf-8")
+    service_worker_script = Path(app_module.app.root_path, "static", "firebase-messaging-sw.js").read_text(encoding="utf-8")
     assert 'import { formatDate, formatDateTime } from "./date_format.js";' in profile_script
     assert "formatDateTime(value)" in profile_script
     assert "Notification.requestPermission()" in web_push_script
@@ -105,6 +107,20 @@ def test_profile_settings_shows_safe_authenticated_user_information(profile_clie
     assert "This browser does not support the required notification APIs." in web_push_script
     assert 'function describeError(error, fallback)' in web_push_script
     assert 'showStatus(describeError(error, "Unable to enable notifications on this device.")' in web_push_script
+    assert 'import { createRedBookChime } from "./red_book_notification_sound.js";' in web_push_script
+    assert "playRedBookChime(payload);" in web_push_script
+    foreground_handler = web_push_script.split("async function showForegroundNotification", 1)[1].split(
+        "async function attachForegroundListener", 1
+    )[0]
+    assert foreground_handler.index("playRedBookChime(payload);") < foreground_handler.index(
+        "serviceWorkerRegistration.showNotification"
+    )
+    assert "await playRedBookChime(payload)" not in foreground_handler
+    assert 'audio.play();' in chime_script
+    assert 'playback.catch(releaseAudio);' in chime_script
+    assert 'messaging.onBackgroundMessage(payload =>' in service_worker_script
+    assert 'self.registration.showNotification(title' in service_worker_script
+    assert Path(app_module.app.root_path, "static", "audio", "red-book-chime.wav").is_file()
     assert "password_hash" not in html
     assert "Example1!Password" not in html
     assert "profile_avatar_csrf" not in html

@@ -1,4 +1,5 @@
 import { getFirebaseApp } from "./firebase_auth.js";
+import { createRedBookChime } from "./red_book_notification_sound.js";
 
 const settings = document.querySelector("[data-web-push-settings]");
 const messagingSdkUrl = "https://www.gstatic.com/firebasejs/12.2.1/firebase-messaging.js";
@@ -7,6 +8,7 @@ let messagingInstance;
 let currentDeviceToken = "";
 let serviceWorkerRegistration;
 let foregroundListenerAttached = false;
+const playRedBookChime = createRedBookChime();
 
 function showStatus(message, state = "info") {
   const status = document.getElementById("web-push-status");
@@ -96,6 +98,7 @@ function notificationUrl(value) {
 async function showForegroundNotification(payload) {
   const data = payload.data || {};
   if (Notification.permission !== "granted") return;
+  playRedBookChime(payload);
   const title = data.title || "Mannat Moon Construction";
   const options = {
     body: data.body || "There is a new Red Book update.",

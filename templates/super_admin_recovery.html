@@ -52,9 +52,9 @@
 
             <p class="meta">This backup recovery flow is restricted to the Super Admin account. It requires the saved recovery email and a single-use recovery code.</p>
             <p class="standard-reset">
-                Have access to the Super Admin account's saved email and verified mobile?
+                Have access to the Super Admin account's saved email?
                 <a href="{{ url_for('password_reset_request') }}">Use the regular password reset</a>
-                to receive a reset link and verify with an SMS code instead.
+                to receive an email reset link instead.
             </p>
 
             <form method="post" action="{{ url_for('super_admin_recovery') }}">

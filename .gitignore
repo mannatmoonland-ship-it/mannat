@@ -1,6 +1,7 @@
 # Environment variables and secrets
 .env
 .env.*
+!.env.example
 
 # Firebase service-account credentials
 *firebase-adminsdk*.json

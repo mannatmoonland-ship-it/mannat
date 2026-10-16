@@ -91,9 +91,20 @@ def test_profile_settings_shows_safe_authenticated_user_information(profile_clie
     assert '2026-09-25T22:57:25Z</time>' in html
     assert 'id="profile-change-mobile"' in html
     assert 'id="profile-mobile-form" class="profile-mobile-form"' in html
+    assert 'data-web-push-settings' in html
+    assert 'id="web-push-enable"' in html
+    assert 'id="web-push-disable"' in html
+    assert "Red Book notifications" in html
     profile_script = Path(app_module.app.root_path, "static", "profile_settings.js").read_text(encoding="utf-8")
+    web_push_script = Path(app_module.app.root_path, "static", "web_push_notifications.js").read_text(encoding="utf-8")
     assert 'import { formatDate, formatDateTime } from "./date_format.js";' in profile_script
     assert "formatDateTime(value)" in profile_script
+    assert "Notification.requestPermission()" in web_push_script
+    assert '"/api/notifications/device"' in web_push_script
+    assert "Notifications require HTTPS, or localhost on this computer." in web_push_script
+    assert "This browser does not support the required notification APIs." in web_push_script
+    assert 'function describeError(error, fallback)' in web_push_script
+    assert 'showStatus(describeError(error, "Unable to enable notifications on this device.")' in web_push_script
     assert "password_hash" not in html
     assert "Example1!Password" not in html
     assert "profile_avatar_csrf" not in html

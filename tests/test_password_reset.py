@@ -1,7 +1,5 @@
 import hashlib
-import re
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
@@ -37,7 +35,6 @@ def client(monkeypatch):
     monkeypatch.setitem(app.config, "TESTING", True)
     monkeypatch.setitem(app.config, "SECRET_KEY", "password-reset-test-secret")
     monkeypatch.setitem(app.config, "PUBLIC_BASE_URL", "https://app.example.test")
-    monkeypatch.setitem(app.config, "SMS_OTP_DEBUG_MODE", False)
     monkeypatch.setitem(app.config, "FIRESTORE_STORE", store)
     monkeypatch.setitem(app.config, "MAIL_PASSWORD", "mock-smtp-only")
     monkeypatch.setattr(app_module, "PASSWORD_RESET_ATTEMPTS", {})
@@ -56,7 +53,7 @@ def test_super_admin_recovery_page_links_to_regular_password_reset():
 
     assert response.status_code == 200
     assert b'href="/password-reset-request"' in response.data
-    assert b"verified mobile" in response.data
+    assert b"saved email" in response.data
     assert b"single-use recovery code" in response.data
 
 
@@ -73,31 +70,7 @@ def request_reset_link(client, user_id=USER_ID, base_url="http://office-test.exa
     return response
 
 
-def verify_reset_otp(client, token, csrf, base_url, monkeypatch):
-    sent_codes = []
-    monkeypatch.setattr(
-        app_module,
-        "_send_fast2sms_otp",
-        lambda _phone, code: sent_codes.append(code) or "sms-request",
-    )
-    sent = client.post(
-        f"/api/reset-password/{USER_ID}/send-code",
-        json={"token": token, "csrf_token": csrf},
-        base_url=base_url,
-    )
-    assert sent.status_code == 200
-    assert sent.get_json()["sent"] is True
-    assert sent.get_json()["provider_request_id"] == "sms-request"
-    verified = client.post(
-        f"/api/reset-password/{USER_ID}/verify-code",
-        json={"token": token, "csrf_token": csrf, "code": sent_codes[-1]},
-        base_url=base_url,
-    )
-    assert verified.status_code == 200
-    assert verified.get_json() == {"verified": True}
-
-
-def prepare_sms_reset_link(client, base_url):
+def prepare_reset_link(client, base_url):
     raw_token = "local-development-reset-token"
     user = app.config["FIRESTORE_STORE"].get_user(USER_ID)
     user["password_reset_token_hash"] = hashlib.sha256(raw_token.encode()).hexdigest()
@@ -110,104 +83,16 @@ def prepare_sms_reset_link(client, base_url):
     return raw_token, csrf
 
 
-def test_local_password_reset_debug_mode_shows_test_code_and_verifies_without_sms(
-    client, monkeypatch
-):
-    base_url = "http://localhost:5020"
-    raw_token, csrf = prepare_sms_reset_link(client, base_url)
-    monkeypatch.setitem(app.config, "SMS_OTP_DEBUG_MODE", True)
-    monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", False)
-    monkeypatch.setattr(
-        app_module,
-        "_send_fast2sms_otp",
-        lambda *_args: pytest.fail("Local test mode must not call the SMS provider."),
-    )
-
-    sent = client.post(
-        f"/api/reset-password/{USER_ID}/send-code",
-        json={"token": raw_token, "csrf_token": csrf},
-        base_url=base_url,
-    )
-
-    assert sent.status_code == 200
-    result = sent.get_json()
-    assert result["delivery_mode"] == "local-test"
-    assert re.fullmatch(r"[0-9]{6}", result["debug_code"])
-    assert result["provider_request_id"] is None
-    assert sent.headers["Cache-Control"] == "no-store"
-
-    verified = client.post(
-        f"/api/reset-password/{USER_ID}/verify-code",
-        json={
-            "token": raw_token,
-            "csrf_token": csrf,
-            "code": result["debug_code"],
-        },
-        base_url=base_url,
-    )
-    assert verified.status_code == 200
-    assert verified.get_json() == {"verified": True}
-
-
-def test_password_reset_debug_code_is_never_returned_in_production(
-    client, monkeypatch
-):
-    base_url = "http://localhost:5020"
-    raw_token, csrf = prepare_sms_reset_link(client, base_url)
-    monkeypatch.setitem(app.config, "SMS_OTP_DEBUG_MODE", True)
-    monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", True)
-    provider_calls = []
-    monkeypatch.setattr(
-        app_module,
-        "_send_fast2sms_otp",
-        lambda _phone, _code: provider_calls.append(True) or "sms-request",
-    )
-
-    sent = client.post(
-        f"/api/reset-password/{USER_ID}/send-code",
-        json={"token": raw_token, "csrf_token": csrf},
-        base_url=base_url,
-    )
-
-    assert sent.status_code == 200
-    assert provider_calls == [True]
-    assert sent.get_json()["provider_request_id"] == "sms-request"
-    assert "debug_code" not in sent.get_json()
-
-
-def test_password_reset_debug_code_is_not_returned_to_nonlocal_clients(
-    client, monkeypatch
-):
-    base_url = "http://office-test.example:5020"
-    raw_token, csrf = prepare_sms_reset_link(client, base_url)
-    monkeypatch.setitem(app.config, "SMS_OTP_DEBUG_MODE", True)
-    monkeypatch.setattr(app_module, "IS_PRODUCTION_ENVIRONMENT", False)
-    monkeypatch.setattr(
-        app_module, "_send_fast2sms_otp", lambda _phone, _code: "sms-request"
-    )
-
-    sent = client.post(
-        f"/api/reset-password/{USER_ID}/send-code",
-        json={"token": raw_token, "csrf_token": csrf},
-        base_url=base_url,
-    )
-
-    assert sent.status_code == 200
-    assert sent.get_json()["provider_request_id"] == "sms-request"
-    assert "debug_code" not in sent.get_json()
-
-
-def test_reset_page_has_local_test_code_popup():
+def test_reset_page_has_email_link_only_flow():
     response = app.test_client().get("/reset-password/account-user-123")
 
     assert response.status_code == 200
-    assert b'id="localOtpDialog"' in response.data
-    assert b"No SMS was sent. Use this code for local development only." in response.data
-    javascript = (
-        Path(__file__).parents[1] / "static" / "password_reset.js"
-    ).read_text(encoding="utf-8")
-    assert 'result.delivery_mode === "local-test"' in javascript
-    assert "localOtpDialog.showModal();" in javascript
+    assert b"phoneChallenge" not in response.data
+    assert b"SMS verification code" not in response.data
+    assert b"data-send-code-url" not in response.data
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert f"/api/reset-password/<user_id>/send-code" not in rules
+    assert f"/api/reset-password/<user_id>/verify-code" not in rules
 
 
 def sign_in_as_admin(client, base_url="http://office-test.example:5020"):
@@ -415,7 +300,7 @@ def test_password_reset_confirmation_masks_email_local_part(email, expected):
     assert app_module.mask_password_reset_email(email) == expected
 
 
-def test_unverified_mobile_blocks_self_service_and_admin_password_resets(client, monkeypatch):
+def test_unverified_mobile_does_not_block_self_service_or_admin_email_resets(client, monkeypatch):
     store = app.config["FIRESTORE_STORE"]
     user = store.get_user(USER_ID)
     user["mobile_phone_verified_at"] = None
@@ -432,10 +317,26 @@ def test_unverified_mobile_blocks_self_service_and_admin_password_resets(client,
         base_url="http://office-test.example:5020",
     )
 
-    assert GENERIC_RESPONSE in response.data
-    assert b"valid 10-digit Indian mobile number in User Management" in admin_response.data
-    assert sent == []
-    assert store.get_user(USER_ID)["password_reset_token_hash"] is None
+    assert b"Password reset instructions have been sent to s***********t@example.com." in response.data
+    assert b"password-reset link was sent" in admin_response.data
+    assert len(sent) == 2
+    assert store.get_user(USER_ID)["password_reset_token_hash"]
+
+
+@pytest.mark.parametrize("mobile_phone", [None, "", "not-a-phone"])
+def test_email_reset_request_does_not_require_a_mobile_number(client, monkeypatch, mobile_phone):
+    store = app.config["FIRESTORE_STORE"]
+    user = store.get_user(USER_ID)
+    user["mobile_phone"] = mobile_phone
+    user["mobile_phone_verified_at"] = None
+    store.save_user(user)
+    sent = []
+    monkeypatch.setattr("app.send_email", lambda *args, **kwargs: sent.append(args) or True)
+
+    response = request_reset_link(client)
+
+    assert b"Password reset instructions have been sent to s***********t@example.com." in response.data
+    assert len(sent) == 1
 
 
 def test_admin_can_resend_setup_link_for_user_with_pending_mobile_verification(client, monkeypatch):
@@ -471,8 +372,7 @@ def test_admin_can_resend_setup_link_for_user_with_pending_mobile_verification(c
     )
 
     assert valid_link.status_code == 200
-    assert valid_link.get_json()["valid"] is True
-    assert valid_link.get_json()["setup_required"] is True
+    assert valid_link.get_json() == {"valid": True, "username": "recovery-user"}
 
 
 def test_admin_entered_ten_digit_mobile_allows_reset_link_validation(client):
@@ -499,12 +399,7 @@ def test_admin_entered_ten_digit_mobile_allows_reset_link_validation(client):
     )
 
     assert response.status_code == 200
-    assert response.get_json() == {
-        "valid": True,
-        "username": "recovery-user",
-        "masked_mobile_phone": "••••••3210",
-        "setup_required": True,
-    }
+    assert response.get_json() == {"valid": True, "username": "recovery-user"}
 
 
 def test_expired_and_reused_tokens_are_rejected(client, monkeypatch):
@@ -542,14 +437,7 @@ def test_expired_and_reused_tokens_are_rejected(client, monkeypatch):
         base_url=base_url,
     )
     assert valid_link.status_code == 200
-    assert valid_link.get_json() == {
-        "valid": True,
-        "username": "recovery-user",
-        "masked_mobile_phone": "••••••3210",
-        "setup_required": False,
-    }
-
-    verify_reset_otp(client, raw_token, csrf, base_url, monkeypatch)
+    assert valid_link.get_json() == {"valid": True, "username": "recovery-user"}
     reset = client.post(
         f"/reset-password/{USER_ID}",
         data={"csrf_token": csrf, "token": raw_token, "new_password": NEW_PASSWORD, "confirm_password": NEW_PASSWORD},
@@ -570,7 +458,7 @@ def test_expired_and_reused_tokens_are_rejected(client, monkeypatch):
     assert updated["password_reset_expires_at"] is None
 
 
-def test_initial_password_setup_requires_phone_verification_and_marks_it_verified(client, monkeypatch):
+def test_initial_password_setup_uses_email_link_without_marking_phone_verified(client):
     store = app.config["FIRESTORE_STORE"]
     user = store.get_user(USER_ID)
     raw_token = "initial-setup-token"
@@ -590,7 +478,6 @@ def test_initial_password_setup_requires_phone_verification_and_marks_it_verifie
         json={"token": raw_token, "csrf_token": csrf},
         base_url=base_url,
     )
-    verify_reset_otp(client, raw_token, csrf, base_url, monkeypatch)
     setup_response = client.post(
         f"/reset-password/{USER_ID}",
         data={
@@ -604,10 +491,10 @@ def test_initial_password_setup_requires_phone_verification_and_marks_it_verifie
     )
 
     assert valid_link.status_code == 200
-    assert valid_link.get_json()["setup_required"] is True
+    assert valid_link.get_json() == {"valid": True, "username": "recovery-user"}
     assert b"Your password has been reset" in setup_response.data
     updated = store.get_user(USER_ID)
-    assert updated["mobile_phone_verified_at"]
+    assert updated["mobile_phone_verified_at"] is None
     assert updated["must_change_password"] is False
 
 
@@ -618,8 +505,6 @@ def test_password_reset_enforces_policy_and_new_password_login(client, monkeypat
     token = sent[-1][0][2].rsplit("#", 1)[1].splitlines()[0]
     base_url = "http://office-test.example:5020"
     csrf = csrf_token(client, base_url)
-    verify_reset_otp(client, token, csrf, base_url, monkeypatch)
-
     invalid = client.post(
         f"/reset-password/{USER_ID}",
         data={"csrf_token": csrf, "token": token, "new_password": "weak", "confirm_password": "weak"},
@@ -644,16 +529,18 @@ def test_password_reset_enforces_policy_and_new_password_login(client, monkeypat
     assert new_login.headers["Location"].endswith("/")
 
 
-def test_password_reset_requires_a_verified_fast2sms_code(client, monkeypatch):
+def test_email_reset_link_alone_allows_password_change_without_phone_verification(client, monkeypatch):
     sent = []
     monkeypatch.setattr("app.send_email", lambda *args, **kwargs: sent.append((args, kwargs)) or True)
     request_reset_link(client)
     token = sent[-1][0][2].rsplit("#", 1)[1].splitlines()[0]
     base_url = "http://office-test.example:5020"
     csrf = csrf_token(client, base_url)
-    original_hash = app.config["FIRESTORE_STORE"].get_user(USER_ID)["password_hash"]
-
-    no_sms_verification = client.post(
+    store = app.config["FIRESTORE_STORE"]
+    user = store.get_user(USER_ID)
+    user["mobile_phone_verified_at"] = None
+    store.save_user(user)
+    reset = client.post(
         f"/reset-password/{USER_ID}",
         data={
             "csrf_token": csrf,
@@ -661,17 +548,14 @@ def test_password_reset_requires_a_verified_fast2sms_code(client, monkeypatch):
             "new_password": NEW_PASSWORD,
             "confirm_password": NEW_PASSWORD,
         },
-        base_url=base_url,
-    )
-    no_sms_endpoint = client.post(
-        f"/api/reset-password/{USER_ID}/verify-code",
-        json={"csrf_token": csrf, "token": token, "code": "000000"},
+        follow_redirects=True,
         base_url=base_url,
     )
 
-    assert b"Verify your registered mobile number by SMS" in no_sms_verification.data
-    assert no_sms_endpoint.status_code == 400
-    assert app.config["FIRESTORE_STORE"].get_user(USER_ID)["password_hash"] == original_hash
+    assert b"Your password has been reset" in reset.data
+    updated = store.get_user(USER_ID)
+    assert updated["mobile_phone_verified_at"] is None
+    assert updated["password_reset_token_hash"] is None
 
 
 def test_reset_request_is_rate_limited_with_generic_response(client, monkeypatch):

@@ -85,7 +85,7 @@ IS_PRODUCTION_ENVIRONMENT = (
 _FIREBASE_ADMIN_IMPORT_ERROR = None
 try:
     import firebase_admin
-    from firebase_admin import auth as firebase_auth, credentials, firestore
+    from firebase_admin import auth as firebase_auth, credentials, firestore, messaging as firebase_messaging
     from google.cloud.firestore_v1 import FieldFilter
 except ImportError as error:  # pragma: no cover - optional for local/dev fallback
     _FIREBASE_ADMIN_IMPORT_ERROR = error
@@ -93,6 +93,7 @@ except ImportError as error:  # pragma: no cover - optional for local/dev fallba
     firebase_auth = None
     credentials = None
     firestore = None
+    firebase_messaging = None
     FieldFilter = None
 
 _FIRESTORE_TRANSPORT_IMPORT_ERROR = None
@@ -326,8 +327,7 @@ app.config.update(
     FAST2SMS_API_KEY=os.environ.get("FAST2SMS_API_KEY", ""),
     FAST2SMS_SENDER_ID=os.environ.get("FAST2SMS_SENDER_ID", "JJROBO"),
     FAST2SMS_MESSAGE_ID=os.environ.get("FAST2SMS_MESSAGE_ID", "144137"),
-    SMS_OTP_DEBUG_MODE=os.environ.get("SMS_OTP_DEBUG_MODE", "").strip().lower()
-    in {"1", "true", "yes", "on"},
+    FIREBASE_WEB_PUSH_VAPID_KEY=os.environ.get("FIREBASE_WEB_PUSH_VAPID_KEY", "").strip(),
 )
 mail = Mail(app)
 PASSWORD_RESET_LOCK = threading.Lock()
@@ -361,6 +361,7 @@ FIREBASE_WEB_CONFIG_OPTIONAL_FIELDS = frozenset({
     "messagingSenderId",
     "measurementId",
 })
+FIREBASE_WEB_PUSH_VAPID_KEY = os.environ.get("FIREBASE_WEB_PUSH_VAPID_KEY", "").strip()
 
 
 def _validate_firebase_web_config(web_config, project_id):
@@ -839,15 +840,6 @@ def _mobile_phone_is_verified(user):
     return _valid_fast2sms_mobile_phone(phone) and isinstance(verified_at, str) and bool(verified_at.strip())
 
 
-def _mobile_phone_can_be_used_for_setup(user):
-    phone = user.get("mobile_phone") if isinstance(user, dict) else None
-    return bool(
-        isinstance(user, dict)
-        and user.get("must_change_password")
-        and _valid_fast2sms_mobile_phone(phone)
-    )
-
-
 def _mask_mobile_phone(phone):
     phone_digits = _fast2sms_phone_digits(phone)
     if not phone_digits:
@@ -995,17 +987,6 @@ def _sms_otp_challenge_record_matches(challenge, expected, challenge_id, now):
     )
 
 
-def _local_sms_otp_debug_enabled():
-    if IS_PRODUCTION_ENVIRONMENT or not app.config.get("SMS_OTP_DEBUG_MODE"):
-        return False
-    try:
-        host = urlsplit(request.host_url).hostname
-        remote_addr = ipaddress.ip_address(request.remote_addr or "")
-    except ValueError:
-        return False
-    return host in {"localhost", "127.0.0.1", "::1"} and remote_addr.is_loopback
-
-
 def _clear_sms_otp_challenge(purpose, user_id):
     get_user_store().delete_sms_otp_challenge(
         _sms_otp_challenge_document_id(purpose, user_id)
@@ -1013,9 +994,7 @@ def _clear_sms_otp_challenge(purpose, user_id):
     session.pop("sms_otp_challenge", None)
 
 
-def _issue_sms_otp(
-    purpose, user_id, phone, token_hash=None, *, allow_local_debug_code=False
-):
+def _issue_sms_otp(purpose, user_id, phone, token_hash=None):
     phone_digits = _fast2sms_phone_digits(phone)
     if not phone_digits:
         raise ValueError("Enter a valid 10-digit Indian mobile number.")
@@ -1023,14 +1002,7 @@ def _issue_sms_otp(
     if not _allow_sms_otp_send(request.remote_addr, phone):
         raise ValueError("Too many SMS code requests. Please wait before requesting another code.")
     code = f"{secrets.randbelow(1_000_000):06d}"
-    debug_code = (
-        code
-        if allow_local_debug_code and _local_sms_otp_debug_enabled()
-        else None
-    )
-    provider_request_id = (
-        None if debug_code else _send_fast2sms_otp(phone, code)
-    )
+    provider_request_id = _send_fast2sms_otp(phone, code)
     challenge_id = secrets.token_urlsafe(24)
     challenge = {
         "id": challenge_id,
@@ -1046,31 +1018,7 @@ def _issue_sms_otp(
     challenge_document_id = _sms_otp_challenge_document_id(purpose, user_id)
     get_user_store().save_sms_otp_challenge(challenge_document_id, challenge)
     session["sms_otp_challenge"] = challenge_id
-    return provider_request_id, debug_code
-
-
-def _sms_otp_challenge_matches(
-    purpose, user_id, phone, token_hash=None, require_verified=False
-):
-    challenge_id = session.get("sms_otp_challenge")
-    phone_digits = _fast2sms_phone_digits(phone)
-    if not isinstance(challenge_id, str) or not phone_digits:
-        return False
-    challenge = get_user_store().get_sms_otp_challenge(
-        _sms_otp_challenge_document_id(purpose, user_id)
-    )
-    expected = {
-        "purpose": purpose,
-        "user_id": str(user_id),
-        "phone": phone_digits,
-        "token_hash": token_hash,
-    }
-    return bool(
-        _sms_otp_challenge_record_matches(
-            challenge, expected, challenge_id, int(time.time())
-        )
-        and (not require_verified or challenge.get("verified") is True)
-    )
+    return provider_request_id
 
 
 def _verify_sms_otp(purpose, user_id, phone, code, token_hash=None):
@@ -1108,6 +1056,7 @@ class InMemoryFirestoreStore:
         self.drawings_categories = {}
         self.drawings = {}
         self.red_book_items = {}
+        self.fcm_device_tokens = {}
         self.custom_staff_types = {}
         self.non_admin_permissions = set(DEFAULT_NON_ADMIN_PERMISSIONS)
         self.audit_log = []
@@ -1117,6 +1066,7 @@ class InMemoryFirestoreStore:
         self._trade_mutation_lock = threading.RLock()
         self._drawings_mutation_lock = threading.RLock()
         self._red_book_mutation_lock = threading.RLock()
+        self._fcm_device_token_lock = threading.RLock()
         self._material_transaction_lock = threading.RLock()
         self.material_categories = {}
         self.materials = {}
@@ -1376,7 +1326,15 @@ class InMemoryFirestoreStore:
         with self._red_book_mutation_lock:
             item = self.red_book_items.get(item_id)
             if item is None:
-                return False
+                return None
+            changed = (item.get("pinned") is True) != pinned
+            if not changed:
+                return {
+                    "changed": False,
+                    "pinned_at": item.get("pinned_at"),
+                    "text": item.get("text", ""),
+                    "event_id": None,
+                }
             now = iso_now()
             item.update({
                 "pinned": pinned,
@@ -1385,7 +1343,44 @@ class InMemoryFirestoreStore:
                 "updated_at": now,
                 "updated_by": actor_id,
             })
+            return {
+                "changed": True,
+                "pinned_at": item.get("pinned_at"),
+                "text": item.get("text", ""),
+                "event_id": uuid.uuid4().hex if pinned else None,
+            }
+
+    def save_fcm_device_token(self, token_id, user_id, token):
+        with self._fcm_device_token_lock:
+            existing = self.fcm_device_tokens.get(token_id, {})
+            self.fcm_device_tokens[token_id] = {
+                "user_id": user_id,
+                "token": token,
+                "created_at": existing.get("created_at") or iso_now(),
+                "updated_at": iso_now(),
+            }
+
+    def fcm_device_token_is_registered(self, token_id, user_id):
+        with self._fcm_device_token_lock:
+            record = self.fcm_device_tokens.get(token_id)
+            return bool(record and record.get("user_id") == user_id)
+
+    def delete_fcm_device_token(self, token_id, user_id):
+        with self._fcm_device_token_lock:
+            record = self.fcm_device_tokens.get(token_id)
+            if not record or record.get("user_id") != user_id:
+                return False
+            del self.fcm_device_tokens[token_id]
             return True
+
+    def list_fcm_device_tokens(self, user_ids):
+        eligible_user_ids = set(user_ids)
+        with self._fcm_device_token_lock:
+            return [
+                {"id": token_id, **record}
+                for token_id, record in self.fcm_device_tokens.items()
+                if record.get("user_id") in eligible_user_ids
+            ]
 
     def create_red_book_item(self, item_id, text, actor_id, image_url="", image_urls=None):
         with self._red_book_mutation_lock:
@@ -1736,7 +1731,7 @@ class InMemoryFirestoreStore:
         return self._normalize_user(user)
 
     def consume_password_reset(
-        self, user_id, token_hash, password_hash, now, mobile_phone_verified_at=None
+        self, user_id, token_hash, password_hash, now
     ):
         with self._password_reset_lock:
             user = self.users.get(user_id)
@@ -1752,9 +1747,6 @@ class InMemoryFirestoreStore:
                 "last_password_change": iso_now(),
                 "updated_at": iso_now(),
             })
-            if mobile_phone_verified_at:
-                user["mobile_phone_verified_at"] = mobile_phone_verified_at
-                user["mobile_phone_verified_by_admin"] = False
             self.users[user_id] = self._normalize_user(user)
             return True
 
@@ -2383,12 +2375,22 @@ class FirebaseFirestoreStore:
     def set_red_book_item_pinned(self, item_id, pinned, actor_id):
         reference = self._collection("red_book_items").document(item_id)
         firestore_transaction = self.db.transaction()
+        event_id = uuid.uuid4().hex
 
         @firestore.transactional
         def set_pinned(transaction):
             snapshot = _transaction_get_document_snapshot(transaction, reference)
             if not snapshot.exists:
-                return False
+                return None
+            item = snapshot.to_dict() or {}
+            changed = (item.get("pinned") is True) != pinned
+            if not changed:
+                return {
+                    "changed": False,
+                    "pinned_at": item.get("pinned_at"),
+                    "text": item.get("text", ""),
+                    "event_id": None,
+                }
             now = iso_now()
             transaction.update(reference, {
                 "pinned": pinned,
@@ -2397,9 +2399,51 @@ class FirebaseFirestoreStore:
                 "updated_at": now,
                 "updated_by": actor_id,
             })
-            return True
+            return {
+                "changed": True,
+                "pinned_at": now if pinned else None,
+                "text": item.get("text", ""),
+                "event_id": event_id if pinned else None,
+            }
 
         return set_pinned(firestore_transaction)
+
+    def save_fcm_device_token(self, token_id, user_id, token):
+        reference = self._collection("fcm_device_tokens").document(token_id)
+        snapshot = reference.get()
+        existing = snapshot.to_dict() if snapshot.exists else {}
+        reference.set({
+            "user_id": user_id,
+            "token": token,
+            "created_at": (existing or {}).get("created_at") or iso_now(),
+            "updated_at": iso_now(),
+        })
+
+    def fcm_device_token_is_registered(self, token_id, user_id):
+        snapshot = self._collection("fcm_device_tokens").document(token_id).get()
+        return bool(snapshot.exists and (snapshot.to_dict() or {}).get("user_id") == user_id)
+
+    def delete_fcm_device_token(self, token_id, user_id):
+        reference = self._collection("fcm_device_tokens").document(token_id)
+        firestore_transaction = self.db.transaction()
+
+        @firestore.transactional
+        def delete(transaction):
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
+            if not snapshot.exists or (snapshot.to_dict() or {}).get("user_id") != user_id:
+                return False
+            transaction.delete(reference)
+            return True
+
+        return delete(firestore_transaction)
+
+    def list_fcm_device_tokens(self, user_ids):
+        eligible_user_ids = set(user_ids)
+        return [
+            {"id": snapshot.id, **(snapshot.to_dict() or {})}
+            for snapshot in self._collection("fcm_device_tokens").stream()
+            if (snapshot.to_dict() or {}).get("user_id") in eligible_user_ids
+        ]
 
     def create_red_book_item(self, item_id, text, actor_id, image_url="", image_urls=None):
         items = self._collection("red_book_items")
@@ -2919,7 +2963,7 @@ class FirebaseFirestoreStore:
         return self.get_user(user_id)
 
     def consume_password_reset(
-        self, user_id, token_hash, password_hash, now, mobile_phone_verified_at=None
+        self, user_id, token_hash, password_hash, now
     ):
         transaction = self.db.transaction()
 
@@ -2942,9 +2986,6 @@ class FirebaseFirestoreStore:
                 "last_password_change": iso_now(),
                 "updated_at": iso_now(),
             }
-            if mobile_phone_verified_at:
-                changes["mobile_phone_verified_at"] = mobile_phone_verified_at
-                changes["mobile_phone_verified_by_admin"] = False
             transaction.update(reference, changes)
             return True
 
@@ -4816,7 +4857,7 @@ def send_profile_mobile_phone_code():
     if not isinstance(mobile_phone, str) or not re.fullmatch(r"[6-9][0-9]{9}", mobile_phone):
         return jsonify({"error": "Enter a valid 10-digit Indian mobile number."}), 400
     try:
-        provider_request_id, _debug_code = _issue_sms_otp(
+        provider_request_id = _issue_sms_otp(
             "profile-mobile", user["id"], mobile_phone
         )
     except ValueError as error:
@@ -4987,8 +5028,6 @@ def password_reset_request():
                     user
                     and normalize_user_status(user.get("status"), default_active=bool(user.get("is_active", True))) == "active"
                     and is_valid_email(saved_email)
-                    and _mobile_phone_is_verified(user)
-                    and _valid_fast2sms_mobile_phone(user.get("mobile_phone"))
                 )
                 base_url = get_request_base_url()
 
@@ -4998,7 +5037,6 @@ def password_reset_request():
                             user,
                             base_url,
                             store,
-                            allow_unverified_mobile=bool(user.get("must_change_password")),
                         )
                         response_message = PASSWORD_RESET_SENT_RESPONSE.format(
                             email=mask_password_reset_email(saved_email)
@@ -5037,17 +5075,11 @@ def _password_reset_csrf_valid(payload):
     return bool(expected and supplied) and hmac.compare_digest(expected, str(supplied))
 
 
-def send_password_reset_link(user, base_url, store=None, *, allow_unverified_mobile=False):
+def send_password_reset_link(user, base_url, store=None):
     store = store or get_user_store()
     saved_email = str(user.get("email") or "").strip()
     if not is_valid_email(saved_email):
         raise ValueError("The user's saved email address is missing or invalid.")
-    if not _valid_fast2sms_mobile_phone(user.get("mobile_phone")):
-        raise ValueError("The user's account must have a valid 10-digit Indian mobile number for Fast2SMS OTP verification.")
-    if not _mobile_phone_is_verified(user) and not (
-        allow_unverified_mobile and _mobile_phone_can_be_used_for_setup(user)
-    ):
-        raise ValueError("The user's mobile number must be verified before a password reset.")
     canonical_base_url = get_request_base_url()
     if not canonical_base_url or base_url != canonical_base_url:
         raise ValueError("The configured public HTTPS origin is invalid.")
@@ -5073,7 +5105,7 @@ def send_password_reset_link(user, base_url, store=None, *, allow_unverified_mob
         f"Hello {display_name},\n\n"
         "A password reset was requested for your Mannat Moon Construction account.\n\n"
         f"Reset your password using this link:\n{reset_link}\n\n"
-        "You will also need the SMS verification code sent to your registered mobile number.\n\n"
+        "Use the link to set a new password. The link can be used once and expires after 30 minutes.\n\n"
         f"This link expires at {expires_label} (30 minutes after it was issued).\n\n"
         "If you did not request this reset, you can ignore this email.\n"
     )
@@ -5090,7 +5122,7 @@ def send_password_reset_link(user, base_url, store=None, *, allow_unverified_mob
       <h1 style="margin:0 0 18px;font-size:22px;color:#18212b;">Password reset request</h1>
       <p>Hello {{ display_name }},</p>
       <p>A password reset was requested for your Mannat Moon Construction account.</p>
-      <p>After opening this link, enter the SMS verification code sent to your registered mobile number.</p>
+      <p>Use the link below to set a new password. The link can be used once and expires after 30 minutes.</p>
       <p style="margin:24px 0;"><a href="{{ reset_link }}" style="display:inline-block;padding:12px 18px;border-radius:7px;background:#0284c7;color:#fff;text-decoration:none;font-weight:700;">Reset Password</a></p>
       <p>If the button does not work, use this link:<br><a href="{{ reset_link }}" style="color:#0369a1;word-break:break-all;">{{ reset_link }}</a></p>
       <p>This link expires at <strong>{{ expires_label }}</strong> (30 minutes after it was issued).</p>
@@ -5138,93 +5170,10 @@ def validate_password_reset_link(user_id):
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     if not password_reset_token_is_valid(user, token_hash):
         return jsonify(valid=False, error="This reset link is invalid or expired."), 400
-    setup_required = _mobile_phone_can_be_used_for_setup(user)
-    if not _mobile_phone_is_verified(user) and not setup_required:
-        return jsonify(valid=False, error="This reset link is invalid or expired."), 400
     username = str(user.get("username") or "").strip()
-    mobile_phone = user.get("mobile_phone")
-    if not username or not _valid_fast2sms_mobile_phone(mobile_phone):
+    if not username:
         return jsonify(valid=False, error="This reset link is invalid or expired."), 400
-    return jsonify(
-        valid=True,
-        username=username,
-        masked_mobile_phone=_mask_mobile_phone(mobile_phone),
-        setup_required=setup_required,
-    )
-
-
-@app.route("/api/reset-password/<user_id>/send-code", methods=["POST"])
-def send_password_reset_sms_code(user_id):
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or not _password_reset_csrf_valid(payload):
-        return jsonify({"error": "This reset link is invalid or expired."}), 400
-    token = payload.get("token", "")
-    if not isinstance(token, str) or not token:
-        return jsonify({"error": "This reset link is invalid or expired."}), 400
-    store = get_user_store()
-    user = store.get_user(user_id)
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    if not password_reset_token_is_valid(user, token_hash):
-        return jsonify({"error": "This reset link is invalid or expired."}), 400
-    if not _mobile_phone_is_verified(user) and not _mobile_phone_can_be_used_for_setup(user):
-        return jsonify({"error": "This reset link is invalid or expired."}), 400
-    try:
-        provider_request_id, debug_code = _issue_sms_otp(
-            "password-reset",
-            user_id,
-            user["mobile_phone"],
-            token_hash,
-            allow_local_debug_code=True,
-        )
-    except ValueError as error:
-        return jsonify({"error": str(error)}), 400
-    except Fast2SMSConfigurationError:
-        app.logger.error("Fast2SMS password-reset OTP send failed: server configuration is incomplete or invalid.")
-        return jsonify({"error": "Fast2SMS is not configured. Set the API key, sender ID, and DLT message ID in private server settings, then restart the app."}), 503
-    except Fast2SMSProviderError as error:
-        app.logger.error("Fast2SMS password-reset OTP send failed: %s", error)
-        return jsonify({"error": str(error)}), 503
-    except Exception as error:
-        app.logger.error("Fast2SMS password-reset OTP send failed (%s).", type(error).__name__)
-        return jsonify({"error": "Unable to send the SMS code. Check the Fast2SMS API key, sender ID, and DLT message ID."}), 503
-    response = {
-        "sent": True,
-        "masked_mobile_phone": _mask_mobile_phone(user["mobile_phone"]),
-        "provider_request_id": provider_request_id,
-    }
-    if debug_code:
-        response["delivery_mode"] = "local-test"
-        response["debug_code"] = debug_code
-    result = jsonify(response)
-    result.headers["Cache-Control"] = "no-store"
-    return result
-
-
-@app.route("/api/reset-password/<user_id>/verify-code", methods=["POST"])
-def verify_password_reset_sms_code(user_id):
-    payload = request.get_json(silent=True)
-    if not isinstance(payload, dict) or not _password_reset_csrf_valid(payload):
-        return jsonify({"error": "This reset link is invalid or expired."}), 400
-    token = payload.get("token", "")
-    code = payload.get("code", "")
-    if not isinstance(token, str) or not token:
-        return jsonify({"error": "This reset link is invalid or expired."}), 400
-    store = get_user_store()
-    user = store.get_user(user_id)
-    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    if not password_reset_token_is_valid(user, token_hash):
-        return jsonify({"error": "This reset link is invalid or expired."}), 400
-    if not _mobile_phone_is_verified(user) and not _mobile_phone_can_be_used_for_setup(user):
-        return jsonify({"error": "This reset link is invalid or expired."}), 400
-    if not _verify_sms_otp(
-        "password-reset",
-        user_id,
-        user["mobile_phone"],
-        code,
-        token_hash,
-    ):
-        return jsonify({"error": "The SMS code is invalid or expired. Request a new code and try again."}), 400
-    return jsonify({"verified": True})
+    return jsonify(valid=True, username=username)
 
 
 @app.route("/reset-password/<user_id>", methods=["GET", "POST"])
@@ -5247,20 +5196,6 @@ def password_reset_page(user_id):
         if not password_reset_token_is_valid(user, token_hash):
             flash("This reset link is invalid or expired. Request a new reset link.", "error")
             return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=True)
-        setup_required = _mobile_phone_can_be_used_for_setup(user)
-        if not _mobile_phone_is_verified(user) and not setup_required:
-            flash("This reset link is invalid or expired. Request a new reset link.", "error")
-            return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=True)
-        if not _sms_otp_challenge_matches(
-            "password-reset",
-            user_id,
-            user.get("mobile_phone"),
-            token_hash,
-            require_verified=True,
-        ):
-            flash("Verify your registered mobile number by SMS before resetting your password.", "error")
-            return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=False, reset_token=token)
-
         password_error = validate_password_policy(new_password)
         if password_error:
             flash(password_error, "error")
@@ -5275,7 +5210,6 @@ def password_reset_page(user_id):
                 token_hash,
                 generate_password_hash(new_password),
                 datetime.now(timezone.utc),
-                mobile_phone_verified_at=iso_now() if setup_required else None,
             )
         except Exception as error:
             app.logger.warning("Password reset could not be completed (%s).", type(error).__name__)
@@ -5285,7 +5219,6 @@ def password_reset_page(user_id):
             flash("This reset link is invalid or expired. Request a new reset link.", "error")
             return render_template("reset_password.html", user_id=user_id, csrf_token=csrf_token, invalid_link=True)
 
-        _clear_sms_otp_challenge("password-reset", user_id)
         flash("Your password has been reset. You can now sign in.", "success")
         return redirect(url_for("login_page"))
 
@@ -5474,12 +5407,11 @@ def forgot_password():
                 target,
                 get_request_base_url(),
                 store,
-                allow_unverified_mobile=bool(target.get("must_change_password")),
             )
         except Exception as error:
             app.logger.warning("Admin password reset email failed (%s).", type(error).__name__)
             if isinstance(error, ValueError):
-                flash("Unable to send a password-reset link. Check the saved email and public origin, and ensure the user has a valid 10-digit Indian mobile number in User Management.", "error")
+                flash("Unable to send a password-reset link. Check the saved email address and public origin.", "error")
             else:
                 flash("Unable to send the password-reset email. No password change was made; check the mail configuration and try again.", "error")
             return redirect(url_for("forgot_password"))
@@ -5671,7 +5603,6 @@ def user_management_create():
             user,
             get_request_base_url(),
             get_user_store(),
-            allow_unverified_mobile=True,
         )
     except Exception as error:
         app.logger.error("Unable to send new account setup link (%s).", type(error).__name__)
@@ -6048,7 +5979,6 @@ def user_management_edit(user_id):
         target["mobile_phone_verified_by_admin"] = True
     if mobile_phone_changed or mobile_phone_admin_confirmed:
         _clear_sms_otp_challenge("profile-mobile", target["id"])
-        _clear_sms_otp_challenge("password-reset", target["id"])
     target["role"] = new_role
     target["custom_staff_type"] = new_custom_staff_type or target.get("custom_staff_type", "")
     target["status"] = "active" if new_is_active else "inactive"
@@ -6149,12 +6079,11 @@ def user_management_reset_password(user_id):
             target,
             get_request_base_url(),
             store,
-            allow_unverified_mobile=bool(target.get("must_change_password")),
         )
     except Exception as error:
         app.logger.warning("Admin password reset email failed (%s).", type(error).__name__)
         if isinstance(error, ValueError):
-            flash("Unable to send a password-reset link. Check the saved email and public origin, and ensure the user has a valid 10-digit Indian mobile number in User Management.", "error")
+            flash("Unable to send a password-reset link. Check the saved email address and public origin.", "error")
         else:
             flash("Unable to send the password-reset email. No password change was made; check the mail configuration and try again.", "error")
         return redirect(url_for("user_management_page"))
@@ -6885,6 +6814,139 @@ def _valid_red_book_item_id(value):
     return parsed is not None and str(parsed) == value.lower()
 
 
+def _fcm_device_token_id(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _valid_fcm_device_token(value):
+    return bool(
+        isinstance(value, str)
+        and 20 <= len(value) <= 4096
+        and not any(character.isspace() or ord(character) < 32 for character in value)
+    )
+
+
+def _valid_firebase_vapid_public_key(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_-]{80,100}={0,2}", value):
+        return False
+    encoded_key = value.rstrip("=")
+    try:
+        decoded = base64.urlsafe_b64decode(
+            encoded_key + "=" * (-len(encoded_key) % 4)
+        )
+    except (ValueError, TypeError):
+        return False
+    return len(decoded) == 65 and decoded[0] == 4
+
+
+def _web_push_request_user(*, require_csrf=False):
+    user = get_current_user()
+    if not user:
+        return None, _red_book_api_response({"error": "Authentication required."}, 401)
+    if user.get("must_change_password"):
+        return None, _red_book_api_response(
+            {"error": "Change your password before continuing."}, 403
+        )
+    if require_csrf:
+        expected = session.get("profile_avatar_csrf", "")
+        supplied = request.headers.get("X-CSRF-Token", "")
+        if not expected or not supplied or not hmac.compare_digest(expected, supplied):
+            return None, _red_book_api_response(
+                {"error": "Your session expired. Reload the page and try again."}, 403
+            )
+    return user, None
+
+
+def _web_push_configuration():
+    try:
+        web_config = get_active_firebase_config()["web_config"]
+    except Exception as error:
+        app.logger.warning("Web Push configuration is unavailable (%s).", type(error).__name__)
+        return None
+    vapid_key = app.config.get("FIREBASE_WEB_PUSH_VAPID_KEY", "")
+    if (
+        firebase_messaging is None
+        or not web_config.get("messagingSenderId")
+        or not _valid_firebase_vapid_public_key(vapid_key)
+    ):
+        return None
+    return {"vapid_key": vapid_key}
+
+
+def _eligible_red_book_notification_user_ids(store):
+    eligible_user_ids = []
+    for user in store.list_users():
+        user_id = user.get("id")
+        if (
+            not isinstance(user_id, str)
+            or not user_id
+            or user.get("must_change_password")
+            or not _user_account_is_active(user)
+        ):
+            continue
+        if _user_has_compiled_permission(user, "red_book.read"):
+            eligible_user_ids.append(user_id)
+    return eligible_user_ids
+
+
+def _remove_invalid_fcm_device_token(token_record):
+    store = get_user_store()
+    try:
+        store.delete_fcm_device_token(token_record["id"], token_record["user_id"])
+    except Exception as error:
+        app.logger.warning(
+            "Invalid FCM token cleanup failed (%s).", type(error).__name__
+        )
+
+
+def _send_red_book_pin_notification(item_id, item_text, event_id):
+    if firebase_messaging is None:
+        app.logger.warning("Red Book pin notification skipped because Firebase Messaging is unavailable.")
+        return
+    store = get_user_store()
+    recipient_ids = _eligible_red_book_notification_user_ids(store)
+    tokens = store.list_fcm_device_tokens(recipient_ids)
+    tokens = [
+        item for item in tokens
+        if _valid_fcm_device_token(item.get("token"))
+    ]
+    if not tokens:
+        return
+    title = "Mannat Moon Construction — Red Book"
+    body = f"A Red Book item has been pinned: {str(item_text or 'Open the Red Book for details.')[:180]}"
+    message_data = {
+        "title": title,
+        "body": body,
+        "url": f"/red-book#red-book-item-{item_id}",
+        "event_id": event_id,
+    }
+    for offset in range(0, len(tokens), 500):
+        batch = tokens[offset:offset + 500]
+        message = firebase_messaging.MulticastMessage(
+            tokens=[item["token"] for item in batch],
+            data=message_data,
+            webpush=firebase_messaging.WebpushConfig(
+                headers={"TTL": "86400"}
+            ),
+        )
+        result = firebase_messaging.send_each_for_multicast(message)
+        for token_record, send_response in zip(batch, result.responses):
+            if send_response.success:
+                continue
+            error = send_response.exception
+            error_code = getattr(error, "code", "")
+            if error_code in {
+                "messaging/registration-token-not-registered",
+                "messaging/invalid-registration-token",
+            }:
+                _remove_invalid_fcm_device_token(token_record)
+        if result.failure_count:
+            app.logger.warning(
+                "Red Book pin notification batch had %s delivery failure(s).",
+                result.failure_count,
+            )
+
+
 def _red_book_api_response(payload, status=200):
     response = jsonify(payload)
     response.status_code = status
@@ -6949,6 +7011,87 @@ def red_book_page():
     ))
     response.headers["Cache-Control"] = "private, no-store"
     return response
+
+
+@app.route("/firebase-messaging-sw.js")
+def firebase_messaging_service_worker():
+    try:
+        public_firebase_config = get_active_firebase_config()["web_config"]
+        worker_path = Path(app.static_folder) / "firebase-messaging-sw.js"
+        worker_source = worker_path.read_text(encoding="utf-8")
+    except Exception as error:
+        app.logger.warning("Firebase Messaging service worker is unavailable (%s).", type(error).__name__)
+        return Response("Firebase Messaging is not configured.", status=503, mimetype="text/plain")
+    safe_config = json.dumps(public_firebase_config, separators=(",", ":")).replace("<", "\\u003c")
+    response = Response(
+        f"self.MANNAT_FIREBASE_CONFIG = {safe_config};\n{worker_source}",
+        mimetype="application/javascript",
+    )
+    response.headers["Cache-Control"] = "no-cache"
+    response.headers["Service-Worker-Allowed"] = "/"
+    return response
+
+
+@app.route("/api/notifications/config")
+def web_push_config_api():
+    user, denied = _web_push_request_user()
+    if denied:
+        return denied
+    configuration = _web_push_configuration()
+    if configuration is None:
+        return _red_book_api_response({
+            "configured": False,
+            "message": "Web Push is not configured for this site yet.",
+        })
+    return _red_book_api_response({
+        "configured": True,
+        "vapid_key": configuration["vapid_key"],
+    })
+
+
+@app.route("/api/notifications/device/status", methods=["POST"])
+def web_push_device_status_api():
+    user, denied = _web_push_request_user(require_csrf=True)
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    token = payload.get("token") if isinstance(payload, dict) and set(payload) == {"token"} else None
+    if not _valid_fcm_device_token(token):
+        return _red_book_api_response({"error": "Provide a valid browser notification token."}, 400)
+    try:
+        registered = get_user_store().fcm_device_token_is_registered(
+            _fcm_device_token_id(token), user.get("id")
+        )
+    except Exception as error:
+        app.logger.error("Browser notification status lookup failed (%s).", type(error).__name__)
+        return _red_book_api_response(
+            {"error": "Unable to check browser notification status."}, 503
+        )
+    return _red_book_api_response({"registered": registered})
+
+
+@app.route("/api/notifications/device", methods=["POST", "DELETE"])
+def web_push_device_api():
+    user, denied = _web_push_request_user(require_csrf=True)
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    token = payload.get("token") if isinstance(payload, dict) and set(payload) == {"token"} else None
+    if not _valid_fcm_device_token(token):
+        return _red_book_api_response({"error": "Provide a valid browser notification token."}, 400)
+    token_id = _fcm_device_token_id(token)
+    try:
+        store = get_user_store()
+        if request.method == "POST":
+            store.save_fcm_device_token(token_id, user.get("id"), token)
+            return _red_book_api_response({"registered": True}, 201)
+        store.delete_fcm_device_token(token_id, user.get("id"))
+    except Exception as error:
+        app.logger.error("Browser notification registration failed (%s).", type(error).__name__)
+        return _red_book_api_response(
+            {"error": "Unable to update browser notification settings."}, 503
+        )
+    return _red_book_api_response({"registered": False})
 
 
 @app.route("/api/red-book/items", methods=["GET", "POST"])
@@ -7080,7 +7223,7 @@ def red_book_item_pin_api(item_id):
             {"error": "Provide the pinned status as a boolean."}, 400
         )
     try:
-        updated = get_user_store().set_red_book_item_pinned(
+        pin_result = get_user_store().set_red_book_item_pinned(
             item_id, payload["pinned"], user.get("id")
         )
     except Exception as error:
@@ -7088,9 +7231,24 @@ def red_book_item_pin_api(item_id):
         return _red_book_api_response(
             {"error": "Unable to update the pinned status."}, 503
         )
-    if not updated:
+    if pin_result is None:
         return _red_book_api_response({"error": "Red Book item not found."}, 404)
-    return _red_book_api_response({"id": item_id, "pinned": payload["pinned"]})
+    if payload["pinned"] and pin_result["changed"]:
+        try:
+            _send_red_book_pin_notification(
+                item_id,
+                pin_result.get("text", ""),
+                pin_result["event_id"],
+            )
+        except Exception as error:
+            app.logger.warning(
+                "Red Book pin notification failed (%s).", type(error).__name__
+            )
+    return _red_book_api_response({
+        "id": item_id,
+        "pinned": payload["pinned"],
+        "changed": pin_result["changed"],
+    })
 
 
 @app.route("/api/red-book/pinned")

@@ -154,7 +154,7 @@
                 <div>
                     <label for="editMobilePhone">10-digit Indian Mobile Number</label>
                     <input id="editMobilePhone" name="mobile_phone" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="10" pattern="[6-9][0-9]{9}" value="{{ user.mobile_phone[3:] if user.mobile_phone and user.mobile_phone.startswith('+91') else user.mobile_phone or '' }}" placeholder="9876543210">
-                    <small>An admin-entered number is treated as verified. Confirm it is correct and that the user can receive SMS there; password setup and resets still require a code sent to this number.</small>
+                    <small>An admin-entered number is treated as verified for profile mobile verification. Confirm that the number is correct and that the user can receive SMS there.</small>
                 </div>
                 <div class="field-row">
                     <div>

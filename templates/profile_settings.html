@@ -81,8 +81,8 @@
             </section>
 
             <section class="profile-card" aria-labelledby="profile-mobile-title">
-                <h2 id="profile-mobile-title">Password-reset mobile verification</h2>
-                <p>Verify a mobile number to protect password resets with an SMS one-time code.</p>
+                <h2 id="profile-mobile-title">Mobile number verification</h2>
+                <p>Verify your mobile number by SMS to confirm it for your profile.</p>
                 <p id="profile-mobile-current">
                     {% if profile.mobile_phone_verified %}
                         Verified number:
@@ -103,6 +103,18 @@
                     <button id="profile-verify-mobile" type="button" disabled>Verify and Save Number</button>
                     <p id="profile-mobile-status" role="status" aria-live="polite"></p>
                 </div>
+            </section>
+
+            <section class="profile-card web-push-settings" data-web-push-settings aria-labelledby="web-push-title"
+                     data-csrf-token="{{ csrf_token }}">
+                <h2 id="web-push-title">Red Book notifications</h2>
+                <p>Get a browser notification when an authorised user pins a Red Book item.</p>
+                <div class="web-push-actions">
+                    <button id="web-push-enable" type="button">Enable Notifications</button>
+                    <button id="web-push-disable" type="button" hidden>Disable on This Device</button>
+                </div>
+                <p id="web-push-status" role="status" aria-live="polite">Checking browser notification support…</p>
+                <p class="web-push-help">Notifications require browser permission and HTTPS. On iPhone or iPad, Web Push may require a supported Safari version and adding this site to the Home Screen. Browser, device, and operating-system settings can affect delivery.</p>
             </section>
 
             <section class="profile-card profile-avatar-card" aria-labelledby="profile-avatar-title">

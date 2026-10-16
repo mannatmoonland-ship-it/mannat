@@ -90,7 +90,7 @@
     <main class="shell">
         <section class="panel">
             <h2>User Management</h2>
-            <p class="form-hint">Reset Password emails a reset link. The SMS code is requested from that link; when local <code>SMS_OTP_DEBUG_MODE=true</code> is enabled, a development test code appears in a popup on the reset page and no SMS is sent. Never enable this mode in production.</p>
+            <p class="form-hint">Reset Password emails a time-limited link to the user's saved email address. The user can set a new password after opening that link.</p>
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}
@@ -124,7 +124,7 @@
                                 <input id="mobile_phone" name="mobile_phone" type="tel" required pattern="[6-9][0-9]{9}" maxlength="10" placeholder="9876543210" autocomplete="tel-national">
                             </div>
                         </div>
-                        <p class="form-hint">Enter 10 digits only. Numbers entered by an admin are treated as verified; the user must be able to receive an SMS code there to set or reset their password.</p>
+                        <p class="form-hint">Enter 10 digits only. Numbers entered by an admin are treated as verified for profile mobile verification.</p>
                         <label for="recovery_email">Recovery Email (optional)</label>
                         <input id="recovery_email" name="recovery_email" type="email" autocomplete="email">
                         <div class="field-row">

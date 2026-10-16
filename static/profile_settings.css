@@ -168,6 +168,31 @@ body.profile-page .profile-card h2 {
 .profile-mobile-form button:disabled { opacity: .55; }
 #profile-mobile-status[data-state="success"] { color: #82dfba; }
 #profile-mobile-status[data-state="error"] { color: #ff9b9b; }
+.web-push-settings { grid-column: 1 / -1; }
+.web-push-settings > p {
+    color: #a4b7ad;
+    font-size: 13px;
+    line-height: 1.55;
+}
+.web-push-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.web-push-actions button {
+    min-height: 44px;
+}
+.web-push-actions button[hidden] { display: none; }
+#web-push-status {
+    min-height: 20px;
+    margin: 12px 0 0;
+}
+#web-push-status[data-state="success"] { color: #82dfba; }
+#web-push-status[data-state="error"] { color: #ff9b9b; }
+.web-push-settings .web-push-help {
+    margin-bottom: 0;
+    font-size: 12px;
+}
 .profile-status {
     display: inline-flex;
     align-items: center;

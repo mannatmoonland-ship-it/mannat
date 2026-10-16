@@ -1,6 +1,6 @@
 const RED_BOOK_NOTIFICATION_TITLE = "Mannat Moon Construction — Red Book";
 
-export function createRedBookChime({
+export function createRedBookSiren({
   AudioConstructor = globalThis.Audio,
 } = {}) {
   const recentEvents = new Set();
@@ -19,7 +19,7 @@ export function createRedBookChime({
     let audio;
     try {
       if (typeof AudioConstructor !== "function") return false;
-      audio = new AudioConstructor("/static/audio/red-book-chime.wav");
+      audio = new AudioConstructor("/static/audio/red-book-siren.wav");
       audio.preload = "auto";
       activeAudio.add(audio);
       const releaseAudio = () => activeAudio.delete(audio);

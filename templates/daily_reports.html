@@ -23,7 +23,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
 </head>
 
-<body data-daily-reports-csrf="{{ daily_reports_csrf }}">
+<body class="daily-reports-page" data-daily-reports-csrf="{{ daily_reports_csrf }}">
 {% include "_page_loader.html" %}
 
 <div id="dr-toastContainer" class="dr-toast-container" aria-live="polite" aria-atomic="false"></div>

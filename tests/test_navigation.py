@@ -211,6 +211,23 @@ def test_daily_record_action_is_in_the_daily_reports_hero():
     assert "grid-column: 1;" in stylesheet
 
 
+def test_daily_reports_mobile_layout_uses_available_width_without_clipping():
+    root = Path(__file__).resolve().parents[1]
+    page = (root / "templates" / "daily_reports.html").read_text(encoding="utf-8")
+    stylesheet = (root / "static" / "daily_reports.css").read_text(encoding="utf-8")
+
+    assert stylesheet.count('name="viewport"') == 0
+    assert page.count('name="viewport"') == 1
+    assert 'class="daily-reports-page"' in page
+    assert "body:not(.login-page).daily-reports-page main" in stylesheet
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in stylesheet
+    assert "grid-template-columns: minmax(0, 1fr) 48px;" in stylesheet
+    assert "max-height: calc(100dvh - env(safe-area-inset-top)" in stylesheet
+    assert "@media (min-width: 390px) and (max-width: 700px)" in stylesheet
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in stylesheet
+    assert "overflow-x: clip" not in stylesheet
+
+
 def test_shared_navigation_renders_animals_and_has_account_menu_behavior():
     root = Path(__file__).resolve().parents[1]
     script = (root / "static" / "mm_navigation.js").read_text(encoding="utf-8")

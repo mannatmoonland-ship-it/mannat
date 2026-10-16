@@ -1501,65 +1501,401 @@ textarea {
     }
 }
 
-@media(max-width: 700px) {
-    .hero {
-        grid-template-columns: 1fr auto;
+@media (max-width: 700px) {
+    body.daily-reports-page .mm-top-nav {
+        flex-wrap: wrap;
+        gap: 8px;
     }
 
-    #dr-addBtn {
+    body.daily-reports-page .mm-app-brand {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    body.daily-reports-page .mm-app-brand-copy {
+        min-width: 0;
+    }
+
+    body.daily-reports-page .mm-app-brand-copy small {
+        white-space: normal;
+    }
+
+    body.daily-reports-page .mm-nav-mobile-toggle {
+        flex: 0 0 auto;
+        margin-left: auto;
+    }
+
+    body:not(.login-page).daily-reports-page main {
+        width: calc(100% - 24px);
+        max-width: 1100px;
+        margin: 18px auto 24px;
+        padding: 0;
+    }
+
+    body.daily-reports-page .hero {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 12px;
+        margin-bottom: 18px;
+    }
+
+    body.daily-reports-page .hero > div:first-child,
+    body.daily-reports-page #dr-addBtn,
+    body.daily-reports-page .stats {
         grid-column: 1;
-        grid-row: 2;
+        grid-row: auto;
+        min-width: 0;
+    }
+
+    body.daily-reports-page .hero h1 {
+        font-size: clamp(24px, 7vw, 32px);
+        overflow-wrap: anywhere;
+    }
+
+    body.daily-reports-page .hero p {
+        font-size: 14px;
+    }
+
+    body.daily-reports-page #dr-addBtn {
         justify-self: start;
     }
 
-    .stats {
+    body.daily-reports-page .stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+        gap: 8px;
+        margin: 0;
+    }
+
+    body.daily-reports-page .stats > div {
+        min-width: 0;
+        padding: 9px 12px;
+    }
+
+    body.daily-reports-page .dr-date-navigation {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        overflow: visible;
+        margin-bottom: 16px;
+        padding: 10px;
+    }
+
+    body.daily-reports-page .dr-selected-date {
+        grid-column: 1 / -1;
+        min-width: 0;
+        flex: initial;
+        align-self: stretch;
+        text-align: center;
+    }
+
+    body.daily-reports-page #dr-prevDay {
         grid-column: 2;
-        grid-row: 1 / span 2;
-        margin-top: 0;
+        grid-row: 2;
     }
 
-    .dr-twocol,
-    .dr-evrow {
-        grid-template-columns: 1fr;
+    body.daily-reports-page .dr-date-navigation .dr-icon-button {
+        width: 100%;
+        min-width: 0;
+        height: 48px;
+        min-height: 48px;
+        flex: initial;
     }
 
-    .dr-workforce-wrap {
-        grid-template-columns: 1fr;
+    body.daily-reports-page .dr-calendar-control {
+        grid-column: 1;
+        grid-row: 2;
+        width: 100%;
+        min-width: 0;
     }
 
-    .dr-evidence {
-        grid-template-columns: 1fr;
+    body.daily-reports-page .dr-calendar-control > .dr-icon-button {
+        width: 100%;
     }
 
-    .dr-record-actions {
+    body.daily-reports-page .dr-calendar {
+        left: 0;
+        width: min(300px, calc(100vw - 40px));
+    }
+
+    body.daily-reports-page .dr-day-actions {
+        grid-column: 1 / -1;
+        display: flex;
+        justify-content: center;
+        flex-wrap: wrap;
+        width: 100%;
+        min-width: 0;
+        margin: 0;
+        gap: 8px;
+        white-space: normal;
+    }
+
+    body.daily-reports-page .dr-share-actions {
+        display: contents;
+    }
+
+    body.daily-reports-page .dr-day-actions .dr-icon-button {
+        width: 48px;
+        flex: 0 0 48px;
+        padding: 7px;
+    }
+
+    body.daily-reports-page .dr-share-status {
+        flex: 1 0 100%;
+        text-align: center;
+        overflow-wrap: anywhere;
+    }
+
+    body.daily-reports-page .dr-card {
+        min-width: 0;
+        padding: 14px;
+    }
+
+    body.daily-reports-page .dr-card h2,
+    body.daily-reports-page .dr-selected-date strong {
+        overflow-wrap: anywhere;
+    }
+
+    body.daily-reports-page .dr-date-row,
+    body.daily-reports-page .dr-weather-actions {
+        min-width: 0;
+        align-items: flex-start;
+        justify-content: flex-start;
+    }
+
+    body.daily-reports-page .dr-weather {
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    body.daily-reports-page .dr-record-actions {
         flex-wrap: wrap;
     }
 
-    header {
-        flex-direction: column;
-        gap: 10px;
+    body.daily-reports-page .dr-twocol,
+    body.daily-reports-page .dr-workforce-wrap {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 8px;
     }
 
-    .dr-date-navigation {
+    body.daily-reports-page #dr-workerCategories {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0 10px;
+    }
+
+    body.daily-reports-page .dr-workforce-total-box {
+        min-height: 0;
+        padding: 12px;
+    }
+
+    body.daily-reports-page .dr-evidenceHead {
         align-items: stretch;
+        flex-direction: column;
+        gap: 8px;
     }
 
-    .dr-selected-date {
-        align-self: center;
-        min-width: 190px;
-        flex: 0 0 190px;
+    body.daily-reports-page .dr-evidence-controls {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        justify-content: stretch;
+        width: 100%;
     }
 
-    .dr-calendar {
-        width: min(300px, calc(100vw - 36px));
+    body.daily-reports-page #dr-driveStatus {
+        grid-column: 1 / -1;
+        overflow-wrap: anywhere;
     }
 
-    .dr-day-actions {
+    body.daily-reports-page .dr-evidence-controls > button {
+        min-width: 0;
+        min-height: 44px;
+        padding: 8px;
+        white-space: normal;
+    }
+
+    body.daily-reports-page .dr-evrow {
+        grid-template-columns: minmax(0, 1fr) 48px;
+        gap: 8px;
+        min-width: 0;
+        padding: 10px;
+        border: 1px solid #e2e7ec;
+        border-radius: 9px;
+        background: #fafafa;
+    }
+
+    body.daily-reports-page .dr-evrow > .dr-evtype,
+    body.daily-reports-page .dr-evrow > .dr-evtitle,
+    body.daily-reports-page .dr-evrow > .dr-evurl {
+        grid-column: 1 / -1;
+        min-width: 0;
+        margin-top: 0;
+    }
+
+    body.daily-reports-page .dr-evrow > .dr-evupload {
+        grid-column: 1;
+        min-width: 0;
+        min-height: 48px;
+        padding: 8px;
+        white-space: normal;
+    }
+
+    body.daily-reports-page .dr-evrow > .dr-remove {
+        grid-column: 2;
+        width: 48px;
+        min-width: 48px;
+        min-height: 48px;
+        padding: 8px;
+    }
+
+    body.daily-reports-page .dr-evidence {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    body.daily-reports-page .dr-ev,
+    body.daily-reports-page .dr-evtitle,
+    body.daily-reports-page .dr-previewBox,
+    body.daily-reports-page #dr-livePreview {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    body.daily-reports-page .dr-ev iframe,
+    body.daily-reports-page .dr-ev-img,
+    body.daily-reports-page #dr-livePreview img,
+    body.daily-reports-page #dr-livePreview iframe {
+        max-width: 100%;
+    }
+
+    body.daily-reports-page .dr-modal {
+        --dr-modal-top-offset: 0px;
+        inset: 0;
+        align-items: flex-start;
+        overflow: hidden;
+        padding: max(8px, env(safe-area-inset-top))
+            max(8px, env(safe-area-inset-right))
+            max(8px, env(safe-area-inset-bottom))
+            max(8px, env(safe-area-inset-left));
+        z-index: 1200;
+    }
+
+    body.daily-reports-page .dr-modalbox {
+        width: 100%;
+        max-width: 850px;
+        max-height: calc(100vh - 16px);
+        max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);
+        margin: auto;
+        padding: 16px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        scroll-padding: 16px 16px 140px;
+    }
+
+    body.daily-reports-page .dr-modalhead {
+        position: sticky;
+        top: -16px;
+        z-index: 2;
+        padding: 8px 0;
+        background: #fff;
+    }
+
+    body.daily-reports-page .dr-modalhead h2 {
+        min-width: 0;
+        font-size: 20px;
+    }
+
+    body.daily-reports-page .dr-modalhead h2 span {
+        overflow-wrap: anywhere;
+    }
+
+    body.daily-reports-page .dr-modalhead .dr-x {
+        flex: 0 0 44px;
+        width: 44px;
+        min-height: 44px;
+        padding: 6px;
+    }
+
+    body.daily-reports-page .dr-modalbox label {
+        min-width: 0;
+    }
+
+    body.daily-reports-page .dr-modalbox input,
+    body.daily-reports-page .dr-modalbox textarea,
+    body.daily-reports-page .dr-modalbox select {
+        min-width: 0;
+        font-size: 16px;
+        scroll-margin-block: 16px 140px;
+    }
+
+    body.daily-reports-page .dr-modalbox button {
+        min-height: 44px;
+    }
+
+    body.daily-reports-page button:not(.dr-calendar-day):not(.dr-calendar-month-button) {
+        min-height: 44px;
+    }
+
+    body.daily-reports-page .dr-save {
+        margin-bottom: max(8px, env(safe-area-inset-bottom));
+    }
+
+    body.daily-reports-page .dr-confirm-actions {
+        flex-wrap: wrap;
+    }
+
+    body.daily-reports-page .dr-confirm-actions button {
+        min-height: 44px;
+    }
+
+    body.daily-reports-page .dr-toast-container {
+        top: max(10px, env(safe-area-inset-top));
+        right: 10px;
+        left: 10px;
         width: auto;
-        margin-left: 0;
+        max-width: none;
     }
 
-    .dr-day-actions button {
-        flex: 0 0 48px;
+    body.daily-reports-page .dr-toast {
+        width: 100%;
+        min-width: 0;
+        padding: 12px;
+        animation: dr-toastMobileSlideIn 0.3s ease-out;
+    }
+
+    body.daily-reports-page .dr-toast.hiding {
+        animation: dr-toastMobileSlideOut 0.3s ease-in forwards;
+    }
+
+    @keyframes dr-toastMobileSlideIn {
+        from {
+            transform: translateY(-8px);
+            opacity: 0;
+        }
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    @keyframes dr-toastMobileSlideOut {
+        from {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        to {
+            transform: translateY(-8px);
+            opacity: 0;
+        }
+    }
+}
+
+@media (min-width: 390px) and (max-width: 700px) {
+    body.daily-reports-page .dr-evidence {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    body.daily-reports-page #dr-workerCategories {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }

@@ -4,9 +4,22 @@ export function createRedBookSiren({
   AudioConstructor = globalThis.Audio,
 } = {}) {
   const recentEvents = new Set();
-  const activeAudio = new Set();
+  let audio;
 
-  return payload => {
+  async function playAudio() {
+    if (typeof AudioConstructor !== "function") {
+      throw new Error("Audio playback is not available in this browser.");
+    }
+    if (!audio) {
+      audio = new AudioConstructor("/static/audio/red-book-siren.wav");
+      audio.preload = "auto";
+    }
+    audio.currentTime = 0;
+    await audio.play();
+    return true;
+  }
+
+  const playSiren = async payload => {
     const data = payload?.data || {};
     const eventId = data.event_id;
     if (data.title !== RED_BOOK_NOTIFICATION_TITLE || typeof eventId !== "string" || !eventId) {
@@ -15,24 +28,9 @@ export function createRedBookSiren({
     if (recentEvents.has(eventId)) return false;
 
     recentEvents.add(eventId);
-
-    let audio;
-    try {
-      if (typeof AudioConstructor !== "function") return false;
-      audio = new AudioConstructor("/static/audio/red-book-siren.wav");
-      audio.preload = "auto";
-      activeAudio.add(audio);
-      const releaseAudio = () => activeAudio.delete(audio);
-      audio.addEventListener("ended", releaseAudio, { once: true });
-      audio.addEventListener("error", releaseAudio, { once: true });
-      const playback = audio.play();
-      if (playback && typeof playback.catch === "function") {
-        playback.catch(releaseAudio);
-      }
-      return true;
-    } catch {
-      if (audio) activeAudio.delete(audio);
-      return false;
-    }
+    return playAudio();
   };
+
+  playSiren.test = playAudio;
+  return playSiren;
 }

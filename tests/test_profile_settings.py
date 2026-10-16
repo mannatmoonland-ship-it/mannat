@@ -94,6 +94,7 @@ def test_profile_settings_shows_safe_authenticated_user_information(profile_clie
     assert 'data-web-push-settings' in html
     assert 'id="web-push-enable"' in html
     assert 'id="web-push-disable"' in html
+    assert 'id="web-push-test-siren"' in html
     assert "Red Book notifications" in html
     profile_script = Path(app_module.app.root_path, "static", "profile_settings.js").read_text(encoding="utf-8")
     web_push_script = Path(app_module.app.root_path, "static", "web_push_notifications.js").read_text(encoding="utf-8")
@@ -106,21 +107,28 @@ def test_profile_settings_shows_safe_authenticated_user_information(profile_clie
     assert "Notifications require HTTPS, or localhost on this computer." in web_push_script
     assert "This browser does not support the required notification APIs." in web_push_script
     assert 'function describeError(error, fallback)' in web_push_script
-    assert 'showStatus(describeError(error, "Unable to enable notifications on this device.")' in web_push_script
-    assert 'import { createRedBookSiren } from "./red_book_notification_sound.js";' in web_push_script
-    assert "playRedBookSiren(payload);" in web_push_script
-    foreground_handler = web_push_script.split("async function showForegroundNotification", 1)[1].split(
+    assert 'function describeNotificationError(error, fallback)' in web_push_script
+    assert "Confirm FIREBASE_WEB_PUSH_VAPID_KEY is the Web Push key for this same Firebase project." in web_push_script
+    assert 'showStatus(describeNotificationError(error, "Unable to enable notifications on this device.")' in web_push_script
+    token_setup = web_push_script.split("async function getCurrentDeviceToken", 1)[1].split(
         "async function attachForegroundListener", 1
     )[0]
-    assert foreground_handler.index("playRedBookSiren(payload);") < foreground_handler.index(
-        "serviceWorkerRegistration.showNotification"
-    )
-    assert "await playRedBookSiren(payload)" not in foreground_handler
-    assert 'audio.play();' in chime_script
-    assert 'playback.catch(releaseAudio);' in chime_script
+    assert token_setup.index("await navigator.serviceWorker.register(") < token_setup.index(
+        "await navigator.serviceWorker.ready"
+    ) < token_setup.index("sdk.getToken")
+    assert 'import { createRedBookSiren } from "./red_book_notification_sound.js";' in web_push_script
+    assert 'import { createRedBookForegroundNotificationHandler } from "./red_book_foreground_notification.js";' in web_push_script
+    assert 'from "./firebase_auth.js"' not in web_push_script
+    assert "handleForegroundNotification(payload).catch(error =>" in web_push_script
+    assert 'sdk.onMessage(messaging, payload =>' in web_push_script
+    assert 'playRedBookSiren.test()' in web_push_script
+    assert 'getElementById("web-push-test-siren").addEventListener("click", testRedBookSiren)' in web_push_script
+    assert "await audio.play();" in chime_script
+    assert 'maximumWaitMs = 10000' in Path(app_module.app.root_path, "templates", "_page_loader.html").read_text(encoding="utf-8")
     assert 'messaging.onBackgroundMessage(payload =>' in service_worker_script
-    assert 'self.registration.showNotification(title' in service_worker_script
-    assert "A digital siren may play" in html
+    assert 'self.registration.showNotification(data.title' in service_worker_script
+    assert "Ignored a background message that is not a Red Book pin event." in service_worker_script
+    assert "On mobile and when the page is in the background or closed" in html
     assert Path(app_module.app.root_path, "static", "audio", "red-book-siren.wav").is_file()
     assert "password_hash" not in html
     assert "Example1!Password" not in html

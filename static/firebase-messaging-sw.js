@@ -8,16 +8,27 @@ const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage(payload => {
   const data = payload.data || {};
-  const title = data.title || "Mannat Moon Construction";
-  const body = data.body || "There is a new Red Book update.";
-  self.registration.showNotification(title, {
-    body,
+  if (
+    data.title !== "Mannat Moon Construction — Red Book"
+    || typeof data.event_id !== "string"
+    || !data.event_id
+  ) {
+    console.info("Ignored a background message that is not a Red Book pin event.");
+    return;
+  }
+  return self.registration.showNotification(data.title, {
+    body: data.body || "There is a new Red Book update.",
     data: {
       url: data.url || "/red-book",
       eventId: data.event_id || "",
     },
     tag: data.event_id || undefined,
     renotify: false,
+  }).catch(error => {
+    console.error("Red Book background notification display failed.", {
+      name: error?.name || "Error",
+    });
+    throw error;
   });
 });
 

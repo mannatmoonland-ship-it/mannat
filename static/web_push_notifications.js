@@ -1,14 +1,28 @@
-import { getFirebaseApp } from "./firebase_auth.js";
 import { createRedBookSiren } from "./red_book_notification_sound.js";
+import { createRedBookForegroundNotificationHandler } from "./red_book_foreground_notification.js";
 
 const settings = document.querySelector("[data-web-push-settings]");
 const messagingSdkUrl = "https://www.gstatic.com/firebasejs/12.2.1/firebase-messaging.js";
+const firebaseAppSdkUrl = "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
 let firebaseMessagingSdk;
+let firebaseAppSdk;
+let firebaseWebConfigPromise;
 let messagingInstance;
 let currentDeviceToken = "";
 let serviceWorkerRegistration;
-let foregroundListenerAttached = false;
+let foregroundListenerPromise;
 const playRedBookSiren = createRedBookSiren();
+const handleForegroundNotification = createRedBookForegroundNotificationHandler({
+  getRegistration: () => serviceWorkerRegistration,
+  playSiren: playRedBookSiren,
+  onSirenFailure: error => {
+    if (!settings) return;
+    const message = error?.name === "NotAllowedError"
+      ? "The Red Book notification was displayed, but the browser blocked siren audio. Click Test Siren and check this tab's sound settings."
+      : "The Red Book notification was displayed, but the siren could not play. Click Test Siren to check the audio.";
+    showStatus(message, "error");
+  },
+});
 
 function showStatus(message, state = "info") {
   const status = document.getElementById("web-push-status");
@@ -20,6 +34,21 @@ function showStatus(message, state = "info") {
 function describeError(error, fallback) {
   const name = typeof error?.name === "string" && error.name ? `${error.name}: ` : "";
   return `${name}${error?.message || fallback}`;
+}
+
+function describeNotificationError(error, fallback) {
+  if (error?.name === "AbortError" && /push service error/i.test(error?.message || "")) {
+    return "The browser could not create a push subscription. Confirm FIREBASE_WEB_PUSH_VAPID_KEY is the Web Push key for this same Firebase project. In Brave, allow Google/Firebase push connections and check Shields, VPN, firewall, or DNS filtering, then reload and try again. If it still fails, try Chrome or Edge to check whether the browser is blocking push.";
+  }
+  return describeError(error, fallback);
+}
+
+function logNotificationError(message, error) {
+  console.error(message, {
+    name: error?.name || "Error",
+    code: error?.code || "",
+    stage: error?.stage || "",
+  });
 }
 
 async function loadMessagingSdk() {
@@ -35,6 +64,16 @@ async function loadMessagingSdk() {
     });
   }
   return firebaseMessagingSdk;
+}
+
+async function loadFirebaseAppSdk() {
+  if (!firebaseAppSdk) {
+    firebaseAppSdk = import(firebaseAppSdkUrl).catch(error => {
+      firebaseAppSdk = undefined;
+      throw error;
+    });
+  }
+  return firebaseAppSdk;
 }
 
 async function requestJson(url, { method = "GET", token, csrfToken } = {}) {
@@ -54,14 +93,35 @@ async function requestJson(url, { method = "GET", token, csrfToken } = {}) {
   return result;
 }
 
+async function getFirebaseWebConfig() {
+  if (!firebaseWebConfigPromise) {
+    firebaseWebConfigPromise = requestJson("/api/firebase-web-config")
+      .catch(error => {
+        firebaseWebConfigPromise = undefined;
+        throw error;
+      });
+  }
+  return firebaseWebConfigPromise;
+}
+
 async function getPushConfiguration() {
   return requestJson("/api/notifications/config");
 }
 
 async function getMessaging() {
   if (!messagingInstance) {
-    const sdk = await loadMessagingSdk();
-    messagingInstance = sdk.getMessaging(await getFirebaseApp());
+    const [sdk, appSdk, config] = await Promise.all([
+      loadMessagingSdk(),
+      loadFirebaseAppSdk(),
+      getFirebaseWebConfig(),
+    ]);
+    const existingApp = appSdk.getApps().find(firebaseApp => firebaseApp.name === "[DEFAULT]");
+    const firebaseApp = existingApp || appSdk.initializeApp(config);
+    if (firebaseApp.options.projectId !== config.projectId) {
+      throw new Error("The initialized Firebase project does not match the active project.");
+    }
+    messagingInstance = sdk.getMessaging(firebaseApp);
+    console.info("Firebase Messaging initialized.");
   }
   return { sdk: await loadMessagingSdk(), messaging: messagingInstance };
 }
@@ -77,6 +137,10 @@ async function getCurrentDeviceToken(vapidKey) {
     "/firebase-messaging-sw.js",
     { scope: "/" },
   );
+  serviceWorkerRegistration = await navigator.serviceWorker.ready;
+  console.info("Firebase Messaging service worker is ready.", {
+    state: serviceWorkerRegistration.active?.state || "no-active-worker",
+  });
   const { sdk, messaging } = await getMessaging();
   currentDeviceToken = await sdk.getToken(messaging, {
     vapidKey,
@@ -86,48 +150,27 @@ async function getCurrentDeviceToken(vapidKey) {
   return currentDeviceToken;
 }
 
-function notificationUrl(value) {
-  try {
-    const target = new URL(value || "/red-book", window.location.origin);
-    return target.origin === window.location.origin ? target.href : "/red-book";
-  } catch {
-    return "/red-book";
-  }
-}
-
-async function showForegroundNotification(payload) {
-  const data = payload.data || {};
-  if (Notification.permission !== "granted") return;
-  playRedBookSiren(payload);
-  const title = data.title || "Mannat Moon Construction";
-  const options = {
-    body: data.body || "There is a new Red Book update.",
-    tag: data.event_id || undefined,
-    renotify: false,
-    data: { url: notificationUrl(data.url) },
-  };
-  if (serviceWorkerRegistration) {
-    await serviceWorkerRegistration.showNotification(title, options);
-    return;
-  }
-  const notification = new Notification(title, options);
-  notification.onclick = () => {
-    window.focus();
-    window.location.assign(options.data.url);
-  };
-}
-
 async function attachForegroundListener() {
-  if (foregroundListenerAttached || Notification.permission !== "granted") return;
-  const { sdk, messaging } = await getMessaging();
-  serviceWorkerRegistration = serviceWorkerRegistration
-    || await navigator.serviceWorker.getRegistration("/");
-  sdk.onMessage(messaging, payload => {
-    showForegroundNotification(payload).catch(() => {
-      if (settings) showStatus("A notification arrived, but this browser could not display it.", "error");
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  if (!foregroundListenerPromise) {
+    foregroundListenerPromise = (async () => {
+      const { sdk, messaging } = await getMessaging();
+      serviceWorkerRegistration = serviceWorkerRegistration
+        || await navigator.serviceWorker.getRegistration("/");
+      sdk.onMessage(messaging, payload => {
+        console.info("Received a Firebase foreground message.");
+        handleForegroundNotification(payload).catch(error => {
+          logNotificationError("Red Book foreground notification could not be displayed.", error);
+          if (settings) showStatus("A Red Book notification arrived, but this browser could not display it.", "error");
+        });
+      });
+      console.info("Firebase foreground message listener registered.");
+    })().catch(error => {
+      foregroundListenerPromise = undefined;
+      throw error;
     });
-  });
-  foregroundListenerAttached = true;
+  }
+  await foregroundListenerPromise;
 }
 
 async function initializeSettings() {
@@ -149,9 +192,8 @@ async function initializeSettings() {
       showStatus(`This browser does not support the required notification APIs. ${unsupportedHint}`, "error");
       return;
     }
-    const sdk = await loadMessagingSdk();
     const configuration = await getPushConfiguration();
-    if (!sdk || !configuration.configured) {
+    if (!configuration.configured) {
       enableButton.disabled = true;
       showStatus(configuration.message || "Web Push is not configured for this site yet.", "error");
       return;
@@ -181,8 +223,9 @@ async function initializeSettings() {
       showStatus("Browser permission is granted, but notifications are not enabled on this device.");
     }
   } catch (error) {
+    logNotificationError("Red Book notification initialization failed.", error);
     enableButton.disabled = true;
-    const message = describeError(error, "Unable to check browser notification settings.");
+    const message = describeNotificationError(error, "Unable to check browser notification settings.");
     showStatus(
       `${message}${message.includes("does not support") ? ` ${unsupportedHint}` : ""}`,
       "error",
@@ -195,7 +238,6 @@ async function enableNotifications() {
   const disableButton = document.getElementById("web-push-disable");
   enableButton.disabled = true;
   try {
-    await loadMessagingSdk();
     const configuration = await getPushConfiguration();
     if (!configuration.configured) throw new Error(configuration.message || "Web Push is not configured for this site yet.");
     const permission = Notification.permission === "default"
@@ -210,17 +252,18 @@ async function enableNotifications() {
       return;
     }
     const token = await getCurrentDeviceToken(configuration.vapid_key);
+    await attachForegroundListener();
     await requestJson("/api/notifications/device", {
       method: "POST",
       token,
       csrfToken: settings.dataset.csrfToken,
     });
-    await attachForegroundListener();
     enableButton.hidden = true;
     disableButton.hidden = false;
     showStatus("Notifications are enabled on this device.", "success");
   } catch (error) {
-    showStatus(describeError(error, "Unable to enable notifications on this device."), "error");
+    logNotificationError("Red Book notifications could not be enabled.", error);
+    showStatus(describeNotificationError(error, "Unable to enable notifications on this device."), "error");
   } finally {
     enableButton.disabled = false;
   }
@@ -255,10 +298,30 @@ async function disableNotifications() {
   }
 }
 
+async function testRedBookSiren() {
+  const testButton = document.getElementById("web-push-test-siren");
+  testButton.disabled = true;
+  try {
+    await playRedBookSiren.test();
+    showStatus("Siren test played. Keep this page open and in the foreground to hear Red Book alerts.", "success");
+  } catch (error) {
+    logNotificationError("Red Book siren test failed.", error);
+    const message = error?.name === "NotAllowedError"
+      ? "The browser blocked siren audio. Allow sound for this site, click Test Siren again, and keep this page open in the foreground."
+      : "The siren audio could not load or play. Check the siren file request and this device's volume, then click Test Siren again.";
+    showStatus(message, "error");
+  } finally {
+    testButton.disabled = false;
+  }
+}
+
 if (settings) {
   document.getElementById("web-push-enable").addEventListener("click", enableNotifications);
   document.getElementById("web-push-disable").addEventListener("click", disableNotifications);
+  document.getElementById("web-push-test-siren").addEventListener("click", testRedBookSiren);
   initializeSettings();
 } else if ("Notification" in window && Notification.permission === "granted") {
-  attachForegroundListener().catch(() => {});
+  attachForegroundListener().catch(error => {
+    logNotificationError("Firebase foreground message listener could not be registered.", error);
+  });
 }

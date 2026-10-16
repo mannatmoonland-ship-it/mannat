@@ -15,7 +15,9 @@ def test_daily_reports_drive_images_use_direct_image_endpoints_and_no_referrer()
     assert 'd && type==="Photo"' in javascript
     assert 'referrerpolicy="no-referrer"' in javascript
     assert 'data-fallbacks=' in javascript
-    assert 'Photo preview unavailable. Sign in to a Google account with access to this file.' in javascript
+    assert 'class="dr-drive-preview-loading" role="status">Loading photo preview...' in javascript
+    assert 'onload="if(this.previousElementSibling)this.previousElementSibling.remove();"' in javascript
+    assert 'Photo preview unavailable. <a href="${escapeHtml(url)}"' in javascript
 
     # Verify iframe is preserved for non-photo Google Drive files
     assert 'if(d) return `<iframe src="https://drive.google.com/file/d/${d}/preview"></iframe>`;' in javascript

@@ -162,6 +162,103 @@ def test_report_creator_and_editor_avatars_resolve_from_current_user_profiles(da
     assert refreshed_avatars_response.get_json()["user_ids"]["user-2"] == "lion"
 
 
+def test_daily_report_save_persists_uploaded_photo_metadata_once(daily_reports_client):
+    client, _store, records = daily_reports_client
+    set_logged_in_user(client, "user-1")
+    headers = {"X-CSRF-Token": "daily-reports-test-csrf"}
+    evidence = [
+        {
+            "type": "Photo",
+            "title": "Site photo",
+            "url": "https://drive.google.com/file/d/photo-file-id/view",
+            "fileId": "photo-file-id",
+            "previewUrl": "https://drive.google.com/thumbnail?id=photo-file-id&sz=w1600",
+        },
+        {
+            "type": "Photo",
+            "title": "Duplicate upload row",
+            "url": "https://drive.google.com/file/d/photo-file-id/view",
+            "fileId": "photo-file-id",
+            "previewUrl": "https://drive.google.com/thumbnail?id=photo-file-id&sz=w1600",
+        },
+        {
+            "type": "Document",
+            "title": "Existing attachment",
+            "url": "https://example.test/document.pdf",
+        },
+    ]
+
+    create_response = client.post(
+        "/api/daily-records",
+        json={"date": "2026-10-16", "activity": "Site progress", "evidence": evidence},
+        headers=headers,
+    )
+
+    assert create_response.status_code == 201
+    record_id = create_response.get_json()["id"]
+    assert create_response.get_json()["evidence"] == [evidence[0], evidence[2]]
+    assert records.records[record_id]["evidence"] == [evidence[0], evidence[2]]
+    assert create_response.get_json()["record"]["evidence"] == [
+        evidence[0],
+        evidence[2],
+    ]
+    assert create_response.get_json()["record"]["createdByName"] == "Rahim"
+    assert "createdByUserId" not in create_response.get_json()["record"]
+
+    update_response = client.patch(
+        f"/api/daily-records/{record_id}",
+        json={
+            "date": "2026-10-16",
+            "activity": "Site progress updated",
+            "evidence": evidence,
+        },
+        headers=headers,
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.get_json()["evidence"] == [evidence[0], evidence[2]]
+    assert records.records[record_id]["evidence"] == [evidence[0], evidence[2]]
+    assert update_response.get_json()["record"]["evidence"] == [
+        evidence[0],
+        evidence[2],
+    ]
+    assert update_response.get_json()["record"]["createdByName"] == "Rahim"
+    assert update_response.get_json()["record"]["activity"] == "Site progress updated"
+
+
+def test_daily_report_save_failure_returns_error_without_success_response(
+    daily_reports_client, monkeypatch
+):
+    client, _store, _records = daily_reports_client
+    set_logged_in_user(client, "user-1")
+    headers = {"X-CSRF-Token": "daily-reports-test-csrf"}
+
+    class FailingRecordReference:
+        def set(self, _record_data):
+            raise RuntimeError("Firestore unavailable")
+
+    class FailingCollection:
+        def document(self):
+            return FailingRecordReference()
+
+    monkeypatch.setattr(
+        app_module,
+        "get_daily_records_collection",
+        lambda: FailingCollection(),
+    )
+
+    response = client.post(
+        "/api/daily-records",
+        json={"date": "2026-10-16", "activity": "Site progress", "evidence": []},
+        headers=headers,
+    )
+
+    assert response.status_code == 503
+    assert response.get_json() == {
+        "error": "Unable to save the daily report. Please try again."
+    }
+
+
 def test_author_avatar_lookup_supports_legacy_report_usernames(daily_reports_client):
     client, _, _ = daily_reports_client
     set_logged_in_user(client, "user-1")

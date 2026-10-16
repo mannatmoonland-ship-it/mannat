@@ -814,22 +814,26 @@ const DailyReports = (function() {
     </div>`;
   }
 
-  function previewHtml(type,url){
+  function previewHtml(type,url,previewUrl="", eagerImage=false){
     const y = youtubeId(url);
     if(y) return youtubePreviewHtml(y);
-    const d = driveId(url);
+    const d = driveId(url) || driveId(previewUrl);
     if(d && type==="Photo"){
-      const candidates = getDriveImageCandidates(url);
+      const candidates = previewUrl
+        ? [previewUrl, ...getDriveImageCandidates(url).filter(candidate => candidate !== previewUrl)]
+        : getDriveImageCandidates(url);
       const primaryUrl = candidates[0] || url;
       const fallbackUrls = candidates.slice(1);
-      return `<img src="${escapeHtml(primaryUrl)}"
+      return `<div class="dr-drive-preview-loading" role="status">Loading photo preview...</div>
+        <img src="${escapeHtml(primaryUrl)}"
         data-fallbacks="${escapeHtml(fallbackUrls.join(','))}"
         referrerpolicy="no-referrer"
         alt="Photo preview"
         class="dr-ev-img"
-        loading="lazy"
-        onerror="if(this.dataset.fallbacks){const f=this.dataset.fallbacks.split(',');this.src=f.shift();this.dataset.fallbacks=f.join(',');}else{this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='block';}">
-        <div class="dr-preview-error" style="display:none;">Photo preview unavailable. Sign in to a Google account with access to this file. <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open in Google Drive</a></div>`;
+        loading="${eagerImage ? "eager" : "lazy"}"
+        onload="if(this.previousElementSibling)this.previousElementSibling.remove();"
+        onerror="if(this.dataset.fallbacks){const f=this.dataset.fallbacks.split(',');this.src=f.shift();this.dataset.fallbacks=f.join(',');}else{this.style.display='none';if(this.previousElementSibling)this.previousElementSibling.remove();if(this.nextElementSibling)this.nextElementSibling.style.display='block';}">
+        <div class="dr-preview-error" style="display:none;">Photo preview unavailable. <a href="${escapeHtml(url)}" target="_blank" rel="noopener">Open in Google Drive</a></div>`;
     }
     if(d) return `<iframe src="https://drive.google.com/file/d/${d}/preview"></iframe>`;
     
@@ -946,6 +950,13 @@ const DailyReports = (function() {
       <button type="button" class="dr-remove" aria-label="Remove evidence" title="Remove evidence"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
     `;
 
+    if (data.fileId) {
+      row.dataset.driveFileId = data.fileId;
+    }
+    if (data.previewUrl) {
+      row.dataset.drivePreviewUrl = data.previewUrl;
+    }
+
     if (data.type) {
       row.querySelector(".dr-evtype").value = data.type;
     }
@@ -967,8 +978,20 @@ const DailyReports = (function() {
       uploadButton.disabled = true;
       uploadButton.querySelector("span").textContent = "Uploading...";
       try {
+        const photoFingerprint = `${photo.name}:${photo.size}:${photo.lastModified}`;
+        if (
+          row.dataset.driveUploadFingerprint !== photoFingerprint ||
+          !row.dataset.driveUploadId
+        ) {
+          if (!window.crypto?.randomUUID) {
+            throw new Error("Secure photo upload is unavailable in this browser.");
+          }
+          row.dataset.driveUploadId = window.crypto.randomUUID();
+          row.dataset.driveUploadFingerprint = photoFingerprint;
+        }
         const formData = new FormData();
         formData.append("photo", photo, photo.name);
+        formData.append("upload_id", row.dataset.driveUploadId);
         const response = await fetch("/api/daily-reports/evidence/upload", {
           method: "POST",
           headers: { "X-CSRF-Token": document.body.dataset.dailyReportsCsrf || "" },
@@ -988,14 +1011,25 @@ const DailyReports = (function() {
         row.querySelector(".dr-evtype").value = "Photo";
         row.querySelector(".dr-evtitle").value = payload.title || "Site photo";
         row.querySelector(".dr-evurl").value = payload.url;
+        row.dataset.driveFileId = payload.file_id;
+        row.dataset.drivePreviewUrl = payload.preview_url;
+        delete row.dataset.driveUploadId;
+        delete row.dataset.driveUploadFingerprint;
         updatePreview();
-        showToast("Photo uploaded to Google Drive and added to evidence.", "success", 4000);
+        showToast(
+          "Photo uploaded and added to this report form. Save the Daily Record to keep it.",
+          "success",
+          5000
+        );
       } catch (error) {
+        uploadButton.querySelector("span").textContent = "Retry / Choose Photo";
         showToast(error.message || "Unable to upload the photo.", "error", 5000);
       } finally {
         uploadInput.value = "";
         uploadButton.disabled = false;
-        uploadButton.querySelector("span").textContent = "Take / Upload Photo";
+        if (!row.dataset.driveUploadId) {
+          uploadButton.querySelector("span").textContent = "Take / Upload Photo";
+        }
       }
     });
 
@@ -1071,7 +1105,9 @@ const DailyReports = (function() {
     if(rows.length){
       const previews = rows.map(row => previewHtml(
         row.querySelector(".dr-evtype").value,
-        row.querySelector(".dr-evurl").value
+        row.querySelector(".dr-evurl").value,
+        row.dataset.drivePreviewUrl || "",
+        true
       ));
       
       $("dr-livePreview").innerHTML = previews.join("");
@@ -1256,12 +1292,16 @@ const DailyReports = (function() {
       return;
     }
 
+    let isEditing;
+    let responseData;
     try {
       const evidence = [...document.querySelectorAll(".dr-evrow")]
         .map(row => ({
           type: row.querySelector(".dr-evtype").value,
           title: row.querySelector(".dr-evtitle").value.trim(),
-          url: row.querySelector(".dr-evurl").value.trim()
+          url: row.querySelector(".dr-evurl").value.trim(),
+          ...(row.dataset.driveFileId ? { fileId: row.dataset.driveFileId } : {}),
+          ...(row.dataset.drivePreviewUrl ? { previewUrl: row.dataset.drivePreviewUrl } : {})
         }))
         .filter(x => x.url);
 
@@ -1269,7 +1309,7 @@ const DailyReports = (function() {
       const selectedTrade = getSelectedTrade();
       const existingRecord = editingId ? recordCache.get(editingId) : null;
       const weatherData = getWeatherDataFromForm();
-      const isEditing = Boolean(editingId);
+      isEditing = Boolean(editingId);
 
       const recordData = {
         date: $("dr-date").value,
@@ -1303,55 +1343,73 @@ const DailyReports = (function() {
           body: JSON.stringify(recordData)
         }
       );
-      let responseData = {};
       try {
         responseData = await response.json();
       } catch (_) {
-        // Keep a readable save error if the server did not return JSON.
+        responseData = {};
       }
       if (!response.ok) {
         throw new Error(responseData.error || "Unable to save the daily report.");
       }
-
-      if (isEditing) {
-        showToast("Daily Record updated successfully.", "success", 3000);
-      } else {
-        showToast("Daily Record saved successfully.", "success", 3000);
-      }
-
-      editingId = null;
-      const modal = $("dr-modal");
-      if (modal) {
-        unregisterEscClose(modal);
-        modal.classList.add("dr-hidden");
-      }
-      e.target.reset();
-      updateFloorCustomField();
-      $("dr-tradeSelect").disabled = false;
-      $("dr-tradeSelect").required = true;
-      $("dr-tradeStatus").textContent = "";
-      renderWorkerCategories(getTradeCategories(getSelectedTrade()));
-      updateWorkforceTotal();
-      $("dr-date").value = selectedDate;
-      $("dr-evidenceRows").innerHTML = "";
-      $("dr-livePreview").innerHTML = "Paste a YouTube, Google Drive, or Google Photos link above.";
-
-      const submitButton = $("dr-recordForm").querySelector('button[type="submit"]');
-      if (submitButton) {
-        submitButton.querySelector("span").textContent = "Save Daily Record";
-      }
-
-      const title = $("dr-modal").querySelector("h2");
-      if (title) {
-        title.querySelector("span").textContent = "New Daily Record";
-      }
-
-      await loadRecords();
-      loadCalendarReportDates();
     } catch (error) {
       console.error(error);
-      showToast("Unable to save the daily report. Please check your connection and try again.", "error", 5000);
+      showToast(error.message || "Unable to save the daily report. Please check your connection and try again.", "error", 5000);
+      return;
     }
+
+    try {
+      if (
+        typeof responseData.id !== "string" ||
+        !responseData.id ||
+        !responseData.record ||
+        typeof responseData.record !== "object"
+      ) {
+        throw new Error("The saved Daily Record could not be displayed. Reload to view it.");
+      }
+      updateDisplayedDailyRecord(responseData.id, responseData.record);
+    } catch (error) {
+      console.error("Daily Report was saved, but the report card could not be updated.", error);
+      showToast(
+        "Daily Record was saved, but the report card could not be updated. Reload to view it.",
+        "error",
+        6000
+      );
+      return;
+    }
+
+    editingId = null;
+    const modal = $("dr-modal");
+    if (modal) {
+      unregisterEscClose(modal);
+      modal.classList.add("dr-hidden");
+    }
+    e.target.reset();
+    updateFloorCustomField();
+    $("dr-tradeSelect").disabled = false;
+    $("dr-tradeSelect").required = true;
+    $("dr-tradeStatus").textContent = "";
+    renderWorkerCategories(getTradeCategories(getSelectedTrade()));
+    updateWorkforceTotal();
+    $("dr-date").value = selectedDate;
+    $("dr-evidenceRows").innerHTML = "";
+    $("dr-livePreview").innerHTML = "Paste a YouTube, Google Drive, or Google Photos link above.";
+
+    const submitButton = $("dr-recordForm").querySelector('button[type="submit"]');
+    if (submitButton) {
+      submitButton.querySelector("span").textContent = "Save Daily Record";
+    }
+
+    const title = $("dr-modal").querySelector("h2");
+    if (title) {
+      title.querySelector("span").textContent = "New Daily Record";
+    }
+
+    loadCalendarReportDates();
+    showToast(
+      isEditing ? "Daily Record updated successfully." : "Daily Record saved successfully.",
+      "success",
+      3000
+    );
   }
 
   async function resolveEvidenceImageUrl(item) {
@@ -1548,7 +1606,7 @@ const DailyReports = (function() {
       for (let index = 0; index < safeItems.length; index += 4) {
         const pageItems = safeItems.slice(index, index + 4);
         const pageMarkup = pageItems.map((item, itemIndex) => {
-          const imgUrl = item.url ? String(item.url).trim() : "";
+          const imgUrl = item.previewUrl || (item.url ? String(item.url).trim() : "");
           const label = item.title || item.type || "Evidence";
             const evidenceIndex = index + itemIndex;
             const videoLabel = isVideoEvidence(item) ? "VIDEO" : "";
@@ -1904,13 +1962,114 @@ const DailyReports = (function() {
     }, 350);
   }
 
+  function renderDailyRecordCard(recordId, record) {
+    const evidence = getUniqueDailyReportEvidence(record);
+    const savedCounts = record.workerCounts && typeof record.workerCounts === "object"
+      ? record.workerCounts
+      : {
+        "Masons": Number(record.masonCount ?? 0),
+        "Man Mazdoor": Number(record.manMazdoorCount ?? 0),
+        "Woman Mazdoor": Number(record.womanMazdoorCount ?? 0)
+      };
+    const totalWorkers = Number(record.totalWorkers ?? record.manpower ?? Object.values(savedCounts)
+      .reduce((total, value) => total + Number(value || 0), 0));
+    const postedBy = getPostedBy(record);
+    const lastEdited = getLastEditedDetails(record);
+    const workerSummary = Object.entries(savedCounts)
+      .map(([name, count]) => `<div>${escapeHtml(name)}: ${Number(count || 0)}</div>`)
+      .join("");
+    return `<article class="dr-card" data-record-id="${escapeHtml(recordId)}">
+      <div class="dr-date-row">
+        <div class="dr-date">${escapeHtml(formatDate(record.date, ""))}</div>
+        <div class="dr-author-details">
+          <div class="dr-posted-by">Posted by: ${renderUserAttribution(postedBy.fullName, postedBy.userId, postedBy.username, "Posted by")}${postedBy.username ? ` (<span class="dr-posted-username">@${escapeHtml(postedBy.username)}</span>)` : ""}</div>
+          ${lastEdited ? `<div class="dr-last-edited">Last edited by: ${renderUserAttribution(lastEdited.fullName, lastEdited.userId, lastEdited.username, "Last edited by")}${lastEdited.username ? ` (@${escapeHtml(lastEdited.username)})` : ""} | ${escapeHtml(lastEdited.editedAt)}</div>` : ""}
+        </div>
+        <div class="dr-weather-actions">
+          ${getWeatherBadgeMarkup(record.weatherCondition, record.weatherDescription)}
+          <button type="button" class="dr-print-btn" data-action="print" data-id="${escapeHtml(recordId)}">🖨 Print</button>
+        </div>
+      </div>
+      <div class="dr-record-actions">
+        <button type="button" class="dr-edit-btn" data-action="edit" data-id="${escapeHtml(recordId)}">Edit</button>
+        <button type="button" class="dr-delete-btn" data-action="delete" data-id="${escapeHtml(recordId)}">Delete</button>
+      </div>
+      <h2>${escapeHtml(record.activity || "Daily Site Record")}</h2>
+      <div class="dr-meta">
+        <span class="dr-tag">${escapeHtml(record.floor || "Location not specified")}</span>
+      </div>
+      <div class="dr-workforce-card">
+        ${workerSummary}
+        <div>Total Workers: ${totalWorkers}</div>
+      </div>
+      ${record.materials ? `<h3>Materials</h3><div class="dr-pre">${escapeHtml(record.materials)}</div>` : ""}
+      ${record.notes ? `<h3>Work Done Today</h3><div class="dr-pre">${escapeHtml(record.notes)}</div>` : ""}
+      ${evidence.length ? `<h3>Evidence</h3><div class="dr-evidence">${evidence.map(item => `<div class="dr-ev" data-evidence-file-id="${escapeHtml(item.fileId || "")}"><div class="dr-evtitle">${escapeHtml(item.type)} — ${escapeHtml(item.title || "")}</div>${previewHtml(item.type, item.url, item.previewUrl)}<div class="dr-ev-actions"><a class="dr-open" target="_blank" href="${escapeHtml(item.url)}">Open original</a></div></div>`).join("")}</div>` : ""}
+    </article>`;
+  }
+
+  function updateDisplayedDailyRecord(recordId, record) {
+    const recordsElement = $("dr-records");
+    const previousRecord = recordCache.get(recordId);
+    record = {
+      ...record,
+      evidence: getUniqueDailyReportEvidence(record)
+    };
+    if (previousRecord?.createdByUserId) {
+      record.createdByUserId = previousRecord.createdByUserId;
+    }
+    const existingCard = [...recordsElement.querySelectorAll(".dr-card[data-record-id]")]
+      .find(card => card.dataset.recordId === recordId);
+    if (record.date !== selectedDate) {
+      existingCard?.remove();
+      recordCache.delete(recordId);
+    } else {
+      recordCache.set(recordId, record);
+      const cardMarkup = renderDailyRecordCard(recordId, record);
+      if (existingCard) {
+        existingCard.outerHTML = cardMarkup;
+      } else {
+        recordsElement.querySelector(".dr-empty-day")?.remove();
+        recordsElement.insertAdjacentHTML("beforeend", cardMarkup);
+      }
+    }
+    const visibleRecords = [...recordCache.values()]
+      .filter(item => belongsToSelectedDate(item, selectedDate));
+    $("dr-recordCount").textContent = visibleRecords.length;
+    $("dr-evidenceCount").textContent = visibleRecords.reduce(
+      (count, item) => count + getUniqueDailyReportEvidence(item).length,
+      0
+    );
+    if (!visibleRecords.length) {
+      recordsElement.innerHTML = '<div class="dr-card dr-empty-day"><h2>No Daily Reports for this date</h2></div>';
+    }
+    const updatedCard = [...recordsElement.querySelectorAll(".dr-card[data-record-id]")]
+      .find(card => card.dataset.recordId === recordId);
+    updatedCard?.querySelectorAll(".dr-ev-img").forEach(image => {
+      image.loading = "eager";
+    });
+    observeGooglePhotosPreviews(recordsElement);
+  }
+
+  function getUniqueDailyReportEvidence(record) {
+    const seenFileIds = new Set();
+    return (Array.isArray(record?.evidence) ? record.evidence : []).filter(item => {
+      if (!item || typeof item !== "object" || typeof item.fileId !== "string" || !item.fileId) {
+        return true;
+      }
+      if (seenFileIds.has(item.fileId)) return false;
+      seenFileIds.add(item.fileId);
+      return true;
+    });
+  }
+
   async function loadRecords(){
     if(!db){
       $("dr-recordCount").textContent = "—";
       $("dr-evidenceCount").textContent = "—";
       setDataStatus(describeFirebaseError(firebaseBootstrapError), true);
       $("dr-records").innerHTML=`<div class="dr-card"><b>Daily Reports are unavailable.</b><p>Please contact your administrator for help.</p></div>`;
-      return;
+      return false;
     }
 
     const requestedDate = selectedDate;
@@ -1919,7 +2078,7 @@ const DailyReports = (function() {
     try {
       snap = await getDocs(query(collection(db, "daily_records"), where("date", "==", requestedDate)));
     } catch (error) {
-      if (requestId !== recordsLoadId) return;
+      if (requestId !== recordsLoadId) return false;
       recordCache.clear();
       $("dr-recordCount").textContent = "—";
       $("dr-evidenceCount").textContent = "—";
@@ -1932,10 +2091,10 @@ const DailyReports = (function() {
         httpStatus: error?.customData?.httpStatus ?? error?.status ?? "unavailable"
       });
       showToast("Unable to load Daily Reports. Check the connection and try again.", "error", 5000);
-      return;
+      return false;
     }
     if (requestId !== recordsLoadId) {
-      return;
+      return false;
     }
 
     const dailyRecords = snap.docs
@@ -1943,7 +2102,7 @@ const DailyReports = (function() {
       .filter(({ record }) => belongsToSelectedDate(record, requestedDate));
     const avatarMaps = await loadAuthorAvatars(dailyRecords.map(({ record }) => record));
     if (requestId !== recordsLoadId) {
-      return;
+      return false;
     }
     authorAvatarByUserId.clear();
     authorAvatarByUsername.clear();
@@ -1954,54 +2113,11 @@ const DailyReports = (function() {
     let html="", evidenceCount=0, recordCount=0;
 
     dailyRecords.forEach(({ recordDoc, record: r }) => {
-      const ev = r.evidence || [];
-      const savedCounts = r.workerCounts && typeof r.workerCounts === "object"
-        ? r.workerCounts
-        : {
-          "Masons": Number(r.masonCount ?? 0),
-          "Man Mazdoor": Number(r.manMazdoorCount ?? 0),
-          "Woman Mazdoor": Number(r.womanMazdoorCount ?? 0)
-        };
-      const totalWorkers = Number(r.totalWorkers ?? r.manpower ?? Object.values(savedCounts).reduce((total, value) => total + Number(value || 0), 0));
-      const weatherSummary = getWeatherSummary(r.weatherCondition, r.weatherDescription);
-      const postedBy = getPostedBy(r);
-      const lastEdited = getLastEditedDetails(r);
-      const workerSummary = Object.entries(savedCounts)
-        .map(([name, count]) => `<div>${escapeHtml(name)}: ${Number(count || 0)}</div>`)
-        .join("");
-
+      const ev = getUniqueDailyReportEvidence(r);
       recordCache.set(recordDoc.id, r);
       recordCount += 1;
       evidenceCount += ev.length;
-
-      html += `<article class="dr-card">
-        <div class="dr-date-row">
-          <div class="dr-date">${escapeHtml(formatDate(r.date, ""))}</div>
-          <div class="dr-author-details">
-            <div class="dr-posted-by">Posted by: ${renderUserAttribution(postedBy.fullName, postedBy.userId, postedBy.username, "Posted by")}${postedBy.username ? ` (<span class="dr-posted-username">@${escapeHtml(postedBy.username)}</span>)` : ""}</div>
-            ${lastEdited ? `<div class="dr-last-edited">Last edited by: ${renderUserAttribution(lastEdited.fullName, lastEdited.userId, lastEdited.username, "Last edited by")}${lastEdited.username ? ` (@${escapeHtml(lastEdited.username)})` : ""} | ${escapeHtml(lastEdited.editedAt)}</div>` : ""}
-          </div>
-          <div class="dr-weather-actions">
-            ${getWeatherBadgeMarkup(r.weatherCondition, r.weatherDescription)}
-            <button type="button" class="dr-print-btn" data-action="print" data-id="${escapeHtml(recordDoc.id)}">🖨 Print</button>
-          </div>
-        </div>
-        <div class="dr-record-actions">
-          <button type="button" class="dr-edit-btn" data-action="edit" data-id="${escapeHtml(recordDoc.id)}">Edit</button>
-          <button type="button" class="dr-delete-btn" data-action="delete" data-id="${escapeHtml(recordDoc.id)}">Delete</button>
-        </div>
-        <h2>${escapeHtml(r.activity||"Daily Site Record")}</h2>
-        <div class="dr-meta">
-          <span class="dr-tag">${escapeHtml(r.floor||"Location not specified")}</span>
-        </div>
-        <div class="dr-workforce-card">
-          ${workerSummary}
-          <div>Total Workers: ${totalWorkers}</div>
-        </div>
-        ${r.materials?`<h3>Materials</h3><div class="dr-pre">${escapeHtml(r.materials)}</div>`:""}
-        ${r.notes?`<h3>Work Done Today</h3><div class="dr-pre">${escapeHtml(r.notes)}</div>`:""}
-        ${ev.length?`<h3>Evidence</h3><div class="dr-evidence">${ev.map(x=>`<div class="dr-ev"><div class="dr-evtitle">${escapeHtml(x.type)} — ${escapeHtml(x.title||"")}</div>${previewHtml(x.type,x.url)}<div class="dr-ev-actions"><a class="dr-open" target="_blank" href="${escapeHtml(x.url)}">Open original</a></div></div>`).join("")}</div>`:""}
-      </article>`;
+      html += renderDailyRecordCard(recordDoc.id, r);
     });
 
     $("dr-records").innerHTML=html||`<div class="dr-card dr-empty-day"><h2>No Daily Reports for this date</h2></div>`;
@@ -2010,6 +2126,7 @@ const DailyReports = (function() {
     setDataStatus(recordCount ? `Loaded ${recordCount} Daily Report${recordCount === 1 ? "" : "s"} for this date.` : "Data loaded successfully. No Daily Reports exist for this date.");
 
     observeGooglePhotosPreviews($("dr-records"));
+    return true;
   }
 
   // Initialize event listeners

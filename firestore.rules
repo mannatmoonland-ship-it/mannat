@@ -70,6 +70,10 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /daily_reports_drive_oauth_tokens/{tokenId} {
+      allow read, write: if false;
+    }
+
     match /material_categories/{categoryId} {
       allow get, list: if hasPermission('materials.read')
         || hasPermission('building_cost_summary.read');

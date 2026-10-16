@@ -610,6 +610,17 @@ h1 {
     border-radius: 6px;
 }
 
+.dr-drive-preview-loading {
+    display: grid;
+    min-height: 120px;
+    place-items: center;
+    padding: 12px;
+    background: #f8fafc;
+    border-radius: 6px;
+    color: #667085;
+    font-size: 13px;
+}
+
 .dr-ev-actions {
     padding: 10px;
     text-align: center;
@@ -898,6 +909,12 @@ textarea {
 .dr-remove {
     background: #fee4e2;
     color: #b42318;
+}
+
+.dr-drive-sharing-notice {
+    margin: 10px 0;
+    color: #7a271a;
+    font-size: 0.9rem;
 }
 
 .dr-previewBox {

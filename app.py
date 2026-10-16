@@ -10,7 +10,6 @@ import secrets
 import socket
 import ssl
 import threading
-import tempfile
 import time
 import traceback
 import uuid
@@ -24,6 +23,7 @@ from urllib.parse import quote, urlsplit
 
 import requests
 from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -58,6 +58,14 @@ from owner_scope import (
     delete_owner_scope_item,
     get_owner_scope_data,
     update_owner_scope_item,
+)
+from daily_reports_drive_tokens import (
+    EncryptedFirestoreTokenStore,
+    TokenRecordError,
+    TokenStorageConflict,
+    TokenStorageUnavailable,
+    TokenStoreConfigurationError,
+    validate_encryption_key,
 )
 from permission_policy import (
     DEFAULT_NON_ADMIN_PERMISSIONS,
@@ -9108,6 +9116,9 @@ def _daily_record_api_csrf_valid():
 
 
 DAILY_REPORTS_DRIVE_SCOPES = ("https://www.googleapis.com/auth/drive.file",)
+DAILY_REPORTS_DRIVE_UPLOAD_ID_PROPERTY = "dailyReportsUploadId"
+DAILY_REPORTS_DRIVE_UPLOAD_HASH_PROPERTY = "dailyReportsUploadHash"
+DAILY_REPORTS_DRIVE_UPLOAD_OWNER_PROPERTY = "dailyReportsUploadOwner"
 DAILY_REPORTS_MAX_IMAGE_BYTES = 20 * 1024 * 1024
 _DAILY_REPORTS_DRIVE_LOCK = threading.RLock()
 _DAILY_REPORTS_IMAGE_TYPES = {
@@ -9124,20 +9135,72 @@ _DAILY_REPORTS_IMAGE_TYPES = {
 }
 
 
-def _daily_reports_drive_paths():
+def _daily_reports_drive_paths(*, redirect_uri=None):
     client_path_value = (os.environ.get("GOOGLE_OAUTH_CLIENT_SECRETS_FILE") or "").strip()
-    redirect_uri = (os.environ.get("GOOGLE_OAUTH_REDIRECT_URI") or "").strip()
-    token_path_value = (os.environ.get("GOOGLE_OAUTH_TOKEN_FILE") or "").strip()
     client_path = Path(client_path_value).expanduser() if client_path_value else None
-    token_path = (
-        Path(token_path_value).expanduser()
-        if token_path_value
-        else Path(app.instance_path) / "google-drive-token.json"
-    )
     client_path = client_path.resolve() if client_path is not None else None
-    token_path = token_path.resolve()
     if client_path is None:
         raise RuntimeError("Google Drive OAuth is not configured.")
+    if redirect_uri is None:
+        if IS_PRODUCTION_ENVIRONMENT:
+            public_base_url = (
+                app.config.get("PUBLIC_BASE_URL")
+                or os.environ.get("RENDER_EXTERNAL_URL")
+                or ""
+            ).strip()
+            if not public_base_url:
+                raise RuntimeError("Google Drive OAuth public base URL is not configured.")
+            parsed_base_url = urlsplit(public_base_url)
+            if (
+                parsed_base_url.scheme not in {"https", "http"}
+                or not parsed_base_url.hostname
+                or parsed_base_url.username
+                or parsed_base_url.password
+                or parsed_base_url.path not in {"", "/"}
+                or parsed_base_url.query
+                or parsed_base_url.fragment
+            ):
+                raise RuntimeError("Google Drive OAuth public base URL is invalid.")
+            try:
+                parsed_base_url.port
+            except ValueError as error:
+                raise RuntimeError("Google Drive OAuth public base URL is invalid.") from error
+            if parsed_base_url.scheme != "https":
+                raise RuntimeError("Google Drive OAuth requires an HTTPS public base URL.")
+            redirect_uri = (
+                public_base_url.rstrip("/")
+                + "/api/daily-reports/google-drive/callback"
+            )
+        else:
+            try:
+                local_base_url = request.host_url
+            except RuntimeError as error:
+                raise RuntimeError(
+                    "Local Google Drive OAuth requires an active localhost request."
+                ) from error
+            parsed_local_base = urlsplit(local_base_url)
+            if (
+                parsed_local_base.scheme != "http"
+                or parsed_local_base.hostname != "localhost"
+                or parsed_local_base.username
+                or parsed_local_base.password
+                or parsed_local_base.path not in {"", "/"}
+                or parsed_local_base.query
+                or parsed_local_base.fragment
+            ):
+                raise RuntimeError(
+                    "Open the local app at http://localhost:<port> for Google Drive OAuth."
+                )
+            try:
+                parsed_local_base.port
+            except ValueError as error:
+                raise RuntimeError(
+                    "The local Google Drive OAuth address is invalid."
+                ) from error
+            redirect_uri = (
+                local_base_url.rstrip("/")
+                + "/api/daily-reports/google-drive/callback"
+            )
     if not redirect_uri:
         raise RuntimeError("Google Drive OAuth is not configured.")
     parsed_redirect = urlsplit(redirect_uri)
@@ -9146,10 +9209,15 @@ def _daily_reports_drive_paths():
         or not parsed_redirect.hostname
         or parsed_redirect.username
         or parsed_redirect.password
+        or parsed_redirect.path != "/api/daily-reports/google-drive/callback"
         or parsed_redirect.query
         or parsed_redirect.fragment
     ):
         raise RuntimeError("Google Drive OAuth redirect URI is invalid.")
+    try:
+        parsed_redirect.port
+    except ValueError as error:
+        raise RuntimeError("Google Drive OAuth redirect URI is invalid.") from error
     if IS_PRODUCTION_ENVIRONMENT and parsed_redirect.scheme != "https":
         raise RuntimeError("Google Drive OAuth requires an HTTPS redirect URI.")
     public_directories = (
@@ -9157,21 +9225,22 @@ def _daily_reports_drive_paths():
         if app.static_folder
         else ()
     ) + (Path(app.template_folder).resolve(),)
-    for candidate in (client_path, token_path):
-        if any(candidate == root or root in candidate.parents for root in public_directories):
-            raise RuntimeError("Google Drive OAuth files must be outside public directories.")
-    if IS_PRODUCTION_ENVIRONMENT and not token_path_value:
-        raise RuntimeError("Durable Google Drive token storage is not configured.")
+    if any(
+        client_path == root or root in client_path.parents
+        for root in public_directories
+    ):
+        raise RuntimeError("Google Drive OAuth files must be outside public directories.")
     if IS_PRODUCTION_ENVIRONMENT:
         application_root = Path(app.root_path).resolve()
-        for candidate in (client_path, token_path):
-            if candidate == application_root or application_root in candidate.parents:
-                raise RuntimeError("Production Google Drive OAuth files must be outside the application.")
-    return client_path, redirect_uri, token_path
+        if client_path == application_root or application_root in client_path.parents:
+            raise RuntimeError("Production Google Drive OAuth files must be outside the application.")
+    return client_path, redirect_uri
 
 
-def _daily_reports_drive_flow(*, state=None, code_verifier=None):
-    client_path, redirect_uri, _token_path = _daily_reports_drive_paths()
+def _daily_reports_drive_flow(*, state=None, code_verifier=None, redirect_uri=None):
+    client_path, redirect_uri = _daily_reports_drive_paths(
+        redirect_uri=redirect_uri
+    )
     if not client_path.is_file():
         raise RuntimeError("Google Drive OAuth client configuration is unavailable.")
     flow = Flow.from_client_secrets_file(
@@ -9186,55 +9255,66 @@ def _daily_reports_drive_flow(*, state=None, code_verifier=None):
     return flow
 
 
-def _daily_reports_drive_token_path(user_id):
-    if not isinstance(user_id, str) or not user_id.strip():
-        raise ValueError("A signed-in user is required for Google Drive token storage.")
-    _client_path, _redirect_uri, token_path = _daily_reports_drive_paths()
-    user_key = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:24]
-    token_suffix = token_path.suffix or ".json"
-    return token_path.with_name(f"{token_path.stem}-{user_key}{token_suffix}")
+def _daily_reports_drive_token_store():
+    encryption_key = os.environ.get("GOOGLE_OAUTH_TOKEN_ENCRYPTION_KEY", "")
+    validate_encryption_key(encryption_key)
+    try:
+        user_store = get_user_store()
+    except Exception as error:
+        raise TokenStorageUnavailable(
+            "Firestore token storage is unavailable."
+        ) from error
+    database = getattr(user_store, "db", None)
+    if firestore is None:
+        raise TokenStoreConfigurationError("Firestore token storage is unavailable.")
+    return EncryptedFirestoreTokenStore(
+        database,
+        encryption_key,
+        firestore.transactional,
+    )
 
 
 def _save_daily_reports_drive_credentials(user_id, credentials_value):
-    token_path = _daily_reports_drive_token_path(user_id)
-    token_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    temporary_path = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=token_path.parent,
-            prefix=f".{token_path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as token_file:
-            temporary_path = Path(token_file.name)
-            if os.name != "nt":
-                os.chmod(temporary_path, 0o600)
-            token_file.write(credentials_value.to_json())
-            token_file.flush()
-            os.fsync(token_file.fileno())
-        os.replace(temporary_path, token_path)
-        if os.name != "nt":
-            os.chmod(token_path, 0o600)
-    finally:
-        if temporary_path and temporary_path.exists():
-            temporary_path.unlink()
+    _daily_reports_drive_token_store().save(user_id, credentials_value.to_json())
 
 
 def _daily_reports_drive_credentials(user_id):
     with _DAILY_REPORTS_DRIVE_LOCK:
-        token_path = _daily_reports_drive_token_path(user_id)
-        if not token_path.is_file():
-            return None
-        credentials_value = Credentials.from_authorized_user_file(
-            str(token_path),
-            scopes=list(DAILY_REPORTS_DRIVE_SCOPES),
-        )
-        if credentials_value.expired and credentials_value.refresh_token:
-            credentials_value.refresh(GoogleAuthRequest())
-            _save_daily_reports_drive_credentials(user_id, credentials_value)
-        return credentials_value if credentials_value.valid else None
+        token_store = _daily_reports_drive_token_store()
+        for _attempt in range(3):
+            stored = token_store.load(user_id)
+            if stored is None:
+                return None
+            try:
+                credential_info = json.loads(stored.serialized_credentials)
+                credentials_value = Credentials.from_authorized_user_info(
+                    credential_info,
+                    scopes=list(DAILY_REPORTS_DRIVE_SCOPES),
+                )
+            except (TypeError, ValueError, KeyError) as error:
+                raise TokenRecordError("The Google Drive token record is invalid.") from error
+            if credentials_value.valid:
+                return credentials_value
+            if not credentials_value.expired or not credentials_value.refresh_token:
+                return None
+            try:
+                credentials_value.refresh(GoogleAuthRequest())
+            except RefreshError as error:
+                if "invalid_grant" not in str(error).lower():
+                    raise
+                latest = token_store.load(user_id)
+                if latest is not None and latest.version != stored.version:
+                    continue
+                return None
+            if not credentials_value.valid:
+                return None
+            if token_store.save_if_version(
+                user_id,
+                credentials_value.to_json(),
+                stored.version,
+            ):
+                return credentials_value
+        raise TokenStorageConflict("Google Drive credentials changed during refresh.")
 
 
 def _daily_reports_drive_api_response(payload, status=200):
@@ -9273,7 +9353,7 @@ def daily_reports_google_drive_status():
         return denied
     client_configured = False
     try:
-        client_path, _redirect_uri, _token_path = _daily_reports_drive_paths()
+        client_path, _redirect_uri = _daily_reports_drive_paths()
         client_configured = client_path.is_file()
     except Exception as error:
         app.logger.warning(
@@ -9284,10 +9364,44 @@ def daily_reports_google_drive_status():
     if client_configured:
         try:
             credentials_value = _daily_reports_drive_credentials(user["id"])
+        except TokenRecordError as error:
+            app.logger.error(
+                "Daily Reports Google Drive token record is invalid (%s).",
+                type(error).__name__,
+            )
+            return _daily_reports_drive_api_response(
+                {
+                    "connected": False,
+                    "configured": True,
+                    "can_connect": True,
+                    "message": "Google Drive authorization needs to be reconnected.",
+                },
+            )
+        except TokenStoreConfigurationError as error:
+            app.logger.error(
+                "Daily Reports Google Drive token storage is not configured (%s).",
+                type(error).__name__,
+            )
+            return _daily_reports_drive_api_response(
+                {
+                    "connected": False,
+                    "configured": True,
+                    "can_connect": True,
+                    "message": "Google Drive connection storage needs administrator setup.",
+                },
+            )
         except Exception as error:
             app.logger.warning(
-                "Daily Reports Google Drive token check failed (%s).",
+                "Daily Reports Google Drive token storage is unavailable (%s).",
                 type(error).__name__,
+            )
+            return _daily_reports_drive_api_response(
+                {
+                    "connected": False,
+                    "configured": True,
+                    "can_connect": True,
+                    "message": "Google Drive connection storage is temporarily unavailable.",
+                },
             )
     return _daily_reports_drive_api_response({
         "connected": bool(credentials_value),
@@ -9303,6 +9417,7 @@ def daily_reports_google_drive_connect():
     if denied:
         return denied
     try:
+        _daily_reports_drive_token_store()
         flow = _daily_reports_drive_flow()
         authorization_url, state = flow.authorization_url(
             access_type="offline",
@@ -9310,8 +9425,11 @@ def daily_reports_google_drive_connect():
             prompt="consent",
         )
         code_verifier = flow.code_verifier
+        redirect_uri = flow.redirect_uri
         if not code_verifier:
             raise RuntimeError("Google OAuth PKCE setup failed.")
+        if not redirect_uri:
+            raise RuntimeError("Google OAuth redirect URI is unavailable.")
     except Exception as error:
         app.logger.error(
             "Daily Reports Google Drive OAuth could not be started (%s).",
@@ -9323,6 +9441,7 @@ def daily_reports_google_drive_connect():
         )
     session["daily_reports_drive_oauth_state"] = state
     session["daily_reports_drive_code_verifier"] = code_verifier
+    session["daily_reports_drive_redirect_uri"] = redirect_uri
     return _daily_reports_drive_api_response({"authorization_url": authorization_url})
 
 
@@ -9333,11 +9452,13 @@ def daily_reports_google_drive_callback():
         return redirect(url_for("daily_reports"))
     expected_state = session.pop("daily_reports_drive_oauth_state", "")
     code_verifier = session.pop("daily_reports_drive_code_verifier", "")
+    redirect_uri = session.pop("daily_reports_drive_redirect_uri", "")
     supplied_state = request.args.get("state", "")
     if (
         request.args.get("error")
         or not expected_state
         or not supplied_state
+        or not redirect_uri
         or not hmac.compare_digest(expected_state, supplied_state)
     ):
         session["daily_reports_drive_message"] = (
@@ -9348,13 +9469,21 @@ def daily_reports_google_drive_callback():
         flow = _daily_reports_drive_flow(
             state=expected_state,
             code_verifier=code_verifier,
+            redirect_uri=redirect_uri,
         )
         flow.fetch_token(code=request.args.get("code", ""))
         _save_daily_reports_drive_credentials(user["id"], flow.credentials)
     except Exception as error:
         failure_category = (
-            "token_storage_not_writable"
-            if isinstance(error, PermissionError)
+            "token_storage_unavailable"
+            if isinstance(
+                error,
+                (
+                    TokenStoreConfigurationError,
+                    TokenStorageUnavailable,
+                    TokenStorageConflict,
+                ),
+            )
             else "oauth_callback_failed"
         )
         app.logger.error(
@@ -9363,9 +9492,15 @@ def daily_reports_google_drive_callback():
             failure_category,
         )
         session["daily_reports_drive_message"] = (
-            "Google Drive authorization could not be saved. Ensure the configured token path "
-            "is on writable durable storage, then try again."
-            if isinstance(error, PermissionError)
+            "Google Drive connection storage is unavailable. Try again later or contact your administrator."
+            if isinstance(
+                error,
+                (
+                    TokenStoreConfigurationError,
+                    TokenStorageUnavailable,
+                    TokenStorageConflict,
+                ),
+            )
             else "Google Drive could not be connected. Try again or contact your administrator."
         )
     else:
@@ -9417,6 +9552,18 @@ def upload_daily_report_evidence():
         return _daily_reports_drive_api_response(
             {"error": "Choose a supported image file."}, 400
         )
+    upload_id = (request.form.get("upload_id") or "").strip()
+    try:
+        if str(uuid.UUID(upload_id)) != upload_id:
+            raise ValueError
+    except (AttributeError, TypeError, ValueError):
+        return _daily_reports_drive_api_response(
+            {"error": "The photo upload request is invalid. Select the photo again."}, 400
+        )
+    content_hash = hashlib.sha256(content).hexdigest()
+    upload_owner = hashlib.sha256(
+        current_user["id"].encode("utf-8")
+    ).hexdigest()[:32]
     try:
         credentials_value = _daily_reports_drive_credentials(current_user["id"])
         if credentials_value is None:
@@ -9430,16 +9577,51 @@ def upload_daily_report_evidence():
             credentials=credentials_value,
             cache_discovery=False,
         )
-        file_id = uuid.uuid4().hex
-        file_metadata = {"name": f"Daily Report Photo {file_id}{extension}"}
-        media = MediaIoBaseUpload(BytesIO(content), mimetype=mime_type, resumable=False)
-        uploaded_file = drive_service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields="id,webViewLink",
-        ).execute()
+        files = drive_service.files()
+        existing_files = files.list(
+            q=(
+                "trashed = false and appProperties has { "
+                f"key='{DAILY_REPORTS_DRIVE_UPLOAD_ID_PROPERTY}' and "
+                f"value='{upload_id}'"
+                " }"
+            ),
+            pageSize=2,
+            fields="files(id,webViewLink,mimeType,appProperties)",
+        ).execute().get("files", [])
+        if len(existing_files) > 1:
+            return _daily_reports_drive_api_response(
+                {"error": "This photo upload request is ambiguous. Contact your administrator."},
+                409,
+            )
+        uploaded_file = existing_files[0] if existing_files else None
+        if uploaded_file:
+            properties = uploaded_file.get("appProperties") or {}
+            if (
+                properties.get(DAILY_REPORTS_DRIVE_UPLOAD_HASH_PROPERTY) != content_hash
+                or properties.get(DAILY_REPORTS_DRIVE_UPLOAD_OWNER_PROPERTY) != upload_owner
+                or uploaded_file.get("mimeType") != mime_type
+            ):
+                return _daily_reports_drive_api_response(
+                    {"error": "This upload request is already associated with a different photo."},
+                    409,
+                )
+        else:
+            file_metadata = {
+                "name": f"Daily Report Photo {upload_id}{extension}",
+                "appProperties": {
+                    DAILY_REPORTS_DRIVE_UPLOAD_ID_PROPERTY: upload_id,
+                    DAILY_REPORTS_DRIVE_UPLOAD_HASH_PROPERTY: content_hash,
+                    DAILY_REPORTS_DRIVE_UPLOAD_OWNER_PROPERTY: upload_owner,
+                },
+            }
+            media = MediaIoBaseUpload(BytesIO(content), mimetype=mime_type, resumable=False)
+            uploaded_file = files.create(
+                body=file_metadata,
+                media_body=media,
+                fields="id,webViewLink,mimeType,appProperties",
+            ).execute()
         uploaded_file_id = uploaded_file.get("id")
-        if not uploaded_file_id:
+        if not isinstance(uploaded_file_id, str) or not uploaded_file_id:
             raise RuntimeError("Google Drive did not return an uploaded file ID.")
         file_url = uploaded_file.get("webViewLink") or (
             f"https://drive.google.com/file/d/{quote(uploaded_file_id, safe='')}/view"
@@ -9452,8 +9634,53 @@ def upload_daily_report_evidence():
         return _daily_reports_drive_api_response(
             {"error": "Unable to upload the photo to Google Drive. Try again."}, 503
         )
+    try:
+        permissions = drive_service.permissions()
+        current_permissions = permissions.list(
+            fileId=uploaded_file_id,
+            fields="permissions(id,type,role)",
+        ).execute().get("permissions", [])
+        anyone_permission = next(
+            (
+                permission for permission in current_permissions
+                if permission.get("type") == "anyone"
+            ),
+            None,
+        )
+        if anyone_permission is None:
+            permissions.create(
+                fileId=uploaded_file_id,
+                body={"type": "anyone", "role": "reader"},
+                fields="id",
+            ).execute()
+        elif anyone_permission.get("role") != "reader":
+            permissions.update(
+                fileId=uploaded_file_id,
+                permissionId=anyone_permission["id"],
+                body={"role": "reader"},
+                fields="id,role",
+            ).execute()
+    except Exception as error:
+        app.logger.error(
+            "Daily Reports Google Drive photo link sharing failed (%s).",
+            type(error).__name__,
+        )
+        return _daily_reports_drive_api_response(
+            {
+                "error": (
+                    "The photo was uploaded, but link sharing could not be enabled. "
+                    "Retry the upload to finish sharing."
+                )
+            },
+            503,
+        )
     return _daily_reports_drive_api_response({
         "url": file_url,
+        "preview_url": (
+            "https://drive.google.com/thumbnail?id="
+            f"{quote(uploaded_file_id, safe='')}&sz=w1600"
+        ),
+        "file_id": uploaded_file_id,
         "title": "Site photo",
     }, 201)
 
@@ -9577,11 +9804,49 @@ def get_daily_record_payload():
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return None
-    return {
+    record_data = {
         key: value
         for key, value in payload.items()
         if key in DAILY_RECORD_EDITABLE_FIELDS
     }
+    evidence = record_data.get("evidence")
+    if isinstance(evidence, list):
+        unique_evidence = []
+        uploaded_file_ids = set()
+        for item in evidence:
+            if not isinstance(item, dict):
+                unique_evidence.append(item)
+                continue
+            file_id = item.get("fileId")
+            if isinstance(file_id, str) and file_id:
+                if file_id in uploaded_file_ids:
+                    continue
+                uploaded_file_ids.add(file_id)
+            unique_evidence.append(item)
+        record_data["evidence"] = unique_evidence
+    return record_data
+
+
+def _daily_record_save_response(record_id, record_data):
+    response_fields = DAILY_RECORD_EDITABLE_FIELDS | {
+        "createdByName",
+        "createdByUsername",
+        "createdAt",
+        "updatedAt",
+        "last_edited_by_name",
+        "last_edited_by_username",
+        "last_edited_at",
+    }
+    response_record = {
+        key: value
+        for key, value in record_data.items()
+        if key in response_fields
+    }
+    return jsonify(
+        id=record_id,
+        evidence=response_record.get("evidence", []),
+        record=response_record,
+    )
 
 
 @app.route("/api/daily-records", methods=["POST"])
@@ -9613,7 +9878,7 @@ def create_daily_record():
         app.logger.exception("Unable to save a Daily Report")
         return jsonify(error="Unable to save the daily report. Please try again."), 503
 
-    return jsonify(id=record_ref.id), 201
+    return _daily_record_save_response(record_ref.id, record_data), 201
 
 
 @app.route("/api/daily-records/<record_id>", methods=["PATCH"])
@@ -9630,8 +9895,10 @@ def update_daily_record(record_id):
 
     try:
         record_ref = get_daily_records_collection().document(record_id)
-        if not record_ref.get().exists:
+        existing_snapshot = record_ref.get()
+        if not existing_snapshot.exists:
             return jsonify(error="Daily report not found."), 404
+        existing_record = existing_snapshot.to_dict() or {}
         edited_at = iso_now()
         record_data["updatedAt"] = edited_at
         record_data["last_edited_by_name"] = (
@@ -9643,11 +9910,12 @@ def update_daily_record(record_id):
         record_data["last_edited_by_user_id"] = current_user["id"]
         record_data["last_edited_at"] = edited_at
         record_ref.update(record_data)
+        saved_record = {**existing_record, **record_data}
     except RuntimeError:
         app.logger.exception("Unable to update a Daily Report")
         return jsonify(error="Unable to update the daily report. Please try again."), 503
 
-    return jsonify(id=record_id), 200
+    return _daily_record_save_response(record_id, saved_record), 200
 
 
 @app.route("/api/daily-records/<path:record_id>", methods=["DELETE"])

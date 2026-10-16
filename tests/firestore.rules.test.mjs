@@ -71,6 +71,7 @@ async function createUserContext({
       custom_staff_types: { name: "Custom staff type" },
       audit_log: { action: "test" },
       camera_auth_rate_limits: { count: 1 },
+      daily_reports_drive_oauth_tokens: { encrypted_credentials: "ciphertext" },
       owner_scopes: { name: "Owner Scope" },
       "owner_scopes/owner-scope/payments": { amount: 5 },
       "owner_scopes/other-owner/payments": { amount: 9 },
@@ -174,14 +175,15 @@ rulesTest("missing permissions and user-administration reads are denied", async 
 
 rulesTest("user, audit, camera-limit, and backup system data are not browser-accessible", async () => {
   const db = await createUserContext({
-    permissions: ["user_admin.manage", "system_backup.manage"]
+    permissions: ["user_admin.manage", "system_backup.manage", "daily_reports.read"]
   });
 
   for (const collectionName of [
     "users",
     "custom_staff_types",
     "audit_log",
-    "camera_auth_rate_limits"
+    "camera_auth_rate_limits",
+    "daily_reports_drive_oauth_tokens"
   ]) {
     await assertFails(getDocs(collection(db, collectionName)));
     await assertFails(setDoc(doc(db, collectionName, "browser-write"), { value: "No" }));

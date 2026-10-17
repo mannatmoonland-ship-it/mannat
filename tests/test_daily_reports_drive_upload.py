@@ -1044,3 +1044,6 @@ def test_daily_reports_update_one_record_card_and_deduplicate_by_drive_file_id()
     assert "loading=\"${eagerImage ? \"eager\" : \"lazy\"}\"" in source
     assert "getUniqueDailyReportEvidence(record)" in render_function
     assert "seenFileIds.has(item.fileId)" in source
+    assert 'record.tradeName || record.tradeId || "Trade not specified"' in render_function
+    assert '<span class="dr-tag">Trade: ${escapeHtml(tradeName)}</span>' in render_function
+    assert '<span class="dr-tag">${escapeHtml(record.floor || "Location not specified")}</span>' in render_function

@@ -81,6 +81,7 @@
       const item = getItem(event.target);
       if (!item || interactiveTarget(event.target)) return;
       event.preventDefault();
+      if (activePress?.item === item) cancelPress();
       open(item, event.clientX, event.clientY);
     });
 
@@ -90,18 +91,19 @@
       const item = getItem(event.target);
       if (!item || interactiveTarget(event.target)) return;
       cancelPress();
-      activePress = {
+      const press = {
         item,
         pointerId: event.pointerId,
         x: event.clientX,
         y: event.clientY,
         timer: window.setTimeout(() => {
-          if (!activePress) return;
+          if (activePress !== press) return;
           suppressClickUntil = Date.now() + 1000;
           open(item, event.clientX, event.clientY);
-          activePress.timer = null;
+          press.timer = null;
         }, longPressMs)
       };
+      activePress = press;
     });
 
     document.addEventListener("pointermove", event => {
@@ -113,7 +115,9 @@
     document.addEventListener("pointerup", event => {
       if (activePress && event.pointerId === activePress.pointerId) cancelPress();
     }, { passive: true });
-    document.addEventListener("pointercancel", cancelPress, { passive: true });
+    document.addEventListener("pointercancel", event => {
+      if (activePress?.pointerId === event.pointerId) cancelPress();
+    }, { passive: true });
     document.addEventListener("scroll", cancelPress, { capture: true, passive: true });
 
     root.addEventListener("click", event => {

@@ -15,6 +15,7 @@
   let items = [];
   let imageFieldId = 0;
   let draggedItemId = null;
+  let touchDragState = null;
   let orderIsSaving = false;
   let isRefreshingPinStates = false;
 
@@ -140,6 +141,24 @@
     if (Array.isArray(item.image_urls)) return item.image_urls;
     return item.image_url ? [item.image_url] : [];
   }
+
+  function restoreTouchDrag(pointerId) {
+    if (touchDragState?.pointerId !== pointerId) return;
+    const { row, wasDraggable } = touchDragState;
+    touchDragState = null;
+    if (row.isConnected) row.draggable = wasDraggable;
+  }
+
+  list.addEventListener("pointerdown", event => {
+    if (!["touch", "pen"].includes(event.pointerType) || !event.isPrimary) return;
+    const row = event.target.closest(".red-book-item");
+    if (!row || !list.contains(row) || !row.draggable) return;
+    touchDragState = { row, pointerId: event.pointerId, wasDraggable: row.draggable };
+    row.draggable = false;
+  }, true);
+
+  document.addEventListener("pointerup", event => restoreTouchDrag(event.pointerId), { passive: true });
+  document.addEventListener("pointercancel", event => restoreTouchDrag(event.pointerId), { passive: true });
 
   function renderItems() {
     list.replaceChildren();

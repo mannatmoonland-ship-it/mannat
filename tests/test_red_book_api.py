@@ -621,10 +621,15 @@ def test_context_menu_and_pinned_dashboard_assets_are_connected():
 
     assert "red_book_context_menu.js" in red_book_template
     assert "red_book_images.js" in red_book_template
+    assert 'if (!["touch", "pen"].includes(event.pointerType) || !event.isPrimary) return;' in red_book_js
+    assert 'row.draggable = false;' in red_book_js
+    assert 'restoreTouchDrag(event.pointerId)' in red_book_js
     assert "data-context-item-id" in context_menu
     assert 'event.preventDefault();' in context_menu
     assert "setTimeout" in context_menu
     assert "pointercancel" in context_menu
+    assert "activePress?.pointerId === event.pointerId" in context_menu
+    assert "activePress !== press" in context_menu
     assert "Pinned Site Instructions" in dashboard_template
     assert ".red-book-item.red-book-item-pinned" in red_book_css
     assert 'row.classList.toggle("red-book-item-pinned", item.pinned === true)' in red_book_js

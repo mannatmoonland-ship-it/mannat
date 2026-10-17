@@ -1973,6 +1973,7 @@ const DailyReports = (function() {
       };
     const totalWorkers = Number(record.totalWorkers ?? record.manpower ?? Object.values(savedCounts)
       .reduce((total, value) => total + Number(value || 0), 0));
+    const tradeName = record.tradeName || record.tradeId || "Trade not specified";
     const postedBy = getPostedBy(record);
     const lastEdited = getLastEditedDetails(record);
     const workerSummary = Object.entries(savedCounts)
@@ -1996,6 +1997,7 @@ const DailyReports = (function() {
       </div>
       <h2>${escapeHtml(record.activity || "Daily Site Record")}</h2>
       <div class="dr-meta">
+        <span class="dr-tag">Trade: ${escapeHtml(tradeName)}</span>
         <span class="dr-tag">${escapeHtml(record.floor || "Location not specified")}</span>
       </div>
       <div class="dr-workforce-card">

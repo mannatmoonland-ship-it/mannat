@@ -13,6 +13,7 @@ export function createRedBookSiren({
     if (!audio) {
       audio = new AudioConstructor("/static/audio/red-book-siren.wav");
       audio.preload = "auto";
+      audio.volume = 1;
     }
     audio.currentTime = 0;
     await audio.play();

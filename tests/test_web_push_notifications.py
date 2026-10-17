@@ -248,6 +248,33 @@ def test_invalid_fcm_token_is_removed_after_delivery_failure(push_client, monkey
     assert token_id not in store.fcm_device_tokens
 
 
+def test_fcm_delivery_failures_log_codes_without_device_tokens(push_client, monkeypatch, caplog):
+    store, client = push_client
+    token = "failing-device-token-" + "d" * 45
+    add_device_token(store, USER_ID, token)
+    monkeypatch.setattr(
+        app_module,
+        "firebase_messaging",
+        FakeFirebaseMessaging(responses=[
+            SimpleNamespace(
+                success=False,
+                exception=SimpleNamespace(
+                    code="messaging/sender-id-mismatch",
+                    token=token,
+                ),
+            ),
+        ]),
+    )
+    item_id = add_red_book_item(store)
+
+    with caplog.at_level("WARNING", logger=app_module.app.logger.name):
+        response = pin(client, item_id)
+
+    assert response.status_code == 200
+    assert "messaging/sender-id-mismatch: 1" in caplog.text
+    assert token not in caplog.text
+
+
 def test_missing_push_configuration_is_reported_without_breaking_pin(push_client, monkeypatch):
     store, client = push_client
     monkeypatch.setattr(app_module, "firebase_messaging", FakeFirebaseMessaging())

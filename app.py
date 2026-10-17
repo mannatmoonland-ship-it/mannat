@@ -6930,20 +6930,32 @@ def _send_red_book_pin_notification(item_id, item_text, event_id):
             ),
         )
         result = firebase_messaging.send_each_for_multicast(message)
+        failure_codes = {}
         for token_record, send_response in zip(batch, result.responses):
             if send_response.success:
                 continue
             error = send_response.exception
             error_code = getattr(error, "code", "")
+            failure_code = (
+                error_code
+                if isinstance(error_code, str) and error_code
+                else type(error).__name__ if error is not None else "unknown"
+            )
+            failure_codes[failure_code] = failure_codes.get(failure_code, 0) + 1
             if error_code in {
                 "messaging/registration-token-not-registered",
                 "messaging/invalid-registration-token",
             }:
                 _remove_invalid_fcm_device_token(token_record)
         if result.failure_count:
+            failure_summary = ", ".join(
+                f"{code}: {count}"
+                for code, count in sorted(failure_codes.items())
+            ) or "unknown"
             app.logger.warning(
-                "Red Book pin notification batch had %s delivery failure(s).",
+                "Red Book pin notification batch had %s delivery failure(s) (%s).",
                 result.failure_count,
+                failure_summary,
             )
 
 

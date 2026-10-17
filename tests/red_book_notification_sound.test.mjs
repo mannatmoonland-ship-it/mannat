@@ -17,6 +17,10 @@ test("plays the local siren for a Red Book pin event", async () => {
       calls.push({ src });
     }
 
+    set volume(value) {
+      calls.push({ volume: value });
+    }
+
     addEventListener() {}
 
     play() {
@@ -27,9 +31,10 @@ test("plays the local siren for a Red Book pin event", async () => {
   const playSiren = createRedBookSiren({ AudioConstructor: FakeAudio });
 
   assert.equal(await playSiren(pinEvent("event-1")), true);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(calls[0].src, "/static/audio/red-book-siren.wav");
-  assert.deepEqual(calls[1], { played: true });
+  assert.deepEqual(calls[1], { volume: 1 });
+  assert.deepEqual(calls[2], { played: true });
 });
 
 test("does not play again for the same event ID", async () => {
@@ -144,15 +149,18 @@ test("test playback rejects clearly when the siren asset cannot be loaded or pla
   await assert.rejects(playSiren({ data: { title: "Mannat Moon Construction — Red Book", event_id: "failed-play" } }), error => error.name === "NotSupportedError");
 });
 
-test("siren asset is a short PCM WAV suitable for modern browsers", async () => {
+test("siren asset is a loud, long PCM WAV suitable for modern browsers", async () => {
   const asset = await readFile(new URL("../static/audio/red-book-siren.wav", import.meta.url));
   assert.equal(asset.toString("ascii", 0, 4), "RIFF");
   assert.equal(asset.toString("ascii", 8, 12), "WAVE");
   assert.equal(asset.readUInt16LE(20), 1);
   assert.equal(asset.readUInt16LE(22), 1);
   assert.equal(asset.readUInt16LE(34), 16);
-  const durationSeconds = asset.readUInt32LE(24) > 0
-    ? asset.readUInt32LE(40) / asset.readUInt32LE(28)
-    : 0;
-  assert.ok(durationSeconds >= 1 && durationSeconds <= 2);
+  const durationSeconds = asset.readUInt32LE(40) / asset.readUInt32LE(28);
+  assert.ok(durationSeconds >= 7.5 && durationSeconds <= 8.5);
+  let peak = 0;
+  for (let offset = 44; offset < asset.length; offset += 2) {
+    peak = Math.max(peak, Math.abs(asset.readInt16LE(offset)));
+  }
+  assert.ok(peak >= 32000);
 });

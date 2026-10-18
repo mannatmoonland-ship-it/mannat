@@ -158,9 +158,20 @@
 }
 
 .owner-scope-row-button {
+    width: 32px;
     min-height: 32px;
-    padding: 5px 9px;
+    padding: 6px;
     font-size: 12px;
+}
+
+.owner-scope-row-button svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 2;
 }
 
 .owner-scope-row-button[data-action="delete"] {
@@ -186,23 +197,27 @@
 }
 
 .owner-scope-item-column {
-    width: 34%;
+    width: 23%;
 }
 
 .owner-scope-date-column {
-    width: 17%;
-}
-
-.owner-scope-category-column {
-    width: 17%;
-}
-
-.owner-scope-paid-column {
     width: 13%;
 }
 
+.owner-scope-category-column {
+    width: 14%;
+}
+
+.owner-scope-paid-column {
+    width: 11%;
+}
+
+.owner-scope-remarks-column {
+    width: 24%;
+}
+
 .owner-scope-actions-column {
-    width: 19%;
+    width: 15%;
 }
 
 .owner-scope-table th {
@@ -425,7 +440,7 @@
     }
 
     .owner-scope-table {
-        min-width: 760px;
+        min-width: 960px;
     }
 
     .owner-scope-history-table {

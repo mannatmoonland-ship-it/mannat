@@ -97,9 +97,15 @@ function sampleData() {
       {
         id: "newer",
         name: "An unusually long Owner Scope item name ".repeat(8),
-        category: "professional_technical"
+        category: "professional_technical",
+        remarks: "Work approved by owner"
       },
-      { id: "unpaid", name: "Unpaid scope item", category: "other" }
+      {
+        id: "unpaid",
+        name: "Unpaid scope item",
+        category: "other",
+        remarks: "Awaiting purchase"
+      }
     ],
     payments: [
       { expenseItemId: "older", date: "2026-10-01", amount: 1250, paymentMode: "Cash" },
@@ -142,14 +148,29 @@ test("report sorts by actual payment date newest first, stably for ties, and put
   assert.equal(report.rows.at(-1).date, "—");
 });
 
+test("report uses payment entry time to order payments with the same date", () => {
+  const data = sampleData();
+  data.payments[1].createdAt = "2026-10-06T09:00:00Z";
+  data.payments[2].createdAt = "2026-10-06T15:30:00Z";
+
+  const report = createOwnerScopeReport(data);
+
+  assert.deepEqual(
+    report.rows.slice(0, 2).map(row => row.paymentMode),
+    ["Bank Transfer", "UPI"]
+  );
+});
+
 test("report total equals each linked Owner Scope payment exactly once", () => {
   const report = createOwnerScopeReport(sampleData());
 
   assert.equal(report.totalPaid, 7250);
   assert.equal(report.rows.reduce((total, row) => total + row.amount, 0), report.totalPaid);
+  assert.equal(report.rows[0].remarks, "Work approved by owner");
+  assert.equal(report.rows.at(-1).remarks, "Awaiting purchase");
 });
 
-test("PDF wraps full long item names within fixed-width landscape columns", () => {
+test("PDF includes remarks and wraps full long item names within fixed-width landscape columns", () => {
   const MockPdf = makePdfConstructor();
   const glyphs = setupPdfGlobals(MockPdf);
   downloadOwnerScopePDF(sampleData());
@@ -157,11 +178,14 @@ test("PDF wraps full long item names within fixed-width landscape columns", () =
   const [serialNumber, itemName] = MockPdf.state.table.body[0];
   assert.equal(serialNumber, "1");
   assert.equal(itemName, "An unusually long Owner Scope item name ".repeat(8));
+  assert.equal(MockPdf.state.table.head[0].at(-1), "Remarks");
+  assert.equal(MockPdf.state.table.body[0].at(-1), "Work approved by owner");
+  assert.equal(MockPdf.state.table.columnStyles[1].cellWidth, 58);
+  assert.equal(MockPdf.state.table.columnStyles[6].cellWidth, 53);
   assert.equal(MockPdf.state.options.orientation, "landscape");
   assert.equal(MockPdf.state.options.format, "a4");
   assert.equal(MockPdf.state.table.styles.overflow, "linebreak");
   assert.equal(MockPdf.state.table.styles.fontSize, 9);
-  assert.equal(MockPdf.state.table.columnStyles[1].cellWidth, 84);
   assert.equal(MockPdf.state.table.showHead, "everyPage");
   assert.equal(MockPdf.state.fileName, "owner_scope_expense_report.pdf");
   assert.equal(glyphs.filter(glyph => glyph === "₹").length, 2);
@@ -185,6 +209,8 @@ test("PDF contains no separate legacy account or budget and balance summary fiel
   assert.ok(visiblePdfText.includes("Total Paid:"));
   assert.ok(visiblePdfText.includes("TOTAL OWNER SCOPE PAID:"));
   assert.ok(visiblePdfText.includes("7,250"));
+  assert.ok(visiblePdfText.includes("Work approved by owner"));
+  assert.ok(visiblePdfText.includes("Awaiting purchase"));
   assert.ok(MockPdf.state.images.length >= 3);
   clearPdfGlobals();
 });

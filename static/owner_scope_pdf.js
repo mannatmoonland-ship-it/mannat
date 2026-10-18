@@ -17,6 +17,14 @@ const money = new Intl.NumberFormat("en-IN", {
   maximumFractionDigits: 2
 });
 
+function compareTime(left, right) {
+  if (left.timeSortValue === null) {
+    return right.timeSortValue === null ? left.sortOrder - right.sortOrder : 1;
+  }
+  if (right.timeSortValue === null) return -1;
+  return right.timeSortValue - left.timeSortValue || left.sortOrder - right.sortOrder;
+}
+
 export function createOwnerScopeReport(data) {
   const items = Array.isArray(data?.items) ? data.items : [];
   const payments = Array.isArray(data?.payments) ? data.payments : [];
@@ -36,9 +44,12 @@ export function createOwnerScopeReport(data) {
         itemName: String(item.name || "—"),
         date: "—",
         dateSortValue: null,
+        timeSortValue: null,
+        sortOrder: rows.length,
         category: categoryLabels[item.category] || String(item.category || "—"),
         amount: 0,
-        paymentMode: "—"
+        paymentMode: "—",
+        remarks: String(item.remarks || "—")
       });
       continue;
     }
@@ -52,17 +63,20 @@ export function createOwnerScopeReport(data) {
         itemName: String(item.name || "—"),
         date: formatDateWithDay(payment.date, "—").replace(", ", ",\n"),
         dateSortValue: ownerScopePaymentDateValue(payment.date),
+        timeSortValue: ownerScopePaymentDateValue(payment.createdAt || payment.updatedAt),
+        sortOrder: rows.length,
         category: categoryLabels[item.category] || String(item.category || "—"),
         amount,
-        paymentMode: String(payment.paymentMode || "—")
+        paymentMode: String(payment.paymentMode || "—"),
+        remarks: String(item.remarks || "—")
       });
     }
   }
 
   rows.sort((left, right) => {
-    if (left.dateSortValue === null) return right.dateSortValue === null ? 0 : 1;
+    if (left.dateSortValue === null) return right.dateSortValue === null ? compareTime(left, right) : 1;
     if (right.dateSortValue === null) return -1;
-    return right.dateSortValue - left.dateSortValue;
+    return right.dateSortValue - left.dateSortValue || compareTime(left, right);
   });
 
   const totalPaid = rows.reduce((total, row) => total + row.amount, 0);
@@ -75,7 +89,8 @@ export function createOwnerScopeReport(data) {
       date: row.date,
       category: row.category,
       amount: row.amount,
-      paymentMode: row.paymentMode
+      paymentMode: row.paymentMode,
+      remarks: row.remarks
     }))
   };
 }
@@ -137,14 +152,15 @@ export function downloadOwnerScopePDF(data) {
   doc.autoTable({
     startY: 49,
     margin: { left: margin, right: margin, top: margin, bottom: 18 },
-    head: [["S.No.", "Item", "Date", "Category", "Amount Paid", "Payment Mode"]],
+    head: [["S.No.", "Item", "Date", "Category", "Amount Paid", "Payment Mode", "Remarks"]],
     body: report.rows.map(row => [
       String(row.serialNumber),
       row.itemName,
       row.date,
       row.category,
       money.format(row.amount),
-      row.paymentMode
+      row.paymentMode,
+      row.remarks
     ]),
     theme: "grid",
     tableWidth: pageWidth - margin * 2,
@@ -166,11 +182,12 @@ export function downloadOwnerScopePDF(data) {
     },
     columnStyles: {
       0: { cellWidth: 14, halign: "center" },
-      1: { cellWidth: 84 },
-      2: { cellWidth: 42 },
-      3: { cellWidth: 43 },
-      4: { cellWidth: 42, halign: "right" },
-      5: { cellWidth: 48 }
+      1: { cellWidth: 58 },
+      2: { cellWidth: 35 },
+      3: { cellWidth: 38 },
+      4: { cellWidth: 35, halign: "right" },
+      5: { cellWidth: 40 },
+      6: { cellWidth: 53 }
     },
     didDrawCell: ({ column, cell, section }) => {
       if (section !== "body" || column.index !== 4) return;

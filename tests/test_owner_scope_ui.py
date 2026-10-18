@@ -321,7 +321,7 @@ def test_owner_scope_page_is_login_protected_and_has_one_finance_navigation_link
     assert b"ownerScopePaymentHistory" in response.data
     assert b"ownerScopeItemBudget" not in response.data
     table_header = response.data.split(b"<thead>", 1)[1].split(b"</thead>", 1)[0]
-    columns = [b"Item", b"Date", b"Category", b"Paid", b"Actions"]
+    columns = [b"Item", b"Date", b"Category", b"Paid", b"Remarks", b"Actions"]
     positions = [table_header.index(column) for column in columns]
     assert positions == sorted(positions)
     assert b'name="paymentDate" type="date"' in response.data
@@ -333,6 +333,7 @@ def test_owner_scope_page_is_login_protected_and_has_one_finance_navigation_link
     assert b'value="Cash"' in response.data
     assert b'value="Bank Transfer"' in response.data
     assert b'id="ownerScopeHistoryTotal"' in response.data
+    assert b'<th scope="col">Remarks</th>' in table_header
     assert response.data.count(b">Owner Scope</a>") == 1
     assert b"owner_scope.js" in response.data
     assert b"dialogs.css" in response.data
@@ -408,7 +409,11 @@ def test_owner_scope_table_uses_linked_payment_date_and_only_edit_delete_actions
     script = (root / "static/owner_scope.js").read_text(encoding="utf-8")
     assert "ownerScopeData.payments.find(payment => payment.expenseItemId === item.id)" in script
     assert 'formatDateWithDay(linkedPayment?.date, "—").replace(", ", ",\\n")' in script
-    assert '[["edit", "Edit"], ["delete", "Delete"]]' in script
+    assert '["edit", "Edit", \'<svg viewBox="0 0 24 24" aria-hidden="true">' in script
+    assert '["delete", "Delete", \'<svg viewBox="0 0 24 24" aria-hidden="true">' in script
+    assert 'button.setAttribute("aria-label", `${label} Owner Scope item`);' in script
+    assert "button.title = `${label} Owner Scope item`;" in script
+    assert 'button.innerHTML = icon;' in script
 
 
 def test_delete_confirmation_uses_simple_custom_mannat_moon_modal():
@@ -460,14 +465,17 @@ def test_owner_scope_items_table_constrains_column_widths_for_wrapping():
     root = Path(__file__).parents[1]
     template = (root / "templates/owner_scope.html").read_text(encoding="utf-8")
     styles = (root / "static/owner_scope.css").read_text(encoding="utf-8")
+    script = (root / "static/owner_scope.js").read_text(encoding="utf-8")
     assert 'class="owner-scope-table owner-scope-items-table"' in template
     assert ".owner-scope-items-table {\n    table-layout: fixed;" in styles
+    assert 'appendCell(row, item.remarks || "—");' in script
     for column, width in (
-        ("item", "34%"),
-        ("date", "17%"),
-        ("category", "17%"),
-        ("paid", "13%"),
-        ("actions", "19%"),
+        ("item", "23%"),
+        ("date", "13%"),
+        ("category", "14%"),
+        ("paid", "11%"),
+        ("remarks", "24%"),
+        ("actions", "15%"),
     ):
         assert f".owner-scope-{column}-column {{\n    width: {width};" in styles
 
@@ -903,6 +911,7 @@ def test_owner_scope_item_crud_leaves_legacy_trade_unread_and_unchanged(client):
     assert payment["date"] == "2026-09-29"
     assert payment["amount"] == 2380
     assert payment["paymentMode"] == "UPI"
+    assert isinstance(payment["createdAt"], str)
     assert sum(entry["amount"] for entry in created_data["payments"]) == 2380
 
     updated = test_client.put(

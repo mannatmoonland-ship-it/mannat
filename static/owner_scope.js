@@ -132,16 +132,22 @@ function renderItems() {
         );
         appendCell(row, categoryLabels[item.category] || item.category || "—");
         appendCell(row, formatMoney(paid), "owner-scope-money");
+        appendCell(row, item.remarks || "—");
 
         const actionsCell = appendCell(row, "");
         actionsCell.className = "owner-scope-actions";
-        for (const [action, label] of [["edit", "Edit"], ["delete", "Delete"]]) {
+        for (const [action, label, icon] of [
+            ["edit", "Edit", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg>'],
+            ["delete", "Delete", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m19 6-1 14H6L5 6"/><path d="M10 11v5M14 11v5"/></svg>']
+        ]) {
             const button = document.createElement("button");
             button.type = "button";
             button.className = "owner-scope-row-button";
             button.dataset.action = action;
             button.dataset.itemId = item.id;
-            button.textContent = label;
+            button.setAttribute("aria-label", `${label} Owner Scope item`);
+            button.title = `${label} Owner Scope item`;
+            button.innerHTML = icon;
             actionsCell.append(button);
         }
         page.itemsBody.append(row);

@@ -173,10 +173,19 @@ def get_owner_scope_data(db):
                     "amount": payment.get("amount", 0),
                     "paymentMode": payment.get("paymentMode", ""),
                     "remarks": payment.get("remarks", ""),
+                    "createdAt": payment.get("createdAt"),
+                    "updatedAt": payment.get("updatedAt"),
                 }
             )
         )
-    payments.sort(key=lambda payment: (str(payment.get("date") or ""), str(payment.get("id") or "")), reverse=True)
+    payments.sort(
+        key=lambda payment: (
+            str(payment.get("date") or ""),
+            str(payment.get("createdAt") or payment.get("updatedAt") or ""),
+            str(payment.get("id") or ""),
+        ),
+        reverse=True,
+    )
 
     return {
         "metadata": _json_value(

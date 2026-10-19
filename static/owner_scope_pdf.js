@@ -10,7 +10,13 @@ const categoryLabels = Object.freeze({
   legal_documentation: "Legal / Documentation",
   site_expense: "Site Expense",
   mixed: "Mixed",
-  other: "Other"
+  other: "Other",
+  office_expenditure: "Office Expenditure",
+  office_rents: "Office Rents",
+  office_salaries: "Office Salaries",
+  office_utilities: "Office Utilities",
+  office_supplies: "Office Supplies",
+  office_travel_conveyance: "Office Travel & Conveyance"
 });
 
 const money = new Intl.NumberFormat("en-IN", {

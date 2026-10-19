@@ -579,3 +579,22 @@ body:not(.login-page) header.mm-app-header > .mm-app-brand {
         transition-duration: .01ms !important;
     }
 }
+
+.mm-connectivity-banner {
+    position: fixed;
+    z-index: 100001;
+    inset: 0 0 auto;
+    padding: 10px 16px;
+    border-bottom: 1px solid #fecaca;
+    background: #fff1f2;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, .16);
+    color: #9f1239;
+    font-size: 14px;
+    font-weight: 650;
+    line-height: 1.4;
+    text-align: center;
+}
+
+.mm-connectivity-banner[hidden] {
+    display: none;
+}

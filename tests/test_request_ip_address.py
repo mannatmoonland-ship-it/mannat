@@ -23,8 +23,8 @@ def test_daily_report_routes_require_authentication_regardless_of_client_ip(
         headers={"X-Forwarded-For": forwarded_for},
     )
     if path == "/daily-reports":
-        assert response.status_code == 302
-        assert response.headers["Location"].startswith("/login?next=")
+        assert response.status_code == 401
+        assert b"You need to sign in to view this page." in response.data
     else:
         assert response.status_code == 401
-    assert "<svg" not in response.get_data(as_text=True)
+        assert "<svg" not in response.get_data(as_text=True)

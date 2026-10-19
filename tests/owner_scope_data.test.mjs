@@ -49,8 +49,18 @@ function makeFirestore(seed) {
   return { db: {}, api, documents, writes, reads };
 }
 
-test("all nine Owner Scope categories are accepted and invalid categories rejected", () => {
-  assert.equal(OWNER_SCOPE_CATEGORIES.length, 9);
+test("all Owner Scope categories are accepted and invalid categories rejected", () => {
+  assert.equal(OWNER_SCOPE_CATEGORIES.length, 15);
+  for (const category of [
+    "office_expenditure",
+    "office_rents",
+    "office_salaries",
+    "office_utilities",
+    "office_supplies",
+    "office_travel_conveyance"
+  ]) {
+    assert.ok(OWNER_SCOPE_CATEGORIES.includes(category));
+  }
   for (const category of OWNER_SCOPE_CATEGORIES) {
     assert.equal(validateOwnerScopeCategory(category), category);
   }

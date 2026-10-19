@@ -179,8 +179,8 @@ def test_user_deletion_does_not_recreate_deleted_account(client):
             deleted_session["user_id"] = "deleted-user"
             deleted_session["session_id"] = "deleted-user-session"
         session_response = deleted_user_client.get("/", follow_redirects=False)
-    assert session_response.status_code == 302
-    assert "/login" in session_response.headers["Location"]
+    assert session_response.status_code == 401
+    assert b"You need to sign in to view this page." in session_response.data
 
 
 def test_user_deletion_failure_shows_error_without_audit_or_removing_user(client):
@@ -404,7 +404,7 @@ def test_office_staff_and_supervisor_share_full_operational_permissions(client):
     assert "super_admin_recovery" not in ROLE_PERMISSIONS["supervisor"]
 
 
-def test_dashboard_redirects_to_login_when_firestore_not_configured(client):
+def test_dashboard_shows_sign_in_prompt_when_firestore_not_configured(client):
     import app as app_module
 
     original = app_module.get_user_store
@@ -416,10 +416,32 @@ def test_dashboard_redirects_to_login_when_firestore_not_configured(client):
             sess["session_id"] = "missing-session"
 
         response = client.get("/", follow_redirects=False)
-        assert response.status_code == 302
-        assert response.headers["Location"] == "/login"
+        assert response.status_code == 401
+        assert b"You need to sign in to view this page." in response.data
+        assert b'href="/login?next=/"' in response.data
     finally:
         app_module.get_user_store = original
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/red-book",
+        "/daily-reports",
+        "/materials",
+        "/drawings",
+        "/labour-payments",
+        "/ledger-prints",
+        "/building-cost-summary",
+    ),
+)
+def test_protected_module_pages_show_sign_in_prompt_when_logged_out(client, path):
+    response = client.get(path, follow_redirects=False)
+
+    assert response.status_code == 401
+    assert "no-store" in response.headers["Cache-Control"]
+    assert b"You need to sign in to view this page." in response.data
+    assert b"Sign in" in response.data
 
 
 def test_initial_super_admin_setup(client):
@@ -1922,8 +1944,9 @@ def test_user_edit_generates_audit_log_and_preserves_password(client):
 
 def test_user_management_requires_super_admin(client):
     response = client.get("/user-management", follow_redirects=False)
-    assert response.status_code == 302
-    assert response.headers["Location"] == "/login"
+    assert response.status_code == 401
+    assert b"You need to sign in to view this page." in response.data
+    assert b'href="/login?next=/user-management"' in response.data
 
 
 def test_user_management_renders_saved_avatar_id_next_to_full_name(client):
@@ -2006,12 +2029,10 @@ def test_daily_report_routes_require_authentication_and_do_not_return_report_dat
         environ_overrides={"REMOTE_ADDR": "127.0.0.1"},
         follow_redirects=False,
     )
-    assert page_response.status_code == 302
-    assert page_response.headers["Location"].startswith("/login?next=")
-    login_response = client.get(page_response.headers["Location"])
-    assert login_response.status_code == 200
-    assert b"Please sign in to continue" in login_response.data
-    assert b"Private report data" not in login_response.data
+    assert page_response.status_code == 401
+    assert b"You need to sign in to view this page." in page_response.data
+    assert b'href="/login?next=/daily-reports?date%3D2026-10-03"' in page_response.data
+    assert b"Private report data" not in page_response.data
 
     image_response = client.get(
         "/daily-reports/share-image?date=2026-10-03",
@@ -2029,7 +2050,9 @@ def test_daily_reports_login_returns_to_requested_date_and_rejects_external_next
     admin["must_change_password"] = False
     app.config["FIRESTORE_STORE"].save_user(admin)
     requested_page = client.get("/daily-reports?date=2026-10-03", follow_redirects=False)
-    login_page = client.get(requested_page.headers["Location"])
+    assert requested_page.status_code == 401
+    assert b'href="/login?next=/daily-reports?date%3D2026-10-03"' in requested_page.data
+    login_page = client.get("/login?next=/daily-reports?date%3D2026-10-03")
     assert b'name="next" value="/daily-reports?date=2026-10-03"' in login_page.data
 
     login_response = client.post(

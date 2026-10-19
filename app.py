@@ -4413,7 +4413,7 @@ def require_login(view):
     def wrapped(*args, **kwargs):
         user = get_current_user()
         if not user:
-            return redirect(url_for("login_page"))
+            return _unauthenticated_response()
         return view(*args, **kwargs)
 
     return wrapped
@@ -4434,13 +4434,25 @@ def _safe_local_redirect_target(target):
     return target
 
 
+def _unauthenticated_response():
+    if request.method == "GET" and not request.path.startswith("/api/"):
+        next_url = _safe_local_redirect_target(request.full_path.rstrip("?"))
+        response = app.make_response(
+            render_template("sign_in_required.html", next_url=next_url)
+        )
+        response.status_code = 401
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    return redirect(url_for("login_page"))
+
+
 def require_role(*allowed_roles):
     def decorator(view):
         @wraps(view)
         def wrapped(*args, **kwargs):
             user = get_current_user()
             if not user:
-                return redirect(url_for("login_page"))
+                return _unauthenticated_response()
             if allowed_roles and str(user.get("role", "")).lower() not in {role.lower() for role in allowed_roles}:
                 flash("You do not have permission to access that page.", "error")
                 return redirect(url_for("dashboard"))
@@ -6969,6 +6981,8 @@ def _red_book_api_response(payload, status=200):
 def _red_book_api_authorize(permission, *, require_csrf=False):
     user = get_current_user()
     if not user:
+        if request.endpoint == "red_book_page" and request.method == "GET":
+            return None, _unauthenticated_response()
         return None, _red_book_api_response({"error": "Authentication required."}, 401)
     if user.get("must_change_password"):
         return None, _red_book_api_response(
@@ -9235,7 +9249,7 @@ def daily_report_share_image():
 @app.route("/daily-reports")
 def daily_reports():
     if not get_current_user():
-        return redirect(url_for("login_page", next=request.full_path.rstrip("?")))
+        return _unauthenticated_response()
 
     current_user, denied = _daily_record_api_authorize("daily_reports.read")
     if denied:

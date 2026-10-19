@@ -145,6 +145,8 @@
         } else {
             window.addEventListener("load", onLoad, { once: true });
         }
+        if (!navigator.onLine) hideOverlay();
+        window.addEventListener("offline", hideOverlay);
         window.setTimeout(hideOverlay, maximumWaitMs);
         window.addEventListener("pageshow", event => {
             if (event.persisted) onLoad();

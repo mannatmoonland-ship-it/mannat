@@ -111,9 +111,21 @@ def test_authenticated_pages_share_navigation_partial_and_styles():
 
     brand_source = (templates_dir / "_navigation.html").read_text(encoding="utf-8")
     assert 'include "_brand.html"' in brand_source
+    shared_brand = (templates_dir / "_brand.html").read_text(encoding="utf-8")
+    login_template = (templates_dir / "login.html").read_text(encoding="utf-8")
+    navigation_css = (Path(__file__).resolve().parents[1] / "static" / "mm_navigation.css").read_text(encoding="utf-8")
+    assert "connectivity_indicator.js" in shared_brand
+    assert "connectivity_indicator.js" in login_template
+    assert ".mm-connectivity-banner" in navigation_css
+    connectivity_banner = navigation_css.split(".mm-connectivity-banner {", 1)[1].split("}", 1)[0]
+    assert "position: fixed;" in connectivity_banner
+    assert "z-index: 100001;" in connectivity_banner
+    page_loader = (templates_dir / "_page_loader.html").read_text(encoding="utf-8")
+    assert "if (!navigator.onLine) hideOverlay();" in page_loader
+    assert 'window.addEventListener("offline", hideOverlay);' in page_loader
     icon_script = (Path(__file__).resolve().parents[1] / "static" / "button_action_icons.js").read_text(encoding="utf-8")
     assert "mm-nav-profile-trigger" in icon_script
-    assert "button_action_icons.js" in (templates_dir / "_brand.html").read_text(encoding="utf-8")
+    assert "button_action_icons.js" in shared_brand
 
     for template_name in ("password_reset_request.html", "reset_password.html", "super_admin_recovery.html", "daily_reports_viewer.html"):
         source = (templates_dir / template_name).read_text(encoding="utf-8")
@@ -128,7 +140,6 @@ def test_authenticated_pages_share_navigation_partial_and_styles():
 
     labour_template = (templates_dir / "labour_payments.html").read_text(encoding="utf-8")
     assert 'include "index.html"' in labour_template
-    login_template = (templates_dir / "login.html").read_text(encoding="utf-8")
     assert "button_action_icons.js" in login_template
 
 

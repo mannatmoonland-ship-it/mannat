@@ -11,7 +11,13 @@ export const OWNER_SCOPE_CATEGORIES = Object.freeze([
   "legal_documentation",
   "site_expense",
   "mixed",
-  "other"
+  "other",
+  "office_expenditure",
+  "office_rents",
+  "office_salaries",
+  "office_utilities",
+  "office_supplies",
+  "office_travel_conveyance"
 ]);
 
 const LEGACY_OWNER_ACCOUNT_COLLECTION = "trades";

@@ -308,7 +308,9 @@ def _item_payload(name="Water connection", category="site_expense"):
 
 def test_owner_scope_page_is_login_protected_and_has_one_finance_navigation_link(client):
     test_client, _ = client
-    assert app.test_client().get("/owner-scope").status_code == 302
+    unauthenticated = app.test_client().get("/owner-scope")
+    assert unauthenticated.status_code == 401
+    assert b"You need to sign in to view this page." in unauthenticated.data
     response = test_client.get("/owner-scope")
     assert response.status_code == 200
     assert b"Owner Scope Items" in response.data
@@ -1084,7 +1086,7 @@ def test_item_edit_updates_only_the_selected_items_name_and_category(client):
 
 
 @pytest.mark.parametrize("category", OWNER_SCOPE_CATEGORIES)
-def test_all_nine_owner_scope_categories_can_be_created(client, category):
+def test_all_owner_scope_categories_can_be_created(client, category):
     test_client, _ = client
     response = test_client.post(
         "/api/owner-scope/items",
@@ -1092,6 +1094,22 @@ def test_all_nine_owner_scope_categories_can_be_created(client, category):
         headers=_mutation_headers(),
     )
     assert response.status_code == 201
+
+
+def test_office_expense_categories_are_available_in_the_item_form(client):
+    test_client, _ = client
+    response = test_client.get("/owner-scope")
+
+    assert response.status_code == 200
+    for label in (
+        "Office Expenditure",
+        "Office Rents",
+        "Office Salaries",
+        "Office Utilities",
+        "Office Supplies",
+        "Office Travel &amp; Conveyance",
+    ):
+        assert label.encode() in response.data
 
 
 @pytest.mark.parametrize(

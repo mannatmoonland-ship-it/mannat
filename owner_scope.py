@@ -21,6 +21,12 @@ OWNER_SCOPE_CATEGORIES = (
     "site_expense",
     "mixed",
     "other",
+    "office_expenditure",
+    "office_rents",
+    "office_salaries",
+    "office_utilities",
+    "office_supplies",
+    "office_travel_conveyance",
 )
 OWNER_SCOPE_PAYMENT_MODES = ("Cash", "Bank Transfer", "UPI", "Cheque", "Other")
 

@@ -37,7 +37,10 @@ def login(client, role="office_staff"):
 
 
 def test_material_builder_requires_login_and_allows_existing_operational_roles(client):
-    assert client.get("/materials").status_code == 302
+    unauthenticated = client.get("/materials")
+    assert unauthenticated.status_code == 401
+    assert b"You need to sign in to view this page." in unauthenticated.data
+    assert b'href="/login?next=/materials"' in unauthenticated.data
     for role in ("office_staff", "supervisor", "super_admin"):
         login(client, role)
         response = client.get("/materials")

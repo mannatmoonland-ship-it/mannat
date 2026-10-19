@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#050907">
+    <title>Sign In Required - Mannat Moon</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <style>
+        body.sign-in-required-page {
+            min-height: 100vh;
+            margin: 0;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background:
+                radial-gradient(ellipse at 50% 0%, rgba(25, 110, 73, .2), transparent 35rem),
+                var(--mm-canvas);
+            color: var(--mm-ink);
+            font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+        }
+        .sign-in-required-card {
+            width: min(520px, 100%);
+            padding: clamp(28px, 7vw, 52px);
+            border: 1px solid var(--mm-line);
+            border-radius: var(--mm-radius);
+            background: linear-gradient(145deg, rgba(18, 34, 26, .94), rgba(8, 16, 12, .96));
+            box-shadow: var(--mm-shadow);
+            text-align: center;
+        }
+        .sign-in-required-card h1 {
+            margin: 0 0 12px;
+            font-size: clamp(24px, 5vw, 32px);
+        }
+        .sign-in-required-card p {
+            margin: 0 0 26px;
+            color: var(--mm-muted);
+            line-height: 1.6;
+        }
+        .sign-in-required-action a {
+            display: inline-flex;
+            min-height: 46px;
+            align-items: center;
+            justify-content: center;
+            padding: 0 22px;
+            border: 0;
+            border-radius: 9px;
+            background: linear-gradient(135deg, #72e5c2, #38c99b);
+            color: #06140e;
+            font-weight: 750;
+            text-decoration: none;
+        }
+        .sign-in-required-action a:focus-visible {
+            outline: 3px solid rgba(93, 221, 180, .55);
+            outline-offset: 3px;
+        }
+        .sign-in-required-brand {
+            margin-bottom: 34px;
+        }
+    </style>
+</head>
+<body class="sign-in-required-page">
+    <main class="sign-in-required-card" aria-labelledby="signInRequiredTitle">
+        <div class="sign-in-required-brand">
+            {% include "_brand.html" %}
+        </div>
+        <h1 id="signInRequiredTitle">Sign in required</h1>
+        <p>You need to sign in to view this page.</p>
+        <nav class="sign-in-required-action" aria-label="Sign in">
+            <a href="{{ url_for('login_page', next=next_url) if next_url else url_for('login_page') }}">Sign in</a>
+        </nav>
+    </main>
+</body>
+</html>

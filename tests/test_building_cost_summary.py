@@ -30,7 +30,9 @@ def client(monkeypatch):
 
 
 def test_building_cost_summary_route_is_login_protected_and_renders_module(client):
-    assert app.test_client().get("/building-cost-summary").status_code == 302
+    unauthenticated = app.test_client().get("/building-cost-summary")
+    assert unauthenticated.status_code == 401
+    assert b"You need to sign in to view this page." in unauthenticated.data
     response = client.get("/building-cost-summary")
     assert response.status_code == 200
     assert b"TOTAL BUILDING COST TILL DATE" in response.data

@@ -182,7 +182,7 @@ python -m playwright install chromium</code></pre>
 
             <section class="guide-chapter" id="routes" aria-labelledby="routesTitle">
                 <h2 id="routesTitle">5. Flask Application and Routes</h2>
-                <p><code>app.py</code> is the entry point and registers <code>snapshot_blueprint</code> from <code>snapshot_routes.py</code>. <code>@require_login</code> protects signed-in pages; <code>@require_role("super_admin")</code> protects administration pages. Snapshot API routes also validate a session CSRF token.</p>
+                <p><code>app.py</code> is the entry point and registers <code>snapshot_blueprint</code> from <code>snapshot_routes.py</code>. <code>@require_login</code> protects signed-in pages and shows a sign-in prompt for unauthenticated page requests; its button returns users to the requested page after sign-in. <code>@require_role("super_admin")</code> protects administration pages. Snapshot API routes also validate a session CSRF token.</p>
                 <h3>Page routes</h3>
                 <ul>
                     <li><code>GET /</code> - Dashboard.</li>

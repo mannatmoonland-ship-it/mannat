@@ -70,7 +70,10 @@ def test_snapshot_page_and_dashboard_card_are_admin_only(client):
     snapshot_page = client.get("/snapshots")
     dashboard = client.get("/")
     assert snapshot_page.status_code == 200
-    assert b"Firestore Backup &amp; Restore" in snapshot_page.data
+    assert b"<h1>Snapshot</h1>" in snapshot_page.data
+    assert b'<a class="mm-app-brand" href="/" aria-label="Mannat Moon Construction Documentation home">' in snapshot_page.data
+    assert b'<a class="mm-nav-link"\n               href="/"' in snapshot_page.data
+    assert b'<span>Dashboard</span>' in snapshot_page.data
     assert b"Snapshot Admin" in dashboard.data
     assert b"Super Admin" in dashboard.data
     for card_text in (b"Trade Builder", b"User Management", b"Snapshot", b"OPEN TRADE BUILDER", b"MANAGE USERS"):

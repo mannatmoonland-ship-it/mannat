@@ -4000,8 +4000,12 @@ def get_current_user():
         return None
     try:
         user = get_user_store().get_user(user_id)
-    except RuntimeError:
-        session.clear()
+    except RuntimeError as error:
+        g.user_store_unavailable = True
+        app.logger.error(
+            "Unable to verify the current session because the user store is unavailable (%s).",
+            type(error).__name__,
+        )
         return None
     if (
         not isinstance(user, dict)
@@ -4435,6 +4439,13 @@ def _safe_local_redirect_target(target):
 
 
 def _unauthenticated_response():
+    if g.get("user_store_unavailable", False):
+        response = app.make_response(
+            "Unable to verify your sign-in right now. Please try again shortly."
+        )
+        response.status_code = 503
+        response.headers["Cache-Control"] = "no-store"
+        return response
     if request.method == "GET" and not request.path.startswith("/api/"):
         next_url = _safe_local_redirect_target(request.full_path.rstrip("?"))
         response = app.make_response(

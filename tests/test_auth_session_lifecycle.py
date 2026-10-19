@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from werkzeug.security import generate_password_hash
 
+import app as app_module
 from app import InMemoryFirestoreStore, app
 
 
@@ -100,6 +101,26 @@ def test_active_user_session_continues_to_work(auth_clients):
     response = staff_client.get("/")
 
     assert response.status_code == 200
+
+
+def test_user_store_failure_does_not_log_out_existing_session(auth_clients, monkeypatch):
+    _store, admin_client, _staff_client = auth_clients
+    snapshot_page = admin_client.get("/snapshots")
+    assert snapshot_page.status_code == 200
+    assert b'class="mm-app-brand" href="/" ' in snapshot_page.data
+
+    def unavailable_store():
+        raise RuntimeError("simulated Firestore outage")
+
+    monkeypatch.setattr(app_module, "get_user_store", unavailable_store)
+    response = admin_client.get("/")
+
+    assert response.status_code == 503
+    assert response.headers["Cache-Control"] == "no-store"
+    assert b"Please try again shortly." in response.data
+    with admin_client.session_transaction() as flask_session:
+        assert flask_session["user_id"] == "admin-user"
+        assert flask_session["session_id"] == "admin-session"
 
 
 def test_inactive_user_session_is_rejected_and_invalidated(auth_clients):

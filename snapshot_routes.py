@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Blueprint, current_app, g, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from snapshot_service import (
     SNAPSHOT_PREFIX,
@@ -154,6 +154,8 @@ def _admin_required(view):
 
         user = get_current_user()
         if not user:
+            if g.get("user_store_unavailable", False):
+                return "Unable to verify your sign-in right now. Please try again shortly.", 503
             return redirect(url_for("login_page"))
         if not is_super_admin(user):
             if request.path.startswith("/api/"):
@@ -258,7 +260,7 @@ def _list_restorable_projects():
 @snapshot_blueprint.route("/snapshots")
 @_admin_required
 def snapshot_page():
-    from app import get_active_firebase_config
+    from app import get_active_firebase_config, get_current_user
 
     csrf_token = session.get("snapshot_csrf_token")
     if not csrf_token:
@@ -274,6 +276,7 @@ def snapshot_page():
             pass
     return render_template(
         "snapshots.html",
+        current_user=get_current_user(),
         csrf_token=csrf_token,
         active_project_id=active_config["project_id"],
         previous_project_id=previous_project_id,

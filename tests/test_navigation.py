@@ -10,6 +10,16 @@ def render_navigation(user):
         return render_template("_navigation.html", current_user=user)
 
 
+def test_brand_uses_resolved_navigation_user_for_home_link():
+    with app.test_request_context("/snapshots"):
+        html = render_template(
+            "_brand.html",
+            nav_user={"username": "admin", "role": "super_admin"},
+        )
+
+    assert 'class="mm-app-brand" href="/" aria-label="Mannat Moon Construction Documentation home"' in html
+
+
 def test_navigation_reconstructs_admin_menu_destinations():
     html = render_navigation({
         "username": "admin",

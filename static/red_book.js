@@ -6,7 +6,11 @@
   const canDelete = body.dataset.canDelete === "true";
   const canArchive = body.dataset.canArchive === "true";
   const archiveDialog = document.getElementById("redBookArchiveDialog");
+  const archiveDialogEyebrow = document.getElementById("redBookArchiveDialogEyebrow");
+  const archiveDialogTitle = document.getElementById("redBookArchiveDialogTitle");
+  const archiveDialogDescription = document.getElementById("redBookArchiveDialogDescription");
   const archiveDialogItem = document.getElementById("redBookArchiveDialogItem");
+  const archiveDialogConfirm = document.getElementById("redBookArchiveDialogConfirm");
   const list = document.getElementById("redBookItems");
   const status = document.getElementById("redBookStatus");
   const emptyMessage = document.getElementById("redBookEmpty");
@@ -291,15 +295,22 @@
     );
   }
 
-  function confirmArchive(item) {
+  function confirmArchive(item, fromDelete = false) {
+    archiveDialogEyebrow.textContent = fromDelete ? "CONFIRM DELETE" : "CONFIRM ARCHIVE";
+    archiveDialogTitle.textContent = fromDelete ? "Delete this Red Book item?" : "Move to Archive?";
+    archiveDialogDescription.textContent = fromDelete
+      ? "This removes the item from the active Red Book and keeps it in Archive. You can restore it later."
+      : "This item will be removed from the active Red Book and kept in Archive. You can restore it later.";
+    archiveDialogConfirm.textContent = fromDelete ? "Delete item" : "Move to Archive";
     archiveDialogItem.textContent = item.text;
     return new Promise(resolve => {
       const finish = () => {
         archiveDialog.removeEventListener("close", onClose);
-        resolve(archiveDialog.returnValue === "archive");
+        resolve(archiveDialog.returnValue === "confirm");
       };
       const onClose = () => finish();
       archiveDialog.addEventListener("close", onClose, { once: true });
+      archiveDialog.returnValue = "";
       archiveDialog.showModal();
     });
   }
@@ -326,16 +337,16 @@
     row.querySelectorAll("button").forEach(button => { button.disabled = false; });
   }
 
-  async function archiveItem(item) {
-    if (!(await confirmArchive(item))) return;
+  async function archiveItem(item, fromDelete = false) {
+    if (!(await confirmArchive(item, fromDelete))) return;
     const row = document.getElementById(`red-book-item-${item.id}`);
     setItemProgress(row, "Archiving item...");
     showStatus("Archiving Red Book item...");
     try {
-      await apiRequest(`/api/red-book/items/${encodeURIComponent(item.id)}/archive`, {
-        method: "POST",
-        body: JSON.stringify({})
-      });
+      const itemPath = `/api/red-book/items/${encodeURIComponent(item.id)}`;
+      await apiRequest(fromDelete ? itemPath : `${itemPath}/archive`, fromDelete
+        ? { method: "DELETE" }
+        : { method: "POST", body: JSON.stringify({}) });
       items = items.filter(candidate => candidate.id !== item.id);
       renderItems();
       showStatus("Red Book item moved to Archive.");
@@ -346,20 +357,7 @@
   }
 
   async function deleteItem(item) {
-    if (!window.confirm("Delete this Red Book item?")) return;
-    try {
-      await apiRequest(`/api/red-book/items/${encodeURIComponent(item.id)}`, {
-        method: "DELETE"
-      });
-      items = items.filter(candidate => candidate.id !== item.id);
-      items.forEach((candidate, index) => {
-        candidate.sort_order = index;
-      });
-      renderItems();
-      showStatus("Red Book item deleted.");
-    } catch (error) {
-      showStatus(error.message, "error");
-    }
+    await archiveItem(item, true);
   }
 
   if (addForm && canCreate) {

@@ -1357,6 +1357,13 @@ class InMemoryFirestoreStore:
             del self.red_book_items[item_id]
             return True
 
+    def delete_archived_red_book_item(self, item_id):
+        with self._red_book_mutation_lock:
+            if item_id not in self.red_book_archive:
+                return False
+            del self.red_book_archive[item_id]
+            return True
+
     def restore_archived_red_book_item(self, item_id, actor_id):
         with self._red_book_mutation_lock:
             item = self.red_book_archive.get(item_id)
@@ -2630,6 +2637,20 @@ class FirebaseFirestoreStore:
             return True
 
         return archive(firestore_transaction)
+
+    def delete_archived_red_book_item(self, item_id):
+        reference = self._collection("red_book_archive").document(item_id)
+        firestore_transaction = self.db.transaction()
+
+        @firestore.transactional
+        def delete(transaction):
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
+            if not snapshot.exists:
+                return False
+            transaction.delete(reference)
+            return True
+
+        return delete(firestore_transaction)
 
     def restore_archived_red_book_item(self, item_id, actor_id):
         items = self._collection("red_book_items")
@@ -8078,6 +8099,7 @@ def red_book_page():
         can_edit = _user_has_compiled_permission(user, "red_book.edit")
         can_create = _user_has_compiled_permission(user, "red_book.create")
         can_delete = _user_has_compiled_permission(user, "red_book.delete")
+        can_archive = is_admin_or_super_admin_role(user.get("role")) and can_delete
     except Exception as error:
         app.logger.error("Red Book page permissions failed (%s).", type(error).__name__)
         return _red_book_api_response(
@@ -8090,6 +8112,7 @@ def red_book_page():
         can_edit=can_edit,
         can_create=can_create,
         can_delete=can_delete,
+        can_archive=can_archive,
     ))
     response.headers["Cache-Control"] = "private, no-store"
     return response
@@ -8100,12 +8123,15 @@ def red_book_archive_page():
     user, denied = _red_book_api_authorize("red_book.read")
     if denied:
         return denied
+    if not is_admin_or_super_admin_role(user.get("role")):
+        return _red_book_api_response({"error": "Archive is available to admins only."}, 403)
     csrf_token = session.get("red_book_csrf")
     if not csrf_token:
         csrf_token = secrets.token_urlsafe(32)
         session["red_book_csrf"] = csrf_token
     try:
         can_restore = _user_has_compiled_permission(user, "red_book.delete")
+        can_delete_archived = can_restore
     except Exception as error:
         app.logger.error("Red Book Archive permissions failed (%s).", type(error).__name__)
         return _red_book_api_response({"error": "Unable to verify Archive permissions."}, 503)
@@ -8114,6 +8140,7 @@ def red_book_archive_page():
         current_user=user,
         red_book_csrf=csrf_token,
         can_restore=can_restore,
+        can_delete_archived=can_delete_archived,
     ))
     response.headers["Cache-Control"] = "private, no-store"
     return response
@@ -8202,9 +8229,11 @@ def web_push_device_api():
 
 @app.route("/api/red-book/archive", methods=["GET"])
 def red_book_archive_api():
-    _user, denied = _red_book_api_authorize("red_book.read")
+    user, denied = _red_book_api_authorize("red_book.read")
     if denied:
         return denied
+    if not is_admin_or_super_admin_role(user.get("role")):
+        return _red_book_api_response({"error": "Archive is available to admins only."}, 403)
     try:
         store = get_user_store()
         items = store.list_archived_red_book_items()
@@ -8249,6 +8278,8 @@ def red_book_item_archive_api(item_id):
     user, denied = _red_book_api_authorize("red_book.delete", require_csrf=True)
     if denied:
         return denied
+    if not is_admin_or_super_admin_role(user.get("role")):
+        return _red_book_api_response({"error": "Only admins can archive Red Book items."}, 403)
     if not _valid_red_book_item_id(item_id):
         return _red_book_api_response({"error": "Invalid Red Book item identifier."}, 400)
     try:
@@ -8272,6 +8303,8 @@ def red_book_archive_restore_api(item_id):
     user, denied = _red_book_api_authorize("red_book.delete", require_csrf=True)
     if denied:
         return denied
+    if not is_admin_or_super_admin_role(user.get("role")):
+        return _red_book_api_response({"error": "Only admins can restore archived items."}, 403)
     if not _valid_red_book_item_id(item_id):
         return _red_book_api_response({"error": "Invalid Red Book item identifier."}, 400)
     try:
@@ -8284,6 +8317,25 @@ def red_book_archive_restore_api(item_id):
     if not restored:
         return _red_book_api_response({"error": "Archived Red Book item not found."}, 404)
     return _red_book_api_response({"restored": True})
+
+
+@app.route("/api/red-book/archive/<item_id>", methods=["DELETE"])
+def red_book_archive_delete_api(item_id):
+    user, denied = _red_book_api_authorize("red_book.delete", require_csrf=True)
+    if denied:
+        return denied
+    if not is_admin_or_super_admin_role(user.get("role")):
+        return _red_book_api_response({"error": "Only admins can permanently delete archived items."}, 403)
+    if not _valid_red_book_item_id(item_id):
+        return _red_book_api_response({"error": "Invalid Red Book item identifier."}, 400)
+    try:
+        deleted = get_user_store().delete_archived_red_book_item(item_id)
+    except Exception as error:
+        app.logger.error("Permanent Red Book archive delete failed (%s).", type(error).__name__)
+        return _red_book_api_response({"error": "Unable to permanently delete the archived item."}, 503)
+    if not deleted:
+        return _red_book_api_response({"error": "Archived Red Book item not found."}, 404)
+    return _red_book_api_response({"deleted": True})
 
 
 @app.route("/api/red-book/items", methods=["GET", "POST"])
@@ -8387,10 +8439,14 @@ def red_book_item_api(item_id):
             if not updated:
                 return _red_book_api_response({"error": "Red Book item not found."}, 404)
             return _red_book_api_response({"id": item_id})
-        deleted = store.delete_red_book_item(item_id, user.get("id"))
-        if not deleted:
+        archived = store.archive_red_book_item(
+            item_id,
+            user.get("id"),
+            user.get("full_name") or user.get("username") or user.get("id"),
+        )
+        if not archived:
             return _red_book_api_response({"error": "Red Book item not found."}, 404)
-        return _red_book_api_response({"deleted": True})
+        return _red_book_api_response({"archived": True})
     except RedBookMutationError as error:
         return _red_book_api_response({"error": str(error)}, error.status)
     except Exception as error:

@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='red_book.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='red_book_context_menu.css') }}">
 </head>
-<body data-red-book-csrf="{{ red_book_csrf }}" data-can-restore="{{ 'true' if can_restore else 'false' }}">
+<body data-red-book-csrf="{{ red_book_csrf }}" data-can-restore="{{ 'true' if can_restore else 'false' }}" data-can-delete-archived="{{ 'true' if can_delete_archived else 'false' }}">
 {% include "_page_loader.html" %}
     <header class="red-book-header mm-app-header">
         {% include '_navigation.html' %}
@@ -33,6 +33,18 @@
                 <div class="red-book-dialog-actions">
                     <button class="red-book-button" type="submit" value="cancel" autofocus>Cancel</button>
                     <button class="red-book-button red-book-primary" type="submit" value="restore">Restore item</button>
+                </div>
+            </form>
+        </dialog>
+        <dialog id="redBookArchiveDeleteDialog" class="red-book-dialog" aria-labelledby="redBookArchiveDeleteTitle" aria-describedby="redBookArchiveDeleteDescription">
+            <form method="dialog" class="red-book-dialog-card">
+                <p class="red-book-eyebrow">PERMANENT DELETE</p>
+                <h2 id="redBookArchiveDeleteTitle">Delete this archived item permanently?</h2>
+                <p id="redBookArchiveDeleteDescription">This removes the item from the Archive and cannot be undone.</p>
+                <blockquote id="redBookArchiveDeleteItem" class="red-book-dialog-item"></blockquote>
+                <div class="red-book-dialog-actions">
+                    <button class="red-book-button" type="submit" value="cancel" autofocus>Cancel</button>
+                    <button class="red-book-button red-book-primary" type="submit" value="delete">Delete permanently</button>
                 </div>
             </form>
         </dialog>

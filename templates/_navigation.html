@@ -57,7 +57,9 @@
             <div class="mm-nav-submenu" id="mm-nav-construction">
                 <a href="{{ url_for('daily_reports') }}" {% if nav_endpoint == 'daily_reports' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-report"></use></svg><span>Daily Reports</span></a>
                 <a href="{{ url_for('red_book_page') }}" {% if nav_endpoint == 'red_book_page' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-book"></use></svg><span>Red Book</span></a>
+                {% if nav_user and nav_role.replace('_', ' ').replace('-', ' ') in ['admin', 'administrator', 'super admin', 'super administrator'] %}
                 <a href="{{ url_for('red_book_archive_page') }}" {% if nav_endpoint == 'red_book_archive_page' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-backup"></use></svg><span>Archive</span></a>
+                {% endif %}
                 {% if nav_user and nav_role == 'super_admin' %}
                 <a href="{{ url_for('trade_builder') }}" {% if nav_endpoint == 'trade_builder' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-trade"></use></svg><span>Trade Builder</span></a>
                 {% endif %}

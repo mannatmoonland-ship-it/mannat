@@ -591,7 +591,12 @@ def test_red_book_policy_and_delete_confirmation_are_explicit():
     javascript = (Path(__file__).parents[1] / "static" / "red_book.js").read_text(
         encoding="utf-8"
     )
-    assert 'window.confirm("Delete this Red Book item?")' in javascript
+    assert "function confirmArchive(item, fromDelete = false)" in javascript
+    assert 'archiveDialog.returnValue = "";' in javascript
+    assert "archiveDialog.showModal();" in javascript
+    assert 'fromDelete ? "Delete this Red Book item?" : "Move to Archive?"' in javascript
+    assert 'archiveDialog.returnValue === "confirm"' in javascript
+    assert "window.confirm(" not in javascript
     assert 'actionButton("↑"' in javascript
     assert 'actionButton("↓"' in javascript
     assert 'orderIsSaving || index === 0, "Move Up"' in javascript
@@ -604,6 +609,8 @@ def test_red_book_policy_and_delete_confirmation_are_explicit():
     stylesheet = (Path(__file__).parents[1] / "static" / "red_book.css").read_text(
         encoding="utf-8"
     )
+    assert ".red-book-dialog {" in stylesheet
+    assert ".red-book-dialog::backdrop" in stylesheet
     assert "@media print" in stylesheet
     assert 'body[data-print-images="false"] .red-book-image-link' in stylesheet
 

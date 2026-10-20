@@ -4,7 +4,10 @@
   const empty = document.getElementById("redBookArchiveEmpty");
   const csrfToken = document.body.dataset.redBookCsrf || "";
   const canRestore = document.body.dataset.canRestore === "true";
+  const canDeleteArchived = document.body.dataset.canDeleteArchived === "true";
   const restoreDialog = document.getElementById("redBookRestoreDialog");
+  const deleteDialog = document.getElementById("redBookArchiveDeleteDialog");
+  const deleteDialogItem = document.getElementById("redBookArchiveDeleteItem");
   const restoreDialogItem = document.getElementById("redBookRestoreDialogItem");
   let archivedItems = [];
 
@@ -77,6 +80,16 @@
     });
   }
 
+  function confirmPermanentDelete(item) {
+    deleteDialogItem.textContent = item.text;
+    return new Promise(resolve => {
+      deleteDialog.addEventListener("close", () => {
+        resolve(deleteDialog.returnValue === "delete");
+      }, { once: true });
+      deleteDialog.showModal();
+    });
+  }
+
   function setRestoreProgress(row, message) {
     row.setAttribute("aria-busy", "true");
     const progress = document.createElement("div");
@@ -94,30 +107,39 @@
 
   window.MannatRedBookContextMenu.bind(list, {
     getActions(row) {
-      return canRestore && archivedItems.some(item => item.id === row.dataset.itemId)
-        ? [{ action: "restore", label: "Restore to Red Book" }]
-        : [];
+      if (!archivedItems.some(item => item.id === row.dataset.itemId)) return [];
+      const actions = [];
+      if (canRestore) actions.push({ action: "restore", label: "Restore to Red Book" });
+      if (canDeleteArchived) actions.push({ action: "delete", label: "Delete permanently" });
+      return actions;
     },
     async onAction(action, row) {
-      if (action !== "restore") return;
+      if (!["restore", "delete"].includes(action)) return;
       const item = archivedItems.find(candidate => candidate.id === row?.dataset.itemId);
-      if (!item || !(await confirmRestore(item))) return;
-      setRestoreProgress(row, "Restoring to Red Book...");
+      if (!item) return;
+      if (action === "restore" && !(await confirmRestore(item))) return;
+      if (action === "delete" && !(await confirmPermanentDelete(item))) return;
+      const restoring = action === "restore";
+      setRestoreProgress(row, restoring ? "Restoring to Red Book..." : "Deleting permanently...");
       status.dataset.kind = "success";
-      status.textContent = "Restoring item to the Red Book...";
+      status.textContent = restoring ? "Restoring item to the Red Book..." : "Deleting archived item...";
       try {
-        const response = await fetch(`/api/red-book/archive/${encodeURIComponent(item.id)}/restore`, {
-          method: "POST",
+        const response = await fetch(restoring
+          ? `/api/red-book/archive/${encodeURIComponent(item.id)}/restore`
+          : `/api/red-book/archive/${encodeURIComponent(item.id)}`, {
+          method: restoring ? "POST" : "DELETE",
           headers: { "Accept": "application/json", "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
           body: JSON.stringify({}),
           cache: "no-store",
           credentials: "same-origin"
         });
         const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "Unable to restore the item.");
+        if (!response.ok) throw new Error(payload.error || `Unable to ${restoring ? "restore" : "delete"} the item.`);
         await loadArchive();
         status.dataset.kind = "success";
-        status.textContent = "Item restored to the Red Book.";
+        status.textContent = restoring
+          ? "Item restored to the Red Book."
+          : "Archived item permanently deleted.";
       } catch (error) {
         clearRestoreProgress(row);
         status.dataset.kind = "error";

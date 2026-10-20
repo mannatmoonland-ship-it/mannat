@@ -16,7 +16,7 @@
     data-can-create="{{ 'true' if can_create else 'false' }}"
     data-can-edit="{{ 'true' if can_edit else 'false' }}"
     data-can-delete="{{ 'true' if can_delete else 'false' }}"
-    data-can-archive="{{ 'true' if can_delete else 'false' }}"
+    data-can-archive="{{ 'true' if can_archive else 'false' }}"
 >
 {% include "_page_loader.html" %}
     <header class="red-book-header mm-app-header">
@@ -59,13 +59,13 @@
 
         <dialog id="redBookArchiveDialog" class="red-book-dialog" aria-labelledby="redBookArchiveDialogTitle" aria-describedby="redBookArchiveDialogDescription">
             <form method="dialog" class="red-book-dialog-card">
-                <p class="red-book-eyebrow">CONFIRM ARCHIVE</p>
+                <p id="redBookArchiveDialogEyebrow" class="red-book-eyebrow">CONFIRM ARCHIVE</p>
                 <h2 id="redBookArchiveDialogTitle">Move to Archive?</h2>
                 <p id="redBookArchiveDialogDescription">This item will be removed from the active Red Book and kept in Archive. You can restore it later.</p>
                 <blockquote id="redBookArchiveDialogItem" class="red-book-dialog-item"></blockquote>
                 <div class="red-book-dialog-actions">
                     <button class="red-book-button" type="submit" value="cancel" autofocus>Cancel</button>
-                    <button class="red-book-button red-book-primary" type="submit" value="archive">Move to Archive</button>
+                    <button id="redBookArchiveDialogConfirm" class="red-book-button red-book-primary" type="submit" value="confirm">Move to Archive</button>
                 </div>
             </form>
         </dialog>

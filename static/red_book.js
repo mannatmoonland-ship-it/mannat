@@ -4,6 +4,9 @@
   const canCreate = body.dataset.canCreate === "true";
   const canEdit = body.dataset.canEdit === "true";
   const canDelete = body.dataset.canDelete === "true";
+  const canArchive = body.dataset.canArchive === "true";
+  const archiveDialog = document.getElementById("redBookArchiveDialog");
+  const archiveDialogItem = document.getElementById("redBookArchiveDialogItem");
   const list = document.getElementById("redBookItems");
   const status = document.getElementById("redBookStatus");
   const emptyMessage = document.getElementById("redBookEmpty");
@@ -227,6 +230,9 @@
           actionButton("Edit", () => editItem(item, content), orderIsSaving)
         );
       }
+      if (canArchive) {
+        actions.append(actionButton("Archive", () => archiveItem(item), orderIsSaving));
+      }
       if (canDelete) {
         actions.append(actionButton("Delete", () => deleteItem(item), orderIsSaving));
       }
@@ -283,6 +289,60 @@
       }),
       actionButton("Cancel", renderItems)
     );
+  }
+
+  function confirmArchive(item) {
+    archiveDialogItem.textContent = item.text;
+    return new Promise(resolve => {
+      const finish = () => {
+        archiveDialog.removeEventListener("close", onClose);
+        resolve(archiveDialog.returnValue === "archive");
+      };
+      const onClose = () => finish();
+      archiveDialog.addEventListener("close", onClose, { once: true });
+      archiveDialog.showModal();
+    });
+  }
+
+  function setItemProgress(row, message) {
+    if (!row) return;
+    row.setAttribute("aria-busy", "true");
+    row.querySelectorAll("button").forEach(button => { button.disabled = true; });
+    let progress = row.querySelector(".red-book-item-progress");
+    if (!progress) {
+      progress = document.createElement("div");
+      progress.className = "red-book-item-progress";
+      progress.setAttribute("role", "status");
+      progress.setAttribute("aria-live", "polite");
+      row.append(progress);
+    }
+    progress.textContent = message;
+  }
+
+  function clearItemProgress(row) {
+    if (!row) return;
+    row.removeAttribute("aria-busy");
+    row.querySelector(".red-book-item-progress")?.remove();
+    row.querySelectorAll("button").forEach(button => { button.disabled = false; });
+  }
+
+  async function archiveItem(item) {
+    if (!(await confirmArchive(item))) return;
+    const row = document.getElementById(`red-book-item-${item.id}`);
+    setItemProgress(row, "Archiving item...");
+    showStatus("Archiving Red Book item...");
+    try {
+      await apiRequest(`/api/red-book/items/${encodeURIComponent(item.id)}/archive`, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      items = items.filter(candidate => candidate.id !== item.id);
+      renderItems();
+      showStatus("Red Book item moved to Archive.");
+    } catch (error) {
+      clearItemProgress(row);
+      showStatus(error.message, "error");
+    }
   }
 
   async function deleteItem(item) {
@@ -362,6 +422,7 @@
       if (canCreate) actions.push({ action: "duplicate", label: "Duplicate", disabled: orderIsSaving });
       if (getImageUrls(item).length) actions.push({ action: "view-image", label: "View Image" });
       actions.push({ action: "copy-text", label: "Copy Text" });
+      if (canArchive) actions.push({ action: "archive", label: "Move to Archive", disabled: orderIsSaving });
       if (canDelete) actions.push({ action: "delete", label: "Delete", disabled: orderIsSaving });
       return actions;
     },
@@ -412,6 +473,8 @@
         } catch (error) {
           showStatus("Could not copy the instruction text.", "error");
         }
+      } else if (action === "archive") {
+        await archiveItem(item);
       } else if (action === "delete") {
         await deleteItem(item);
       }

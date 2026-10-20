@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mannat Moon - Red Book Archive</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='red_book.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='red_book_context_menu.css') }}">
+</head>
+<body data-red-book-csrf="{{ red_book_csrf }}" data-can-restore="{{ 'true' if can_restore else 'false' }}">
+{% include "_page_loader.html" %}
+    <header class="red-book-header mm-app-header">
+        {% include '_navigation.html' %}
+    </header>
+    <main class="red-book-main">
+        <section class="red-book-hero">
+            <div>
+                <p class="red-book-eyebrow">RED BOOK RECORDS</p>
+                <h1>Archive</h1>
+                <p>Red Book items marked as consumed at the site are kept here for reference.</p>
+            </div>
+        </section>
+        <dialog id="redBookRestoreDialog" class="red-book-dialog" aria-labelledby="redBookRestoreDialogTitle" aria-describedby="redBookRestoreDialogDescription">
+            <form method="dialog" class="red-book-dialog-card">
+                <p class="red-book-eyebrow">CONFIRM RESTORE</p>
+                <h2 id="redBookRestoreDialogTitle">Restore to Red Book?</h2>
+                <p id="redBookRestoreDialogDescription">This item will return to the active Red Book at the end of the list.</p>
+                <blockquote id="redBookRestoreDialogItem" class="red-book-dialog-item"></blockquote>
+                <div class="red-book-dialog-actions">
+                    <button class="red-book-button" type="submit" value="cancel" autofocus>Cancel</button>
+                    <button class="red-book-button red-book-primary" type="submit" value="restore">Restore item</button>
+                </div>
+            </form>
+        </dialog>
+        <p id="redBookArchiveStatus" class="red-book-status" role="status" aria-live="polite">Loading archived items...</p>
+        <ol id="redBookArchiveItems" class="red-book-list" aria-label="Archived Red Book entries"></ol>
+        <p id="redBookArchiveEmpty" class="red-book-empty" hidden>No entries have been archived yet.</p>
+    </main>
+    <script src="{{ url_for('static', filename='red_book_context_menu.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='red_book_images.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='red_book_archive.js') }}" defer></script>
+</body>
+</html>

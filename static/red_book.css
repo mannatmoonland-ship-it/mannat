@@ -407,3 +407,75 @@
         margin: 16mm;
     }
 }
+
+.red-book-archived-item { align-items: center; }
+.red-book-archived-date { color: #9bb6ab; font-size: 12px; white-space: nowrap; }
+@media (max-width: 720px) {
+    .red-book-archived-item { grid-template-columns: auto minmax(0, 1fr); }
+    .red-book-archived-date { grid-column: 2; white-space: normal; }
+}
+
+.red-book-dialog {
+    width: min(520px, calc(100vw - 32px));
+    max-width: none;
+    max-height: min(85vh, 720px);
+    padding: 0;
+    overflow: auto;
+    border: 1px solid rgba(123, 224, 182, .3);
+    border-radius: 16px;
+    color: #ecf8f2;
+    background: #0b1b13;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, .55);
+}
+.red-book-dialog::backdrop { background: rgba(1, 7, 4, .76); backdrop-filter: blur(4px); }
+.red-book-dialog-card { display: grid; gap: 12px; padding: clamp(20px, 5vw, 30px); }
+.red-book-dialog-card .red-book-eyebrow { margin: 0; }
+.red-book-dialog-card h2 { margin: 0; color: #effff6; font-size: clamp(22px, 5vw, 28px); }
+.red-book-dialog-card > p:not(.red-book-eyebrow) { margin: 0; color: #a9c0b6; line-height: 1.55; }
+.red-book-dialog-item {
+    max-height: 26vh;
+    margin: 2px 0;
+    padding: 12px 14px;
+    overflow: auto;
+    border-left: 3px solid #50d2ad;
+    border-radius: 4px 9px 9px 4px;
+    color: #d7eee2;
+    background: rgba(77, 205, 157, .09);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+.red-book-dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 9px; margin-top: 5px; }
+.red-book-dialog-actions button { min-width: 108px; }
+.red-book-dialog button:focus-visible { outline: 3px solid rgba(93, 221, 180, .65); outline-offset: 3px; }
+@media (max-width: 480px) {
+    .red-book-dialog-actions { display: grid; grid-template-columns: 1fr; }
+    .red-book-dialog-actions button { width: 100%; }
+}
+
+.red-book-item[aria-busy="true"] { position: relative; overflow: hidden; }
+.red-book-item-progress {
+    position: absolute;
+    z-index: 2;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 11px;
+    border-radius: inherit;
+    color: #eafff4;
+    background: rgba(3, 14, 9, .88);
+    font-size: 14px;
+    font-weight: 750;
+}
+.red-book-item-progress::before {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(142, 232, 197, .3);
+    border-top-color: #8ce8c5;
+    border-radius: 50%;
+    content: "";
+    animation: red-book-progress-spin .8s linear infinite;
+}
+@keyframes red-book-progress-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .red-book-item-progress::before { animation-duration: 2.4s; } }

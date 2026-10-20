@@ -1066,6 +1066,7 @@ class InMemoryFirestoreStore:
         self.drawings_categories = {}
         self.drawings = {}
         self.red_book_items = {}
+        self.red_book_archive = {}
         self.fcm_device_tokens = {}
         self.user_todos = {}
         self.custom_staff_types = {}
@@ -1332,6 +1333,55 @@ class InMemoryFirestoreStore:
             return _sort_red_book_items(
                 [{"id": item_id, **item} for item_id, item in self.red_book_items.items()]
             )
+
+    def list_archived_red_book_items(self):
+        with self._red_book_mutation_lock:
+            return _sort_red_book_items(
+                [{"id": item_id, **item} for item_id, item in self.red_book_archive.items()]
+            )
+
+    def archive_red_book_item(self, item_id, actor_id, actor_name=None):
+        with self._red_book_mutation_lock:
+            item = self.red_book_items.get(item_id)
+            if item is None:
+                return False
+            if item_id in self.red_book_archive:
+                raise RedBookMutationError("This item is already archived.", 409)
+            archived = dict(item)
+            archived.update({
+                "archived_at": iso_now(), "archived_by": actor_id,
+                "archived_by_name": actor_name or actor_id,
+                "pinned": False, "pinned_at": None, "pinned_by": actor_id,
+            })
+            self.red_book_archive[item_id] = archived
+            del self.red_book_items[item_id]
+            return True
+
+    def restore_archived_red_book_item(self, item_id, actor_id):
+        with self._red_book_mutation_lock:
+            item = self.red_book_archive.get(item_id)
+            if item is None:
+                return False
+            if item_id in self.red_book_items:
+                raise RedBookMutationError("This item is already in the Red Book.", 409)
+            if len(self.red_book_items) >= RED_BOOK_MAX_ITEMS:
+                raise RedBookMutationError("The Red Book has reached its item limit.", 409)
+            orders = [
+                order for order in (_red_book_sort_order(value) for value in self.red_book_items.values())
+                if order is not None
+            ]
+            restored = dict(item)
+            restored.pop("archived_at", None)
+            restored.pop("archived_by", None)
+            restored.pop("archived_by_name", None)
+            restored.update({
+                "sort_order": max(orders, default=-1) + 1,
+                "updated_at": iso_now(), "updated_by": actor_id,
+                "pinned": False, "pinned_at": None, "pinned_by": actor_id,
+            })
+            self.red_book_items[item_id] = restored
+            del self.red_book_archive[item_id]
+            return True
 
     def set_red_book_item_pinned(self, item_id, pinned, actor_id):
         with self._red_book_mutation_lock:
@@ -2546,6 +2596,78 @@ class FirebaseFirestoreStore:
         return _sort_red_book_items(
             [{"id": snapshot.id, **(snapshot.to_dict() or {})} for snapshot in snapshots]
         )
+
+    def list_archived_red_book_items(self):
+        snapshots = self._collection("red_book_archive").stream()
+        return _sort_red_book_items(
+            [{"id": snapshot.id, **(snapshot.to_dict() or {})} for snapshot in snapshots]
+        )
+
+    def archive_red_book_item(self, item_id, actor_id, actor_name=None):
+        items = self._collection("red_book_items")
+        archived_items = self._collection("red_book_archive")
+        reference = items.document(item_id)
+        archived_reference = archived_items.document(item_id)
+        firestore_transaction = self.db.transaction()
+
+        @firestore.transactional
+        def archive(transaction):
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
+            archived_snapshot = _transaction_get_document_snapshot(transaction, archived_reference)
+            if not snapshot.exists:
+                return False
+            if archived_snapshot.exists:
+                raise RedBookMutationError("This item is already archived.", 409)
+            item = snapshot.to_dict() or {}
+            now = iso_now()
+            item.update({
+                "archived_at": now, "archived_by": actor_id,
+                "archived_by_name": actor_name or actor_id,
+                "pinned": False, "pinned_at": None, "pinned_by": actor_id,
+            })
+            transaction.create(archived_reference, item)
+            transaction.delete(reference)
+            return True
+
+        return archive(firestore_transaction)
+
+    def restore_archived_red_book_item(self, item_id, actor_id):
+        items = self._collection("red_book_items")
+        archived_items = self._collection("red_book_archive")
+        reference = items.document(item_id)
+        archived_reference = archived_items.document(item_id)
+        firestore_transaction = self.db.transaction()
+
+        @firestore.transactional
+        def restore(transaction):
+            archived_snapshot = _transaction_get_document_snapshot(transaction, archived_reference)
+            active_snapshot = _transaction_get_document_snapshot(transaction, reference)
+            if not archived_snapshot.exists:
+                return False
+            if active_snapshot.exists:
+                raise RedBookMutationError("This item is already in the Red Book.", 409)
+            active_snapshots = _transaction_get_collection_snapshots(transaction, items)
+            if len(active_snapshots) >= RED_BOOK_MAX_ITEMS:
+                raise RedBookMutationError("The Red Book has reached its item limit.", 409)
+            next_order = max(
+                (order for order in (_red_book_sort_order(snapshot.to_dict() or {}) for snapshot in active_snapshots)
+                 if order is not None),
+                default=-1,
+            ) + 1
+            item = archived_snapshot.to_dict() or {}
+            item.pop("archived_at", None)
+            item.pop("archived_by", None)
+            item.pop("archived_by_name", None)
+            now = iso_now()
+            item.update({
+                "sort_order": next_order, "updated_at": now, "updated_by": actor_id,
+                "pinned": False, "pinned_at": None, "pinned_by": actor_id,
+            })
+            transaction.create(reference, item)
+            transaction.delete(archived_reference)
+            return True
+
+        return restore(firestore_transaction)
 
     def set_red_book_item_pinned(self, item_id, pinned, actor_id):
         reference = self._collection("red_book_items").document(item_id)
@@ -7973,6 +8095,30 @@ def red_book_page():
     return response
 
 
+@app.route("/red-book/archive")
+def red_book_archive_page():
+    user, denied = _red_book_api_authorize("red_book.read")
+    if denied:
+        return denied
+    csrf_token = session.get("red_book_csrf")
+    if not csrf_token:
+        csrf_token = secrets.token_urlsafe(32)
+        session["red_book_csrf"] = csrf_token
+    try:
+        can_restore = _user_has_compiled_permission(user, "red_book.delete")
+    except Exception as error:
+        app.logger.error("Red Book Archive permissions failed (%s).", type(error).__name__)
+        return _red_book_api_response({"error": "Unable to verify Archive permissions."}, 503)
+    response = app.make_response(render_template(
+        "red_book_archive.html",
+        current_user=user,
+        red_book_csrf=csrf_token,
+        can_restore=can_restore,
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @app.route("/firebase-messaging-sw.js")
 def firebase_messaging_service_worker():
     try:
@@ -8052,6 +8198,92 @@ def web_push_device_api():
             {"error": "Unable to update browser notification settings."}, 503
         )
     return _red_book_api_response({"registered": False})
+
+
+@app.route("/api/red-book/archive", methods=["GET"])
+def red_book_archive_api():
+    _user, denied = _red_book_api_authorize("red_book.read")
+    if denied:
+        return denied
+    try:
+        store = get_user_store()
+        items = store.list_archived_red_book_items()
+    except Exception as error:
+        app.logger.error("Archived Red Book items could not be loaded (%s).", type(error).__name__)
+        return _red_book_api_response(
+            {"error": "Archived Red Book items are temporarily unavailable."}, 503
+        )
+    display_names = {}
+    public_items = []
+    for item in items:
+        actor_id = item.get("archived_by")
+        display_name = item.get("archived_by_name")
+        if not display_name and actor_id:
+            if actor_id not in display_names:
+                try:
+                    actor = store.get_user(actor_id)
+                    display_names[actor_id] = (
+                        (actor or {}).get("full_name")
+                        or (actor or {}).get("username")
+                        or actor_id
+                    )
+                except Exception:
+                    display_names[actor_id] = actor_id
+            display_name = display_names[actor_id]
+        public_items.append(dict(
+            {
+                field: item.get(field)
+                for field in (
+                    "id", "text", "image_url", "sort_order", "created_at", "updated_at",
+                    "archived_at",
+                )
+            },
+            archived_by_name=display_name or "Unknown user",
+            image_urls=_red_book_image_urls(item),
+        ))
+    return _red_book_api_response({"items": public_items})
+
+
+@app.route("/api/red-book/items/<item_id>/archive", methods=["POST"])
+def red_book_item_archive_api(item_id):
+    user, denied = _red_book_api_authorize("red_book.delete", require_csrf=True)
+    if denied:
+        return denied
+    if not _valid_red_book_item_id(item_id):
+        return _red_book_api_response({"error": "Invalid Red Book item identifier."}, 400)
+    try:
+        archived = get_user_store().archive_red_book_item(
+            item_id,
+            user.get("id"),
+            user.get("full_name") or user.get("username") or user.get("id"),
+        )
+    except RedBookMutationError as error:
+        return _red_book_api_response({"error": str(error)}, error.status)
+    except Exception as error:
+        app.logger.error("Red Book archive failed (%s).", type(error).__name__)
+        return _red_book_api_response({"error": "Unable to archive the Red Book item."}, 503)
+    if not archived:
+        return _red_book_api_response({"error": "Red Book item not found."}, 404)
+    return _red_book_api_response({"archived": True})
+
+
+@app.route("/api/red-book/archive/<item_id>/restore", methods=["POST"])
+def red_book_archive_restore_api(item_id):
+    user, denied = _red_book_api_authorize("red_book.delete", require_csrf=True)
+    if denied:
+        return denied
+    if not _valid_red_book_item_id(item_id):
+        return _red_book_api_response({"error": "Invalid Red Book item identifier."}, 400)
+    try:
+        restored = get_user_store().restore_archived_red_book_item(item_id, user.get("id"))
+    except RedBookMutationError as error:
+        return _red_book_api_response({"error": str(error)}, error.status)
+    except Exception as error:
+        app.logger.error("Red Book archive restore failed (%s).", type(error).__name__)
+        return _red_book_api_response({"error": "Unable to restore the Red Book item."}, 503)
+    if not restored:
+        return _red_book_api_response({"error": "Archived Red Book item not found."}, 404)
+    return _red_book_api_response({"restored": True})
 
 
 @app.route("/api/red-book/items", methods=["GET", "POST"])

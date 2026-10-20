@@ -1525,6 +1525,14 @@ class InMemoryFirestoreStore:
         items[todo_id] = item
         return item
 
+    def update_user_todo(self, user_id, todo_id, text):
+        item = self.user_todos.get(user_id, {}).get(todo_id)
+        if item is None:
+            return None
+        item["text"] = text
+        item["updated_at"] = iso_now()
+        return {"id": todo_id, "text": text}
+
     def delete_user_todo(self, user_id, todo_id):
         return self.user_todos.get(user_id, {}).pop(todo_id, None) is not None
 
@@ -2003,7 +2011,9 @@ class FirebaseFirestoreStore:
         return self.db.collection(name)
 
     def list_user_todos(self, user_id):
-        snapshots = self._collection("user_todos").where("user_id", "==", user_id).stream()
+        snapshots = self._collection("user_todos").where(
+            filter=FieldFilter("user_id", "==", user_id)
+        ).stream()
         items = [{**(snapshot.to_dict() or {}), "id": snapshot.id} for snapshot in snapshots]
         return sorted(items, key=lambda item: (item.get("sort_order", 10**9), item.get("created_at", "")))
 
@@ -2015,6 +2025,14 @@ class FirebaseFirestoreStore:
         self._collection("user_todos").document(todo_id).set(item)
         return {"id": todo_id, "text": text, "created_at": now}
 
+    def update_user_todo(self, user_id, todo_id, text):
+        reference = self._collection("user_todos").document(todo_id)
+        snapshot = reference.get()
+        if not snapshot.exists or (snapshot.to_dict() or {}).get("user_id") != user_id:
+            return None
+        reference.update({"text": text, "updated_at": iso_now()})
+        return {"id": todo_id, "text": text}
+
     def delete_user_todo(self, user_id, todo_id):
         reference = self._collection("user_todos").document(todo_id)
         snapshot = reference.get()
@@ -2025,7 +2043,9 @@ class FirebaseFirestoreStore:
 
     def reorder_user_todos(self, user_id, todo_ids):
         collection = self._collection("user_todos")
-        snapshots = list(collection.where("user_id", "==", user_id).stream())
+        snapshots = list(collection.where(
+            filter=FieldFilter("user_id", "==", user_id)
+        ).stream())
         if len(todo_ids) != len(snapshots) or set(todo_ids) != {snapshot.id for snapshot in snapshots}:
             return False
         batch = self.db.batch()
@@ -4487,26 +4507,41 @@ def _prune_expired_presence_records(reference, now_ms, correlation_id=None):
     if not isinstance(records, dict):
         raise RuntimeError("Firebase Realtime Database returned an invalid presence record set.")
     for record_key in records:
-        if isinstance(record_key, str):
-            def delete_if_still_expired(current):
+        if not isinstance(record_key, str):
+            continue
+
+        def delete_if_still_expired():
+            lease_reference = reference.child(record_key)
+            for _attempt in range(5):
+                current, etag = lease_reference.get(etag=True)
                 expires_at = current.get("expires_at") if isinstance(current, dict) else None
                 if (
                     not isinstance(expires_at, (int, float))
                     or isinstance(expires_at, bool)
-                    or expires_at <= now_ms
+                    or expires_at > now_ms
+                    or not isinstance(etag, str)
+                    or not etag
                 ):
-                    return None
-                return current
+                    return False
+                try:
+                    # The Admin SDK transaction API rejects None, so use RTDB's
+                    # ETag conditional DELETE to avoid removing a renewed lease.
+                    lease_reference._client.request(
+                        "delete",
+                        lease_reference._add_suffix(),
+                        headers={"if-match": etag},
+                    )
+                    return True
+                except firebase_admin.exceptions.FailedPreconditionError:
+                    # A concurrent heartbeat changed this lease after the ETag read.
+                    continue
+            return False
 
-            delete = lambda: reference.child(record_key).transaction(
-                delete_if_still_expired
-            )
-            if correlation_id:
-                _presence_run_stage(
-                    correlation_id, "expired_lease_delete", delete
-                )
-            else:
-                delete()
+        delete = delete_if_still_expired
+        if correlation_id:
+            _presence_run_stage(correlation_id, "expired_lease_delete", delete)
+        else:
+            delete()
     return True
 
 
@@ -5607,7 +5642,7 @@ def reorder_profile_todos():
         return jsonify({"error": "Unable to save your task order."}), 503
 
 
-@app.route("/api/profile/todos/<todo_id>", methods=["DELETE"])
+@app.route("/api/profile/todos/<todo_id>", methods=["DELETE", "PATCH"])
 @require_login
 def delete_profile_todo(todo_id):
     user = get_current_user()
@@ -5621,7 +5656,19 @@ def delete_profile_todo(todo_id):
     if not expected or not isinstance(supplied, str) or not hmac.compare_digest(expected, supplied):
         return jsonify({"error": "Request validation failed."}), 400
     try:
-        if not get_user_store().delete_user_todo(user["id"], todo_id):
+        store = get_user_store()
+        if request.method == "PATCH":
+            text = payload.get("text", "")
+            if not isinstance(text, str) or not text.strip():
+                return jsonify({"error": "Enter a to-do item."}), 400
+            text = text.strip()
+            if len(text) > 240:
+                return jsonify({"error": "To-do items must be 240 characters or fewer."}), 400
+            item = store.update_user_todo(user["id"], todo_id, text)
+            if not item:
+                return jsonify({"error": "To-do item not found."}), 404
+            return jsonify({"item": item})
+        if not store.delete_user_todo(user["id"], todo_id):
             return jsonify({"error": "To-do item not found."}), 404
         return jsonify({"ok": True})
     except Exception:

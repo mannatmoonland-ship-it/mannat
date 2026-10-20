@@ -42,8 +42,11 @@ if (root) {
         list.replaceChildren();
         if (!items.length) {
             const empty = document.createElement("li");
+            const emptyText = document.createElement("span");
             empty.className = "todo-empty";
-            empty.textContent = "No tasks yet. Add your first task above.";
+            emptyText.className = "todo-empty-text";
+            emptyText.textContent = "No tasks yet. Add your first task above.";
+            empty.append(emptyText);
             list.append(empty);
             return;
         }
@@ -53,6 +56,7 @@ if (root) {
             const actions = document.createElement("div");
             const up = document.createElement("button");
             const down = document.createElement("button");
+            const edit = document.createElement("button");
             const remove = document.createElement("button");
             row.dataset.todoId = item.id;
             row.draggable = true;
@@ -60,19 +64,25 @@ if (root) {
             text.className = "todo-item-text";
             text.textContent = item.text;
             actions.className = "todo-item-actions";
-            up.type = down.type = remove.type = "button";
+            up.type = down.type = edit.type = remove.type = "button";
             up.className = "todo-move-button todo-move-up";
             down.className = "todo-move-button todo-move-down";
             up.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.59 5.58L20 12l-8-8-8 8z"/></svg>';
             down.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.59-5.58L4 12l8 8 8-8z"/></svg>';
+            edit.className = "todo-icon-button todo-edit-button";
+            edit.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm17.71-10.04a1 1 0 0 0 0-1.41l-2.5-2.5a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.99-1.67z"/></svg>';
+            edit.title = "Edit task";
+            edit.setAttribute("aria-label", `Edit ${item.text}`);
+            edit.addEventListener("click", () => startEdit());
             up.title = "Move up";
             down.title = "Move down";
             up.setAttribute("aria-label", `Move ${item.text} up`);
             down.setAttribute("aria-label", `Move ${item.text} down`);
             up.addEventListener("click", () => moveItem(row, -1));
             down.addEventListener("click", () => moveItem(row, 1));
-            remove.className = "todo-delete-button";
-            remove.textContent = "Delete";
+            remove.className = "todo-icon-button todo-delete-button";
+            remove.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+            remove.title = "Delete task";
             remove.setAttribute("aria-label", `Delete ${item.text}`);
             remove.addEventListener("click", async () => {
                 if (busy) return;
@@ -89,7 +99,57 @@ if (root) {
                 } catch (error) { message(error.message); remove.disabled = false; }
                 finally { busy = false; }
             });
-            actions.append(up, down, remove);
+            const startEdit = () => {
+                if (busy || row.classList.contains("todo-editing")) return;
+                row.classList.add("todo-editing");
+                row.draggable = false;
+                const input = document.createElement("input");
+                const save = document.createElement("button");
+                const cancel = document.createElement("button");
+                input.className = "todo-edit-input";
+                input.type = "text";
+                input.maxLength = 240;
+                input.value = item.text;
+                input.setAttribute("aria-label", `Edit task: ${item.text}`);
+                save.type = cancel.type = "button";
+                save.className = "todo-icon-button todo-save-button";
+                save.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
+                save.title = "Save task";
+                save.setAttribute("aria-label", "Save task");
+                cancel.className = "todo-icon-button todo-cancel-button";
+                cancel.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>';
+                cancel.title = "Cancel editing";
+                cancel.setAttribute("aria-label", "Cancel editing");
+                text.replaceWith(input);
+                [up, down, edit, remove].forEach(button => { button.hidden = true; });
+                actions.append(save, cancel);
+                const cancelEdit = () => { loadItems().catch(error => message(error.message)); };
+                cancel.addEventListener("click", cancelEdit, {once: true});
+                input.addEventListener("keydown", event => {
+                    if (event.key === "Enter") { event.preventDefault(); save.click(); }
+                    if (event.key === "Escape") cancel.click();
+                });
+                save.addEventListener("click", async () => {
+                    const updatedText = input.value.trim();
+                    if (!updatedText) { message("Task cannot be empty."); input.focus(); return; }
+                    if (busy) return;
+                    busy = true;
+                    save.disabled = cancel.disabled = true;
+                    try {
+                        const response = await fetch(`/api/profile/todos/${encodeURIComponent(item.id)}`, {
+                            method: "PATCH", headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({text: updatedText, csrf_token: root.dataset.csrfToken})
+                        });
+                        await readApiResponse(response);
+                        await loadItems();
+                        message("Task updated.");
+                    } catch (error) { message(error.message); save.disabled = cancel.disabled = false; }
+                    finally { busy = false; }
+                });
+                input.focus();
+                input.select();
+            };
+            actions.append(up, down, edit, remove);
             row.append(text, actions);
             list.append(row);
         });

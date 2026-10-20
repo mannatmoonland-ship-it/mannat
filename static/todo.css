@@ -26,4 +26,32 @@
 .todo-item-actions .todo-move-button svg { display: block; width: 22px; height: 22px; fill: currentColor; }
 .todo-list li .todo-delete-button { min-width: 44px; border-color: rgba(255, 135, 135, .28); color: #ffb2b2; background: rgba(181, 59, 59, .12); }
 .todo-list li.todo-empty { justify-content: center; color: #91a99b; }
-@media (max-width: 600px) { .todo-main { padding-top: 26px; } .todo-card { padding: 17px; } .todo-add-form { flex-direction: column; } .todo-add-form button { min-height: 42px; } .todo-list li { align-items: flex-start; gap: 10px; padding: 12px 10px; } .todo-item-actions { gap: 5px; } .todo-item-actions button { min-height: 44px; } .todo-item-actions .todo-move-button { width: 44px; min-width: 44px; } }
+@media (max-width: 600px) {
+    .todo-main { padding: 26px 14px 48px; }
+    .todo-card { padding: 17px; }
+    .todo-add-form { flex-direction: column; }
+    .todo-add-form button { min-height: 42px; }
+    .todo-list li {
+        display: grid;
+        grid-template-columns: 30px minmax(0, 1fr);
+        align-items: start;
+        gap: 10px;
+        padding: 12px 10px;
+    }
+    .todo-list li:not(.todo-empty)::before { grid-column: 1; grid-row: 1; }
+    .todo-list li .todo-item-text {
+        grid-column: 2;
+        grid-row: 1;
+        min-width: 0;
+        overflow-wrap: anywhere;
+        word-break: normal;
+    }
+    .todo-item-actions {
+        grid-column: 2;
+        grid-row: 2;
+        justify-content: flex-start;
+        gap: 6px;
+    }
+    .todo-item-actions button { min-height: 44px; }
+    .todo-item-actions .todo-move-button { width: 44px; min-width: 44px; }
+}

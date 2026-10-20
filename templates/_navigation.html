@@ -29,6 +29,7 @@
         <symbol id="mm-icon-profile" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
         <symbol id="mm-icon-password" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 1 1 8 0v3m-4 4v3"/></symbol>
         <symbol id="mm-icon-guide" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM8 8h8m-8 4h8m-8 4h5"/></symbol>
+        <symbol id="mm-icon-todo" viewBox="0 0 24 24"><path d="M9 5h11M9 12h11M9 19h11"/><path d="m3 5 1.5 1.5L7 4m-4 8 1.5 1.5L7 11m-4 8 1.5 1.5L7 18"/></symbol>
         <symbol id="mm-icon-developer" viewBox="0 0 24 24"><path d="m8 8-5 4 5 4m8-8 5 4-5 4m-3-9-2 10"/></symbol>
         <symbol id="mm-icon-logout" viewBox="0 0 24 24"><path d="M10 17l5-5-5-5m5 5H3m9-9h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7"/></symbol>
     </svg>
@@ -149,6 +150,9 @@
             <a class="mm-nav-menu-link" href="{{ url_for('profile_settings') }}"
                {% if nav_endpoint == 'profile_settings' %}aria-current="page"{% endif %}>
                 <svg class="mm-menu-icon"><use href="#mm-icon-profile"></use></svg><span>Profile settings</span>
+            </a>
+            <a class="mm-nav-menu-link" href="{{ url_for('todo_page') }}" {% if nav_endpoint == 'todo_page' %}aria-current="page"{% endif %}>
+                <svg class="mm-menu-icon"><use href="#mm-icon-todo"></use></svg><span>To-do</span>
             </a>
             <a class="mm-nav-menu-link" href="{{ url_for('change_password') }}"
                {% if nav_endpoint == 'change_password' %}aria-current="page"{% endif %}>

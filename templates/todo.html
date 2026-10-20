@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mannat Moon - To-do List</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='todo.css') }}">
+</head>
+<body class="dashboard-page todo-page">
+{% include "_page_loader.html" %}
+    <header class="dashboard-header mm-app-header">
+        {% include "_navigation.html" %}
+    </header>
+    <main class="container todo-main" data-todo-page data-csrf-token="{{ authenticated_form_csrf_token() }}">
+        <section class="todo-heading">
+            <p class="dashboard-eyebrow"><span></span> YOUR ACCOUNT</p>
+            <h1>To-do list</h1>
+            <p>Keep track of tasks you want to get done.</p>
+        </section>
+        <section class="todo-card" aria-labelledby="todo-list-title">
+            <h2 id="todo-list-title">My tasks</h2>
+            <p class="todo-reorder-hint">Drag tasks to change their order, or use Move up and Move down.</p>
+            <form class="todo-add-form" data-todo-form>
+                <label class="sr-only" for="todo-input">New task</label>
+                <input id="todo-input" name="text" type="text" maxlength="240" placeholder="What do you need to do?" autocomplete="off" required>
+                <button type="submit">Add task</button>
+            </form>
+            <p class="todo-status" data-todo-status role="status" aria-live="polite"></p>
+            <ol class="todo-list" data-todo-list aria-label="Your tasks"></ol>
+        </section>
+    </main>
+    <footer>Mannat Moon Construction</footer>
+    <script type="module" src="{{ url_for('static', filename='todo.js') }}"></script>
+</body>
+</html>

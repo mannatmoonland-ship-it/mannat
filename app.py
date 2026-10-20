@@ -1067,6 +1067,7 @@ class InMemoryFirestoreStore:
         self.drawings = {}
         self.red_book_items = {}
         self.fcm_device_tokens = {}
+        self.user_todos = {}
         self.custom_staff_types = {}
         self.non_admin_permissions = set(DEFAULT_NON_ADMIN_PERMISSIONS)
         self.audit_log = []
@@ -1509,6 +1510,31 @@ class InMemoryFirestoreStore:
 
     def list_users(self):
         return [self._normalize_user(user) for user in self.users.values()]
+
+    def list_user_todos(self, user_id):
+        return sorted(
+            self.user_todos.get(user_id, {}).values(),
+            key=lambda item: (item.get("sort_order", 10**9), item.get("created_at", "")),
+        )
+
+    def add_user_todo(self, user_id, todo_id, text):
+        now = iso_now()
+        items = self.user_todos.setdefault(user_id, {})
+        next_order = max((item.get("sort_order", -1) for item in items.values()), default=-1) + 1
+        item = {"id": todo_id, "text": text, "created_at": now, "sort_order": next_order}
+        items[todo_id] = item
+        return item
+
+    def delete_user_todo(self, user_id, todo_id):
+        return self.user_todos.get(user_id, {}).pop(todo_id, None) is not None
+
+    def reorder_user_todos(self, user_id, todo_ids):
+        items = self.user_todos.get(user_id, {})
+        if len(todo_ids) != len(items) or set(todo_ids) != set(items):
+            return False
+        for order, todo_id in enumerate(todo_ids):
+            items[todo_id]["sort_order"] = order
+        return True
 
     def claim_presence_request(
         self, user_key, session_key, request_type, now_ms, minimum_interval_ms
@@ -1975,6 +2001,38 @@ class FirebaseFirestoreStore:
 
     def _collection(self, name):
         return self.db.collection(name)
+
+    def list_user_todos(self, user_id):
+        snapshots = self._collection("user_todos").where("user_id", "==", user_id).stream()
+        items = [{**(snapshot.to_dict() or {}), "id": snapshot.id} for snapshot in snapshots]
+        return sorted(items, key=lambda item: (item.get("sort_order", 10**9), item.get("created_at", "")))
+
+    def add_user_todo(self, user_id, todo_id, text):
+        now = iso_now()
+        current = self.list_user_todos(user_id)
+        next_order = max((item.get("sort_order", -1) for item in current), default=-1) + 1
+        item = {"user_id": user_id, "text": text, "created_at": now, "sort_order": next_order}
+        self._collection("user_todos").document(todo_id).set(item)
+        return {"id": todo_id, "text": text, "created_at": now}
+
+    def delete_user_todo(self, user_id, todo_id):
+        reference = self._collection("user_todos").document(todo_id)
+        snapshot = reference.get()
+        if not snapshot.exists or (snapshot.to_dict() or {}).get("user_id") != user_id:
+            return False
+        reference.delete()
+        return True
+
+    def reorder_user_todos(self, user_id, todo_ids):
+        collection = self._collection("user_todos")
+        snapshots = list(collection.where("user_id", "==", user_id).stream())
+        if len(todo_ids) != len(snapshots) or set(todo_ids) != {snapshot.id for snapshot in snapshots}:
+            return False
+        batch = self.db.batch()
+        for order, todo_id in enumerate(todo_ids):
+            batch.update(collection.document(todo_id), {"sort_order": order})
+        batch.commit()
+        return True
 
     def claim_presence_request(
         self, user_key, session_key, request_type, now_ms, minimum_interval_ms
@@ -5437,6 +5495,17 @@ def dashboard():
     return response
 
 
+@app.route("/todo")
+@require_login
+def todo_page():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login_page"))
+    response = app.make_response(render_template("todo.html", current_user=user))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @app.route("/profile-settings")
 @require_login
 def profile_settings():
@@ -5477,6 +5546,87 @@ def profile_settings():
         else DEFAULT_PROFILE_AVATAR_ID,
     }
     return render_template("profile_settings.html", profile=safe_profile, csrf_token=csrf_token, current_user=get_current_user())
+
+
+@app.route("/api/profile/todos", methods=["GET", "POST"])
+@require_login
+def profile_todos():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Sign in to manage your to-do list."}), 401
+    if request.method == "GET":
+        try:
+            return jsonify({"items": get_user_store().list_user_todos(user["id"])})
+        except Exception as error:
+            app.logger.exception("Unable to load profile to-do items")
+            return jsonify({"error": "Unable to load your to-do list."}), 503
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
+    expected = get_authenticated_form_csrf_token()
+    supplied = payload.get("csrf_token", "")
+    if not expected or not isinstance(supplied, str) or not hmac.compare_digest(expected, supplied):
+        return jsonify({"error": "Request validation failed."}), 400
+    text = payload.get("text", "")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify({"error": "Enter a to-do item."}), 400
+    text = text.strip()
+    if len(text) > 240:
+        return jsonify({"error": "To-do items must be 240 characters or fewer."}), 400
+    try:
+        item = get_user_store().add_user_todo(user["id"], secrets.token_urlsafe(12), text)
+        return jsonify({"item": item}), 201
+    except Exception:
+        app.logger.exception("Unable to save profile to-do item")
+        return jsonify({"error": "Unable to save your to-do item."}), 503
+
+
+@app.route("/api/profile/todos/reorder", methods=["POST"])
+@require_login
+def reorder_profile_todos():
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Sign in to manage your to-do list."}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
+    expected = get_authenticated_form_csrf_token()
+    supplied = payload.get("csrf_token", "")
+    todo_ids = payload.get("items")
+    if not expected or not isinstance(supplied, str) or not hmac.compare_digest(expected, supplied):
+        return jsonify({"error": "Request validation failed."}), 400
+    if not isinstance(todo_ids, list) or any(not isinstance(item, str) for item in todo_ids) or len(todo_ids) != len(set(todo_ids)):
+        return jsonify({"error": "Invalid to-do order."}), 400
+    try:
+        if not get_user_store().reorder_user_todos(user["id"], todo_ids):
+            return jsonify({"error": "Your to-do list changed. Reload and try again."}), 409
+        return jsonify({"ok": True})
+    except Exception:
+        app.logger.exception("Unable to reorder profile to-do items")
+        return jsonify({"error": "Unable to save your task order."}), 503
+
+
+@app.route("/api/profile/todos/<todo_id>", methods=["DELETE"])
+@require_login
+def delete_profile_todo(todo_id):
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Sign in to manage your to-do list."}), 401
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
+    expected = get_authenticated_form_csrf_token()
+    supplied = payload.get("csrf_token", "")
+    if not expected or not isinstance(supplied, str) or not hmac.compare_digest(expected, supplied):
+        return jsonify({"error": "Request validation failed."}), 400
+    try:
+        if not get_user_store().delete_user_todo(user["id"], todo_id):
+            return jsonify({"error": "To-do item not found."}), 404
+        return jsonify({"ok": True})
+    except Exception:
+        app.logger.exception("Unable to delete profile to-do item")
+        return jsonify({"error": "Unable to delete your to-do item."}), 503
 
 
 @app.route("/api/profile", methods=["PATCH"])

@@ -4495,54 +4495,66 @@ def _claim_expired_presence_cleanup(now_ms):
         return True
 
 
+def _release_failed_presence_cleanup(now_ms):
+    global _last_presence_cleanup_ms
+    with _presence_cleanup_lock:
+        if _last_presence_cleanup_ms == now_ms:
+            _last_presence_cleanup_ms = 0
+
+
 def _prune_expired_presence_records(reference, now_ms, correlation_id=None):
     if not _claim_expired_presence_cleanup(now_ms):
         return False
-    query = lambda: reference.order_by_child("expires_at").end_at(now_ms).get() or {}
-    records = (
-        _presence_run_stage(correlation_id, "expired_lease_query", query)
-        if correlation_id
-        else query()
-    )
-    if not isinstance(records, dict):
-        raise RuntimeError("Firebase Realtime Database returned an invalid presence record set.")
-    for record_key in records:
-        if not isinstance(record_key, str):
-            continue
+    try:
+        query = lambda: reference.order_by_child("expires_at").end_at(now_ms).get() or {}
+        records = (
+            _presence_run_stage(correlation_id, "expired_lease_query", query)
+            if correlation_id
+            else query()
+        )
+        if not isinstance(records, dict):
+            raise RuntimeError("Firebase Realtime Database returned an invalid presence record set.")
+        for record_key in records:
+            if not isinstance(record_key, str):
+                continue
 
-        def delete_if_still_expired():
-            lease_reference = reference.child(record_key)
-            for _attempt in range(5):
-                current, etag = lease_reference.get(etag=True)
-                expires_at = current.get("expires_at") if isinstance(current, dict) else None
-                if (
-                    not isinstance(expires_at, (int, float))
-                    or isinstance(expires_at, bool)
-                    or expires_at > now_ms
-                    or not isinstance(etag, str)
-                    or not etag
-                ):
-                    return False
-                try:
-                    # The Admin SDK transaction API rejects None, so use RTDB's
-                    # ETag conditional DELETE to avoid removing a renewed lease.
-                    lease_reference._client.request(
-                        "delete",
-                        lease_reference._add_suffix(),
-                        headers={"if-match": etag},
-                    )
-                    return True
-                except firebase_admin.exceptions.FailedPreconditionError:
-                    # A concurrent heartbeat changed this lease after the ETag read.
-                    continue
-            return False
+            def delete_if_still_expired():
+                lease_reference = reference.child(record_key)
+                for _attempt in range(5):
+                    current, etag = lease_reference.get(etag=True)
+                    expires_at = current.get("expires_at") if isinstance(current, dict) else None
+                    if (
+                        not isinstance(expires_at, (int, float))
+                        or isinstance(expires_at, bool)
+                        or expires_at > now_ms
+                        or not isinstance(etag, str)
+                        or not etag
+                    ):
+                        return False
+                    try:
+                        # Firebase Admin transactions reject None as a write value.
+                        # Conditional DELETE ensures a concurrent renewal is preserved.
+                        lease_reference._client.request(
+                            "delete",
+                            lease_reference._add_suffix(),
+                            headers={"if-match": etag},
+                        )
+                        return True
+                    except firebase_admin.exceptions.FailedPreconditionError:
+                        # A concurrent heartbeat changed this lease after the ETag read.
+                        continue
+                return False
 
-        delete = delete_if_still_expired
-        if correlation_id:
-            _presence_run_stage(correlation_id, "expired_lease_delete", delete)
-        else:
-            delete()
-    return True
+            delete = delete_if_still_expired
+            if correlation_id:
+                _presence_run_stage(correlation_id, "expired_lease_delete", delete)
+            else:
+                delete()
+        return True
+    except Exception:
+        # A failed attempt must not suppress the next cleanup attempt for five minutes.
+        _release_failed_presence_cleanup(now_ms)
+        raise
 
 
 def _presence_error_response(error, correlation_id=None):

@@ -1,4 +1,5 @@
 import copy
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,28 @@ DATABASE_URL = (
     "https://mannat-moon-construction-default-rtdb."
     "asia-southeast1.firebasedatabase.app"
 )
+
+
+class FakePresenceClient:
+    def __init__(self, reference):
+        self.reference = reference
+
+    def request(self, method, _url, headers=None):
+        metrics = self.reference.metrics
+        error = metrics.pop("conditional_delete_error", None)
+        if error is not None:
+            raise error
+        hook = metrics.pop("conditional_delete_hook", None)
+        if hook:
+            hook(self.reference.key, self.reference.records)
+        current = self.reference.records.get(self.reference.key)
+        current_etag = json.dumps(current, sort_keys=True, separators=(",", ":"))
+        if not current_etag or (headers or {}).get("if-match") != f'"{current_etag}"':
+            raise app_module.firebase_admin.exceptions.FailedPreconditionError(
+                "The lease changed before conditional deletion."
+            )
+        self.reference.records.pop(self.reference.key, None)
+        metrics["conditional_deletes"] = metrics.get("conditional_deletes", 0) + 1
 
 
 class FakePresenceReference:
@@ -30,6 +53,7 @@ class FakePresenceReference:
         self.query_start = query_start
         self.query_end = query_end
         self.metrics = metrics if metrics is not None else {}
+        self._client = FakePresenceClient(self)
 
     def child(self, key):
         return FakePresenceReference(
@@ -63,13 +87,23 @@ class FakePresenceReference:
             metrics=self.metrics,
         )
 
-    def get(self):
+    def get(self, etag=False):
         if self.key is not None:
-            return copy.deepcopy(self.records.get(self.key))
+            value = copy.deepcopy(self.records.get(self.key))
+            if not etag:
+                return value
+            tag = json.dumps(value, sort_keys=True, separators=(",", ":"))
+            hook = self.metrics.pop("etag_read_hook", None)
+            if hook:
+                hook(self.key, self.records)
+            return value, f'"{tag}"'
         if self.query_child is None:
             self.metrics["root_gets"] = self.metrics.get("root_gets", 0) + 1
             return copy.deepcopy(self.records)
         self.metrics["indexed_queries"] = self.metrics.get("indexed_queries", 0) + 1
+        query_error = self.metrics.pop("query_error", None)
+        if query_error is not None:
+            raise query_error
         self.metrics["last_query"] = (
             self.query_child,
             self.query_start,
@@ -99,15 +133,17 @@ class FakePresenceReference:
     def delete(self):
         self.records.pop(self.key, None)
 
+    def _add_suffix(self):
+        return f"/presence/sessions/{self.key}.json"
+
     def transaction(self, update):
         hook = self.metrics.pop("transaction_hook", None)
         if hook:
             hook(self.key, self.records)
         updated = update(copy.deepcopy(self.records.get(self.key)))
         if updated is None:
-            self.records.pop(self.key, None)
-        else:
-            self.records[self.key] = copy.deepcopy(updated)
+            raise ValueError("Value must not be none.")
+        self.records[self.key] = copy.deepcopy(updated)
         return copy.deepcopy(updated)
 
 
@@ -619,12 +655,85 @@ def test_expiry_cleanup_preserves_a_lease_renewed_after_the_expiry_query(
         "expires_at": now_ms + 90_000,
     }
 
-    reference.metrics["transaction_hook"] = (
+    reference.metrics["etag_read_hook"] = (
         lambda key, current_records: current_records.update({key: renewed})
     )
     app_module._prune_expired_presence_records(reference, now_ms)
 
     assert records[record_key] == renewed
+
+
+
+def test_cleanup_removes_expired_records_even_when_identity_fields_are_missing(
+    presence_environment,
+):
+    _store, records, _reference = presence_environment
+    now_ms = 2_000_000
+    records.update({
+        "expired-missing-identity": {"expires_at": now_ms - 1},
+        "missing-expiry": {"user_id": "staff-user", "last_seen_at": now_ms - 100_000},
+        "active-missing-identity": {"expires_at": now_ms + 90_000},
+    })
+
+    assert app_module._prune_expired_presence_records(_reference, now_ms) is True
+
+    assert "expired-missing-identity" not in records
+    assert "missing-expiry" in records
+    assert records["active-missing-identity"]["expires_at"] == now_ms + 90_000
+
+
+def test_cleanup_uses_conditional_delete_and_preserves_active_record(
+    presence_environment,
+):
+    _store, records, reference = presence_environment
+    now_ms = 3_000_000
+    records.update({
+        "expired": {"user_id": "old-user", "expires_at": now_ms - 1},
+        "active": {"user_id": "staff-user", "expires_at": now_ms + 1},
+    })
+
+    app_module._prune_expired_presence_records(reference, now_ms)
+
+    assert "expired" not in records
+    assert records["active"]["expires_at"] == now_ms + 1
+    assert reference.metrics["conditional_deletes"] == 1
+
+
+def test_cleanup_failure_does_not_fail_heartbeat_or_roster_and_can_retry(
+    presence_environment, monkeypatch
+):
+    _store, records, reference = presence_environment
+    client = _client_for_session()
+    csrf_token = _csrf_token(client)
+    now = [app_module.time.time()]
+    now_ms = int(now[0] * 1000)
+    monkeypatch.setattr(app_module.time, "time", lambda: now[0])
+    records["expired"] = {"expires_at": now_ms - 1}
+    reference.metrics["conditional_delete_error"] = RuntimeError("temporary delete failure")
+
+    heartbeat = _heartbeat(client, csrf_token)
+    assert heartbeat.status_code == 200
+    assert "expired" in records
+    assert app_module._last_presence_cleanup_ms == 0
+
+    roster = client.get("/api/presence/roster")
+    assert roster.status_code == 200
+    assert roster.get_json() == {"staff": [{"display_name": "Trusted Staff Name", "status": "online"}]}
+
+    now[0] += 26
+    retry = _heartbeat(client, csrf_token)
+    assert retry.status_code == 200
+    assert "expired" not in records
+
+
+def test_cleanup_query_failure_releases_throttle_claim(presence_environment):
+    _store, _records, reference = presence_environment
+    reference.metrics["query_error"] = RuntimeError("temporary query failure")
+
+    with pytest.raises(RuntimeError, match="temporary query failure"):
+        app_module._prune_expired_presence_records(reference, 4_000_000)
+
+    assert app_module._last_presence_cleanup_ms == 0
 
 
 def test_roster_queries_only_live_leases_and_returns_minimal_deduplicated_data(

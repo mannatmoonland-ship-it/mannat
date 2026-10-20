@@ -34,6 +34,7 @@ from dotenv import load_dotenv
 from flask import (
     Flask,
     Response,
+    after_this_request,
     flash,
     g,
     has_request_context,
@@ -85,13 +86,20 @@ IS_PRODUCTION_ENVIRONMENT = (
 _FIREBASE_ADMIN_IMPORT_ERROR = None
 try:
     import firebase_admin
-    from firebase_admin import auth as firebase_auth, credentials, firestore, messaging as firebase_messaging
+    from firebase_admin import (
+        auth as firebase_auth,
+        credentials,
+        db as firebase_database,
+        firestore,
+        messaging as firebase_messaging,
+    )
     from google.cloud.firestore_v1 import FieldFilter
 except ImportError as error:  # pragma: no cover - optional for local/dev fallback
     _FIREBASE_ADMIN_IMPORT_ERROR = error
     firebase_admin = None
     firebase_auth = None
     credentials = None
+    firebase_database = None
     firestore = None
     firebase_messaging = None
     FieldFilter = None
@@ -1050,6 +1058,8 @@ def _verify_sms_otp(purpose, user_id, phone, code, token_hash=None):
 class InMemoryFirestoreStore:
     def __init__(self):
         self.users = {}
+        self.presence_rate_limits = {}
+        self._presence_rate_limit_lock = threading.Lock()
         self.sms_otp_challenges = {}
         self._sms_otp_challenge_lock = threading.Lock()
         self.trades = {}
@@ -1500,6 +1510,37 @@ class InMemoryFirestoreStore:
     def list_users(self):
         return [self._normalize_user(user) for user in self.users.values()]
 
+    def claim_presence_request(
+        self, user_key, session_key, request_type, now_ms, minimum_interval_ms
+    ):
+        if IS_PRODUCTION_ENVIRONMENT:
+            raise RuntimeError(
+                "Online presence requires the shared Firestore rate-limit store in production."
+            )
+        with self._presence_rate_limit_lock:
+            current = self.presence_rate_limits.get(user_key)
+            updated, allowed, changed, retry_after_seconds = _updated_presence_rate_limits(
+                current, session_key, request_type, now_ms, minimum_interval_ms
+            )
+            if changed:
+                self.presence_rate_limits[user_key] = updated
+            return allowed, retry_after_seconds
+
+    def release_presence_request(
+        self, user_key, session_key, request_type, expected_timestamp_ms
+    ):
+        with self._presence_rate_limit_lock:
+            current = self.presence_rate_limits.get(user_key)
+            updated, changed = _released_presence_rate_limit(
+                current, session_key, request_type, expected_timestamp_ms
+            )
+            if changed:
+                if updated is None:
+                    self.presence_rate_limits.pop(user_key, None)
+                else:
+                    self.presence_rate_limits[user_key] = updated
+            return changed
+
     def list_trades(self):
         return [
             {**dict(trade), "id": trade_id}
@@ -1846,6 +1887,15 @@ class FirebaseFirestoreStore:
     def _initialize_client(self, app_name=None):
         if firebase_admin is None:
             raise RuntimeError("firebase-admin is not installed")
+        try:
+            database_url = _get_firebase_database_url(self.project_id, required=False)
+        except RuntimeError as error:
+            app.logger.error(
+                "FIREBASE_DATABASE_URL is invalid for the selected project; Realtime Database "
+                "presence will remain unavailable (%s).",
+                type(error).__name__,
+            )
+            database_url = None
         service_account_path = self.service_account_path
         if service_account_path and not os.path.isabs(service_account_path):
             service_account_path = os.path.abspath(os.path.join(os.path.dirname(__file__), service_account_path))
@@ -1876,19 +1926,25 @@ class FirebaseFirestoreStore:
             )
 
         if firebase_app is default_app_not_initialized:
+            app_options = {"projectId": self.project_id}
+            if database_url:
+                app_options["databaseURL"] = database_url
             firebase_app = _run_login_diagnostic_step(
                 "Initialize default Firebase Admin app",
                 lambda: firebase_admin.initialize_app(
                     cred,
-                    {"projectId": self.project_id},
+                    app_options,
                 ),
             )
         elif firebase_app is None:
+            app_options = {"projectId": self.project_id}
+            if database_url:
+                app_options["databaseURL"] = database_url
             firebase_app = _run_login_diagnostic_step(
                 "Initialize named Firebase Admin app",
                 lambda: firebase_admin.initialize_app(
                     cred,
-                    {"projectId": self.project_id},
+                    app_options,
                     name=app_name or f"mannat-{self.project_id}-{uuid.uuid4().hex[:10]}",
                 ),
             )
@@ -1919,6 +1975,47 @@ class FirebaseFirestoreStore:
 
     def _collection(self, name):
         return self.db.collection(name)
+
+    def claim_presence_request(
+        self, user_key, session_key, request_type, now_ms, minimum_interval_ms
+    ):
+        reference = self._collection("presence_rate_limits").document(user_key)
+        transaction = self.db.transaction()
+
+        @firestore.transactional
+        def claim(transaction):
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
+            current = snapshot.to_dict() if snapshot.exists else None
+            updated, allowed, changed, retry_after_seconds = _updated_presence_rate_limits(
+                current, session_key, request_type, now_ms, minimum_interval_ms
+            )
+            if changed:
+                transaction.set(reference, updated)
+            return allowed, retry_after_seconds
+
+        return claim(transaction)
+
+    def release_presence_request(
+        self, user_key, session_key, request_type, expected_timestamp_ms
+    ):
+        reference = self._collection("presence_rate_limits").document(user_key)
+        transaction = self.db.transaction()
+
+        @firestore.transactional
+        def release(transaction):
+            snapshot = _transaction_get_document_snapshot(transaction, reference)
+            current = snapshot.to_dict() if snapshot.exists else None
+            updated, changed = _released_presence_rate_limit(
+                current, session_key, request_type, expected_timestamp_ms
+            )
+            if changed:
+                if updated is None:
+                    transaction.delete(reference)
+                else:
+                    transaction.set(reference, updated)
+            return changed
+
+        return release(transaction)
 
     def list_trades(self):
         return [
@@ -3995,7 +4092,12 @@ def _get_or_create_memory_store():
 def get_current_user():
     user_id = session.get("user_id")
     current_session_id = session.get("session_id")
-    if not isinstance(user_id, str) or not user_id or not isinstance(current_session_id, str) or not current_session_id:
+    if (
+        not isinstance(user_id, str)
+        or not user_id
+        or not isinstance(current_session_id, str)
+        or not current_session_id
+    ):
         session.clear()
         return None
     try:
@@ -4058,6 +4160,611 @@ def _firebase_custom_token_origin_is_valid():
         return False
     fetch_site = request.headers.get("Sec-Fetch-Site")
     return not fetch_site or fetch_site.lower() == "same-origin"
+
+
+PRESENCE_LEASE_SECONDS = 90
+PRESENCE_HEARTBEAT_MIN_INTERVAL_SECONDS = 25
+PRESENCE_ROSTER_MIN_INTERVAL_SECONDS = 2
+PRESENCE_EXPIRED_CLEANUP_MIN_INTERVAL_SECONDS = 5 * 60
+PRESENCE_RATE_LIMIT_STATE_TTL_MS = 24 * 60 * 60 * 1000
+_presence_cleanup_lock = threading.Lock()
+_last_presence_cleanup_ms = 0
+
+
+def _updated_presence_rate_limits(
+    current, session_key, request_type, now_ms, minimum_interval_ms
+):
+    sessions = {}
+    changed = not isinstance(current, dict)
+    existing_sessions = current.get("sessions") if isinstance(current, dict) else None
+    if isinstance(existing_sessions, dict):
+        for key, value in existing_sessions.items():
+            if not isinstance(key, str) or not isinstance(value, dict):
+                changed = True
+                continue
+            valid_values = {
+                name: timestamp
+                for name, timestamp in value.items()
+                if isinstance(name, str)
+                and isinstance(timestamp, int)
+                and not isinstance(timestamp, bool)
+            }
+            if valid_values and max(valid_values.values()) >= (
+                now_ms - PRESENCE_RATE_LIMIT_STATE_TTL_MS
+            ):
+                sessions[key] = valid_values
+            else:
+                changed = True
+            if len(valid_values) != len(value):
+                changed = True
+    elif existing_sessions is not None:
+        changed = True
+
+    session_state = sessions.get(session_key, {})
+    previous = session_state.get(request_type)
+    allowed = not (
+        isinstance(previous, int)
+        and not isinstance(previous, bool)
+        and now_ms - previous < minimum_interval_ms
+    )
+    retry_after_seconds = 0
+    if allowed:
+        session_state[request_type] = now_ms
+        sessions[session_key] = session_state
+        changed = True
+    elif isinstance(previous, int) and not isinstance(previous, bool):
+        retry_after_seconds = max(
+            1,
+            math.ceil((minimum_interval_ms - (now_ms - previous)) / 1000),
+        )
+    return {"sessions": sessions}, allowed, changed, retry_after_seconds
+
+
+def _released_presence_rate_limit(
+    current, session_key, request_type, expected_timestamp_ms
+):
+    if not isinstance(current, dict):
+        return current, False
+    current_sessions = current.get("sessions")
+    if not isinstance(current_sessions, dict):
+        return current, False
+    current_session = current_sessions.get(session_key)
+    if (
+        not isinstance(current_session, dict)
+        or current_session.get(request_type) != expected_timestamp_ms
+    ):
+        return current, False
+
+    sessions = {
+        key: dict(value) if isinstance(value, dict) else value
+        for key, value in current_sessions.items()
+    }
+    session_state = sessions[session_key]
+    session_state.pop(request_type, None)
+    if not session_state:
+        sessions.pop(session_key, None)
+    if not sessions:
+        return None, True
+    return {"sessions": sessions}, True
+
+
+def _presence_request_context():
+    correlation_id = uuid.uuid4().hex
+    request_started_at = time.monotonic()
+
+    @after_this_request
+    def add_correlation_id(response):
+        response.headers["X-Correlation-ID"] = correlation_id
+        outcome = "rate_limited" if response.status_code == 429 else "completed"
+        app.logger.info(
+            "online_presence correlation_id=%s stage=request outcome=%s elapsed_ms=%d response_status=%d",
+            correlation_id,
+            outcome,
+            int((time.monotonic() - request_started_at) * 1000),
+            response.status_code,
+        )
+        return response
+
+    return correlation_id
+
+
+def _presence_run_stage(correlation_id, stage, operation, outcome_for_result=None):
+    app.logger.info(
+        "online_presence correlation_id=%s stage=%s outcome=started elapsed_ms=0",
+        correlation_id,
+        stage,
+    )
+    started_at = time.monotonic()
+    try:
+        result = operation()
+        outcome = outcome_for_result(result) if outcome_for_result else "success"
+    except Exception as error:
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+        message = str(error)
+        message = re.sub(
+            r"(?i)(authorization|cookie|token|secret|password|private[_ -]?key|api[_ -]?key|credential|auth)(\s*[:=]\s*|\s+)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+            r"\1\2[REDACTED]",
+            message,
+        )
+        message = re.sub(r"(?i)\bbearer\s+[^\s,;]+", "Bearer [REDACTED]", message)
+        message = re.sub(r"https?://[^\s?]+\?[^\s#]+", "[URL_WITH_QUERY_REDACTED]", message)
+        message = re.sub(
+            r"-----BEGIN [A-Z ]*PRIVATE KEY-----.+?-----END [A-Z ]*PRIVATE KEY-----",
+            "[PRIVATE_KEY_REDACTED]",
+            message,
+            flags=re.DOTALL,
+        )
+        message = " ".join(message.split())[:500]
+        stack = ">".join(
+            f"{Path(frame.filename).name}:{frame.name}:{frame.lineno}"
+            for frame in traceback.extract_tb(error.__traceback__)
+        )
+        app.logger.warning(
+            "online_presence correlation_id=%s stage=%s outcome=error elapsed_ms=%d error_type=%s error_message=%r stack=%s",
+            correlation_id,
+            stage,
+            elapsed_ms,
+            type(error).__name__,
+            message,
+            stack,
+        )
+        raise
+    elapsed_ms = int((time.monotonic() - started_at) * 1000)
+    app.logger.info(
+        "online_presence correlation_id=%s stage=%s outcome=%s elapsed_ms=%d",
+        correlation_id,
+        stage,
+        outcome,
+        elapsed_ms,
+    )
+    return result
+
+
+def _get_firebase_database_url(project_id, required=True):
+    database_url = os.environ.get("FIREBASE_DATABASE_URL", "").strip()
+    if not database_url:
+        if required:
+            raise RuntimeError(
+                "FIREBASE_DATABASE_URL is required for online presence; configure the HTTPS "
+                "Realtime Database URL for FIREBASE_PROJECT_ID."
+            )
+        return None
+
+    return _validate_firebase_database_url(database_url, project_id)
+
+
+def _validate_firebase_database_url(database_url, project_id):
+    try:
+        parsed_url = urlsplit(database_url)
+        hostname = parsed_url.hostname or ""
+        parsed_url.port
+    except ValueError as error:
+        raise RuntimeError(
+            "FIREBASE_DATABASE_URL must be a valid HTTPS Realtime Database URL."
+        ) from error
+
+    expected_prefix = f"{project_id}-default-rtdb"
+    host_matches_project = (
+        hostname == f"{project_id}.firebaseio.com"
+        or (
+            hostname.startswith(expected_prefix + ".")
+            and hostname.endswith(".firebasedatabase.app")
+            and len(hostname.split(".")) in {3, 4}
+        )
+    )
+    if (
+        parsed_url.scheme != "https"
+        or not host_matches_project
+        or parsed_url.username
+        or parsed_url.password
+        or parsed_url.port is not None
+        or parsed_url.path not in {"", "/"}
+        or parsed_url.query
+        or parsed_url.fragment
+    ):
+        raise RuntimeError(
+            "FIREBASE_DATABASE_URL must be an HTTPS Realtime Database URL belonging "
+            "to FIREBASE_PROJECT_ID."
+        )
+    return database_url.rstrip("/")
+
+
+def _presence_record_key(user_id, session_id):
+    secret_key = app.secret_key
+    if not isinstance(secret_key, (str, bytes)) or not secret_key:
+        raise RuntimeError("The Flask SECRET_KEY must be configured to protect presence references.")
+    key = secret_key.encode("utf-8") if isinstance(secret_key, str) else secret_key
+    message = f"{user_id}\0{session_id}".encode("utf-8")
+    return hmac.new(key, message, hashlib.sha256).hexdigest()
+
+
+def _presence_rate_limit_user_key(user_id):
+    secret_key = app.secret_key
+    if not isinstance(secret_key, (str, bytes)) or not secret_key:
+        raise RuntimeError("The Flask SECRET_KEY must be configured to protect presence rate limits.")
+    key = secret_key.encode("utf-8") if isinstance(secret_key, str) else secret_key
+    message = f"presence-rate-limit\0{user_id}".encode("utf-8")
+    return hmac.new(key, message, hashlib.sha256).hexdigest()
+
+
+def _presence_database_reference(store=None):
+    store = store or get_user_store()
+    project_id = getattr(store, "project_id", None) or os.environ.get("FIREBASE_PROJECT_ID")
+    if not isinstance(project_id, str) or not project_id:
+        raise RuntimeError("FIREBASE_PROJECT_ID must be configured for online presence.")
+    database_url = _get_firebase_database_url(project_id)
+    firebase_app = getattr(store, "firebase_app", None)
+    if firebase_database is None or firebase_app is None:
+        raise RuntimeError(
+            "Firebase Admin Realtime Database is unavailable; configure trusted Firebase Admin credentials."
+        )
+    configured_url = firebase_app.options.get("databaseURL")
+    if not isinstance(configured_url, str) or configured_url.rstrip("/") != database_url:
+        raise RuntimeError(
+            "Firebase Admin was initialized without the configured Realtime Database URL; restart "
+            "the application after setting FIREBASE_DATABASE_URL."
+        )
+    return firebase_database.reference("/presence/sessions", app=firebase_app)
+
+
+def _claim_expired_presence_cleanup(now_ms):
+    global _last_presence_cleanup_ms
+    minimum_interval_ms = PRESENCE_EXPIRED_CLEANUP_MIN_INTERVAL_SECONDS * 1000
+    with _presence_cleanup_lock:
+        if now_ms - _last_presence_cleanup_ms < minimum_interval_ms:
+            return False
+        _last_presence_cleanup_ms = now_ms
+        return True
+
+
+def _prune_expired_presence_records(reference, now_ms, correlation_id=None):
+    if not _claim_expired_presence_cleanup(now_ms):
+        return False
+    query = lambda: reference.order_by_child("expires_at").end_at(now_ms).get() or {}
+    records = (
+        _presence_run_stage(correlation_id, "expired_lease_query", query)
+        if correlation_id
+        else query()
+    )
+    if not isinstance(records, dict):
+        raise RuntimeError("Firebase Realtime Database returned an invalid presence record set.")
+    for record_key in records:
+        if isinstance(record_key, str):
+            def delete_if_still_expired(current):
+                expires_at = current.get("expires_at") if isinstance(current, dict) else None
+                if (
+                    not isinstance(expires_at, (int, float))
+                    or isinstance(expires_at, bool)
+                    or expires_at <= now_ms
+                ):
+                    return None
+                return current
+
+            delete = lambda: reference.child(record_key).transaction(
+                delete_if_still_expired
+            )
+            if correlation_id:
+                _presence_run_stage(
+                    correlation_id, "expired_lease_delete", delete
+                )
+            else:
+                delete()
+    return True
+
+
+def _presence_error_response(error, correlation_id=None):
+    if "FIREBASE_DATABASE_URL" in str(error):
+        message = str(error)
+    else:
+        message = "Online presence is temporarily unavailable. Please try again shortly."
+    app.logger.error(
+        "online_presence correlation_id=%s stage=request outcome=error error_type=%s response_status=503",
+        correlation_id or "unavailable",
+        type(error).__name__,
+    )
+    response = jsonify(error=message)
+    response.status_code = 503
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+def _presence_unauthenticated_response():
+    if g.get("user_store_unavailable", False):
+        response = jsonify(error="Unable to verify your sign-in right now. Please try again shortly.")
+        response.status_code = 503
+    else:
+        response = jsonify(error="Authentication required.")
+        response.status_code = 401
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+def _presence_user_may_use_routes(user):
+    if user.get("must_change_password"):
+        response = jsonify(error="Change your password before continuing.")
+        response.status_code = 403
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    return None
+
+
+@app.route("/api/presence/heartbeat", methods=["POST"])
+def presence_heartbeat_api():
+    correlation_id = _presence_request_context()
+    user = _presence_run_stage(
+        correlation_id,
+        "session_validation",
+        get_current_user,
+        lambda result: "authenticated" if result else "rejected",
+    )
+    if not user:
+        return _presence_unauthenticated_response()
+    denied = _presence_run_stage(
+        correlation_id,
+        "account_eligibility",
+        lambda: _presence_user_may_use_routes(user),
+        lambda result: "rejected" if result else "eligible",
+    )
+    if denied:
+        return denied
+
+    def validate_heartbeat_request():
+        expected_csrf = get_authenticated_form_csrf_token()
+        supplied_csrf = request.headers.get("X-CSRF-Token", "")
+        return (
+            _firebase_custom_token_origin_is_valid()
+            and expected_csrf
+            and supplied_csrf
+            and hmac.compare_digest(expected_csrf, supplied_csrf)
+        )
+
+    request_is_valid = _presence_run_stage(
+        correlation_id,
+        "csrf_origin_validation",
+        validate_heartbeat_request,
+        lambda result: "accepted" if result else "rejected",
+    )
+    if not request_is_valid:
+        response = jsonify(error="Request validation failed.")
+        response.status_code = 400
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    user_id = user.get("id")
+    current_session_id = session.get("session_id")
+    identity_is_valid = _presence_run_stage(
+        correlation_id,
+        "trusted_identity_validation",
+        lambda: (
+            isinstance(user_id, str)
+            and bool(user_id)
+            and isinstance(current_session_id, str)
+            and bool(current_session_id)
+        ),
+        lambda result: "accepted" if result else "rejected",
+    )
+    if not identity_is_valid:
+        return jsonify(error="The authenticated session is not valid for online presence."), 403
+
+    now_ms = int(time.time() * 1000)
+    record = {
+        "user_id": user_id,
+        "last_seen_at": now_ms,
+        "expires_at": now_ms + PRESENCE_LEASE_SECONDS * 1000,
+    }
+    try:
+        record_key = _presence_run_stage(
+            correlation_id,
+            "trusted_identity_derivation",
+            lambda: _presence_record_key(user_id, current_session_id),
+        )
+        store = _presence_run_stage(
+            correlation_id, "user_store_selection", get_user_store
+        )
+        reference = _presence_run_stage(
+            correlation_id,
+            "rtdb_reference_selection",
+            lambda: _presence_database_reference(store),
+        )
+        claim_result = _presence_run_stage(
+            correlation_id,
+            "heartbeat_rate_limit_transaction",
+            lambda: store.claim_presence_request(
+                _presence_rate_limit_user_key(user_id),
+                record_key,
+                "heartbeat",
+                now_ms,
+                PRESENCE_HEARTBEAT_MIN_INTERVAL_SECONDS * 1000,
+            ),
+            lambda result: "accepted" if result[0] else "rate_limited",
+        )
+        allowed, retry_after_seconds = claim_result
+        if not allowed:
+            app.logger.info(
+                "online_presence correlation_id=%s stage=heartbeat_rate_limit_transaction outcome=rate_limited retry_after_seconds=%d",
+                correlation_id,
+                retry_after_seconds,
+            )
+            response = jsonify(error="Presence heartbeat was received too recently.")
+            response.status_code = 429
+            response.headers["Retry-After"] = str(retry_after_seconds)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        try:
+            _presence_run_stage(
+                correlation_id,
+                "rtdb_heartbeat_write",
+                lambda: reference.child(record_key).set(record),
+            )
+        except Exception:
+            try:
+                _presence_run_stage(
+                    correlation_id,
+                    "heartbeat_rate_limit_release",
+                    lambda: store.release_presence_request(
+                        _presence_rate_limit_user_key(user_id),
+                        record_key,
+                        "heartbeat",
+                        now_ms,
+                    ),
+                )
+            except Exception as release_error:
+                app.logger.warning(
+                    "online_presence correlation_id=%s stage=heartbeat_rate_limit_release outcome=error error_type=%s",
+                    correlation_id,
+                    type(release_error).__name__,
+                )
+            raise
+    except Exception as error:
+        return _presence_error_response(error, correlation_id)
+    try:
+        _prune_expired_presence_records(reference, now_ms, correlation_id)
+    except Exception as error:
+        app.logger.warning(
+            "online_presence correlation_id=%s stage=expired_lease_cleanup outcome=error error_type=%s",
+            correlation_id,
+            type(error).__name__,
+        )
+
+    response = jsonify(success=True, lease_seconds=PRESENCE_LEASE_SECONDS)
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.route("/api/presence/roster", methods=["GET"])
+def presence_roster_api():
+    correlation_id = _presence_request_context()
+    user = _presence_run_stage(
+        correlation_id,
+        "session_validation",
+        get_current_user,
+        lambda result: "authenticated" if result else "rejected",
+    )
+    if not user:
+        return _presence_unauthenticated_response()
+    denied = _presence_run_stage(
+        correlation_id,
+        "account_eligibility",
+        lambda: _presence_user_may_use_routes(user),
+        lambda result: "rejected" if result else "eligible",
+    )
+    if denied:
+        return denied
+
+    try:
+        user_id = user.get("id")
+        current_session_id = session.get("session_id")
+        if (
+            not isinstance(user_id, str)
+            or not user_id
+            or not isinstance(current_session_id, str)
+            or not current_session_id
+        ):
+            return jsonify(error="The authenticated session is not valid for online presence."), 403
+
+        store = _presence_run_stage(
+            correlation_id, "user_store_selection", get_user_store
+        )
+        now_ms = int(time.time() * 1000)
+        current_record_key = _presence_record_key(user_id, current_session_id)
+        claim_result = _presence_run_stage(
+            correlation_id,
+            "roster_rate_limit_transaction",
+            lambda: store.claim_presence_request(
+                _presence_rate_limit_user_key(user_id),
+                current_record_key,
+                "roster",
+                now_ms,
+                PRESENCE_ROSTER_MIN_INTERVAL_SECONDS * 1000,
+            ),
+            lambda result: "accepted" if result[0] else "rate_limited",
+        )
+        allowed, retry_after_seconds = claim_result
+        if not allowed:
+            app.logger.info(
+                "online_presence correlation_id=%s stage=roster_rate_limit_transaction outcome=rate_limited retry_after_seconds=%d",
+                correlation_id,
+                retry_after_seconds,
+            )
+            response = jsonify(error="Online staff was refreshed too recently.")
+            response.status_code = 429
+            response.headers["Retry-After"] = str(retry_after_seconds)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+
+        reference = _presence_run_stage(
+            correlation_id,
+            "rtdb_reference_selection",
+            lambda: _presence_database_reference(store),
+        )
+        presence_records = _presence_run_stage(
+            correlation_id,
+            "rtdb_live_presence_query",
+            lambda: reference.order_by_child("expires_at").start_at(now_ms + 1).get() or {},
+        )
+        if not isinstance(presence_records, dict):
+            raise RuntimeError("Firebase Realtime Database returned an invalid presence record set.")
+        candidate_ids = {
+            record.get("user_id")
+            for record in presence_records.values()
+            if isinstance(record, dict)
+            and isinstance(record.get("user_id"), str)
+            and record.get("user_id")
+        }
+        users_by_id = {}
+        for candidate_id in candidate_ids:
+            candidate = _presence_run_stage(
+                correlation_id,
+                "firestore_user_lookup",
+                lambda candidate_id=candidate_id: store.get_user(candidate_id),
+            )
+            if (
+                not isinstance(candidate, dict)
+                or str(candidate.get("id") or "") != candidate_id
+                or not _user_account_is_active(candidate)
+                or candidate.get("must_change_password")
+            ):
+                continue
+            sessions = candidate.get("active_sessions")
+            if not isinstance(sessions, (list, tuple, set)):
+                continue
+            active_record_keys = {
+                _presence_record_key(candidate_id, session_id)
+                for session_id in sessions
+                if isinstance(session_id, str) and session_id
+            }
+            users_by_id[candidate_id] = (candidate, active_record_keys)
+
+        online_staff = {}
+        for record_key, record in presence_records.items():
+            if not isinstance(record_key, str) or not isinstance(record, dict):
+                continue
+            candidate_id = record.get("user_id")
+            expires_at = record.get("expires_at")
+            if (
+                not isinstance(candidate_id, str)
+                or isinstance(expires_at, bool)
+                or not isinstance(expires_at, (int, float))
+                or expires_at <= now_ms
+                or candidate_id not in users_by_id
+                or record_key not in users_by_id[candidate_id][1]
+            ):
+                continue
+            candidate = users_by_id[candidate_id][0]
+            name = str(
+                candidate.get("full_name") or candidate.get("username") or "Staff member"
+            ).strip()
+            online_staff[candidate_id] = {"display_name": name[:120], "status": "online"}
+
+        response = jsonify(staff=list(online_staff.values()))
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+        return response
+    except Exception as error:
+        return _presence_error_response(error, correlation_id)
 
 
 def _custom_role_definition_for_user(user, store):
@@ -5353,12 +6060,19 @@ def logout():
     user = get_current_user()
     if user:
         current_session_id = session.get("session_id")
+        current_user_id = user.get("id")
         active_sessions = list(user.get("active_sessions", []))
         if current_session_id in active_sessions:
             active_sessions.remove(current_session_id)
             user["active_sessions"] = active_sessions
             user["updated_at"] = iso_now()
             get_user_store().save_user(user)
+        if isinstance(current_user_id, str) and isinstance(current_session_id, str):
+            try:
+                record_key = _presence_record_key(current_user_id, current_session_id)
+                _presence_database_reference().child(record_key).delete()
+            except Exception as error:
+                app.logger.warning("Online presence logout cleanup failed (%s).", type(error).__name__)
         add_audit_log(user.get("id"), "logout", "User logged out successfully", user.get("id"))
     session.clear()
     flash("You have been logged out.", "success")

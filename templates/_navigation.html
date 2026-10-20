@@ -117,6 +117,19 @@
 </nav>
 
 {% if nav_user %}
+    {% if not nav_user.must_change_password %}
+    <details class="mm-online-presence" data-presence-widget
+             data-csrf-token="{{ authenticated_form_csrf_token() }}">
+        <summary>
+            <span class="mm-online-presence-dot" aria-hidden="true"></span>
+            <span>Online staff</span>
+            <span class="mm-online-presence-status" data-presence-status role="status" aria-live="polite">Loading…</span>
+        </summary>
+        <ul class="mm-online-presence-list" data-presence-list aria-label="Online staff members">
+            <li>Loading staff presence…</li>
+        </ul>
+    </details>
+    {% endif %}
     {% set nav_name = nav_user.full_name|default(nav_user.username|default('Account'), true) %}
     {% set nav_role_label = nav_user.custom_staff_type|default(nav_user.role|default('Member')|replace('_', ' ')|title, true) %}
     <div class="mm-nav-account">
@@ -151,3 +164,6 @@
 
 <script type="module" src="{{ url_for('static', filename='mm_navigation.js') }}"></script>
 <script type="module" src="{{ url_for('static', filename='web_push_notifications.js') }}"></script>
+{% if nav_user and not nav_user.must_change_password %}
+<script type="module" src="{{ url_for('static', filename='online_presence.js') }}"></script>
+{% endif %}

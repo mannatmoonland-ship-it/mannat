@@ -2,6 +2,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:rtdb-rules": "firebase emulators:exec --project demo-mannat-moon-rules --only database \"node --test tests/realtime_database.rules.test.mjs\"",
     "test:rules": "firebase emulators:exec --project demo-mannat-moon-rules --only firestore \"node --test tests/firestore.rules.test.mjs\""
   },
   "devDependencies": {

@@ -7,9 +7,10 @@ MANNAT MOON CONSTRUCTION - TRADE BUILDER & GOOGLE PHOTOS TOOL
 2. Install dependencies:
    pip install -r requirements.txt
 
-3. Copy `.env.example` to `.env` and set the Firebase project ID and matching
-   Firebase Web configuration. Configure a Firebase Admin credential outside
-   source control for Firestore access. Never commit `.env` or credentials.
+3. Copy `.env.example` to `.env` and set the Firebase project ID, matching
+   Firebase Web configuration, and matching Realtime Database URL. Configure
+   a Firebase Admin credential outside source control. Never commit `.env`
+   or credentials.
 
 4. Install Chromium for Playwright:
    python -m playwright install chromium
@@ -53,7 +54,7 @@ Render/Railway source startup (deployment preparation only):
 - Set `FLASK_ENV=production` and a unique random `SECRET_KEY` of at least 32 bytes in the provider's secret environment.
 - Set `PUBLIC_BASE_URL` to the application's canonical public HTTPS origin (for example, `https://app.example.com`, with no path). Production password-reset and account-setup links use this configured origin only; missing or non-HTTPS values fail closed. Development without this setting uses `http://127.0.0.1:5020`; to test email links on an office LAN, explicitly set a development `PUBLIC_BASE_URL`.
 - Configure Daily Reports access through authenticated sessions with the `daily_reports.read` permission. Both `/daily-reports` and `/daily-reports/share-image` require this permission.
-- Explicitly supply `FIREBASE_PROJECT_ID` and the matching public `FIREBASE_WEB_CONFIG` as provider environment values. Deployed environments do not use the local-development Firebase project or Web-config defaults. Supply Firebase Admin credentials as a provider secret file referenced by `FIREBASE_SERVICE_ACCOUNT`, or as `FIREBASE_SERVICE_ACCOUNT_JSON` / `FIREBASE_SERVICE_ACCOUNT_BASE64`; the credential project ID must match the selected Firebase project. Environment-provided credential JSON is written to a private ignored `instance` file at startup. Configure separate Firebase projects, credentials, and `instance/` storage for staging and production; never share a persistent disk or copy production credentials into staging.
+- Explicitly supply `FIREBASE_PROJECT_ID`, the matching public `FIREBASE_WEB_CONFIG`, and the matching `FIREBASE_DATABASE_URL` as provider environment values. Deployed environments do not use the local-development Firebase project or Web-config defaults. Supply Firebase Admin credentials as a provider secret file referenced by `FIREBASE_SERVICE_ACCOUNT`, or as `FIREBASE_SERVICE_ACCOUNT_JSON` / `FIREBASE_SERVICE_ACCOUNT_BASE64`; the credential project ID must match the selected Firebase project. Environment-provided credential JSON is written to a private ignored `instance` file at startup. Configure separate Firebase projects, credentials, and `instance/` storage for staging and production; never share a persistent disk or copy production credentials into staging.
 - The initial active project comes from these explicit environment values. The existing Super Admin project-switch workflow can intentionally save a different active project in `instance/firebase_active_project.json`; review and protect that capability when configuring a deployed service, and do not share its `instance/` storage between environments.
 - Configure the existing mail, bootstrap-account (only for first initialization), and Camera authentication secrets through the provider secret store. Never upload `.env`, service-account JSON, or private keys as source/deployment artifacts.
 - Firebase Authentication must be enabled and configured in the selected Firebase project before browser custom-token sign-in can succeed. This startup command does not enable Firebase services or deploy the application.

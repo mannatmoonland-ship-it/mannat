@@ -1,0 +1,11 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "presence": {
+      "sessions": {
+        ".indexOn": ["expires_at"]
+      }
+    }
+  }
+}

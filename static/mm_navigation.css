@@ -9,6 +9,70 @@
     margin: 0;
 }
 
+.mm-online-presence {
+    position: relative;
+    z-index: 110;
+    flex: 0 0 auto;
+    color: #eff8f3;
+    font-size: 12px;
+}
+
+.mm-online-presence summary {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 11px;
+    border: 1px solid rgba(220, 245, 236, .24);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .07);
+    cursor: pointer;
+    list-style: none;
+}
+
+.mm-online-presence summary::-webkit-details-marker {
+    display: none;
+}
+
+.mm-online-presence-dot {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 8px;
+    border-radius: 50%;
+    background: #72e3a5;
+    box-shadow: 0 0 0 3px rgba(114, 227, 165, .13);
+}
+
+.mm-online-presence-status {
+    color: #b5d5cf;
+}
+
+.mm-online-presence-list {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 210px;
+    max-width: min(300px, 80vw);
+    max-height: 240px;
+    overflow: auto;
+    margin: 0;
+    padding: 8px 12px;
+    border: 1px solid rgba(11, 30, 48, .13);
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 12px 28px rgba(11, 30, 48, .2);
+    color: #183548;
+    list-style: none;
+}
+
+.mm-online-presence-list li {
+    padding: 6px 2px;
+    overflow-wrap: anywhere;
+}
+
+.mm-online-presence-list li + li {
+    border-top: 1px solid #e5eeec;
+}
+
 .mm-icon-library {
     position: absolute;
     width: 0;
@@ -540,6 +604,32 @@ body:not(.login-page) header.mm-app-header > .mm-app-brand {
 }
 
 @media (max-width: 620px) {
+    .mm-top-nav.mm-nav-mobile-open ~ .mm-online-presence {
+        visibility: hidden;
+        pointer-events: none;
+    }
+
+    .mm-online-presence {
+        z-index: 130;
+    }
+
+    .mm-online-presence-list {
+        position: fixed;
+        top: var(--presence-panel-top, 96px);
+        right: auto;
+        left: 50%;
+        width: calc(100vw - 24px);
+        min-width: 0;
+        max-width: calc(100vw - 24px);
+        max-height: calc(100vh - var(--presence-panel-top, 96px) - 24px);
+        max-height: calc(100dvh - var(--presence-panel-top, 96px) - 24px);
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        box-sizing: border-box;
+        transform: translateX(-50%);
+    }
+
     .mm-nav-list {
         left: 50%;
         width: calc(100vw - 24px);

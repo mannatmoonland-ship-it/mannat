@@ -1,5 +1,6 @@
 import copy
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -204,6 +205,7 @@ def presence_environment(monkeypatch):
         "id": "staff-user",
         "username": "staff-login",
         "full_name": "Trusted Staff Name",
+        "avatarId": "fox",
         "email": "staff@example.invalid",
         "role": "office_staff",
         "custom_staff_type": "",
@@ -296,7 +298,11 @@ def test_active_staff_can_create_presence_and_read_trusted_roster(presence_envir
     roster_response = client.get("/api/presence/roster")
     assert roster_response.status_code == 200
     assert roster_response.get_json() == {
-        "staff": [{"display_name": "Trusted Staff Name", "status": "online"}]
+        "staff": [{
+            "display_name": "Trusted Staff Name",
+            "avatar_id": "fox",
+            "status": "online",
+        }]
     }
     assert "staff-user" not in roster_response.get_data(as_text=True)
     assert "staff-session" not in roster_response.get_data(as_text=True)
@@ -381,7 +387,7 @@ def test_heartbeat_is_idempotent_rate_limited_and_renews_lease(
     assert records[next(iter(records))]["last_seen_at"] == int(now[0] * 1000)
 
     assert client.get("/api/presence/roster").get_json()["staff"] == [
-        {"display_name": "Trusted Staff Name", "status": "online"}
+        {"display_name": "Trusted Staff Name", "avatar_id": "fox", "status": "online"}
     ]
 
 
@@ -718,7 +724,13 @@ def test_cleanup_failure_does_not_fail_heartbeat_or_roster_and_can_retry(
 
     roster = client.get("/api/presence/roster")
     assert roster.status_code == 200
-    assert roster.get_json() == {"staff": [{"display_name": "Trusted Staff Name", "status": "online"}]}
+    assert roster.get_json() == {
+        "staff": [{
+            "display_name": "Trusted Staff Name",
+            "avatar_id": "fox",
+            "status": "online",
+        }]
+    }
 
     now[0] += 26
     retry = _heartbeat(client, csrf_token)
@@ -778,7 +790,7 @@ def test_roster_queries_only_live_leases_and_returns_minimal_deduplicated_data(
 
     assert response.status_code == 200
     assert response.get_json() == {
-        "staff": [{"display_name": "A" * 120, "status": "online"}]
+        "staff": [{"display_name": "A" * 120, "avatar_id": "fox", "status": "online"}]
     }
     assert reference.metrics.get("root_gets", 0) == 0
     assert reference.metrics["indexed_queries"] == 1
@@ -798,7 +810,11 @@ def test_multiple_sessions_deduplicate_roster_and_logout_removes_only_one(
     assert len(records) == 2
 
     roster = first_client.get("/api/presence/roster").get_json()
-    assert roster["staff"] == [{"display_name": "Trusted Staff Name", "status": "online"}]
+    assert roster["staff"] == [{
+        "display_name": "Trusted Staff Name",
+        "avatar_id": "fox",
+        "status": "online",
+    }]
 
     with first_client.session_transaction() as flask_session:
         csrf_token = flask_session["authenticated_form_csrf"]
@@ -808,7 +824,7 @@ def test_multiple_sessions_deduplicate_roster_and_logout_removes_only_one(
     assert len(records) == 1
     assert store.get_user("staff-user")["active_sessions"] == ["second-session"]
     assert second_client.get("/api/presence/roster").get_json()["staff"] == [
-        {"display_name": "Trusted Staff Name", "status": "online"}
+        {"display_name": "Trusted Staff Name", "avatar_id": "fox", "status": "online"}
     ]
     assert first_client.post("/logout").status_code == 302
     assert len(records) == 1
@@ -846,6 +862,12 @@ def test_authenticated_navigation_renders_presence_widget(presence_environment):
     assert response.status_code == 200
     assert b"data-presence-widget" in response.data
     assert b"online_presence.js" in response.data
+    script = (Path(app_module.__file__).parent / "static" / "online_presence.js").read_text(encoding="utf-8")
+    assert 'import { renderAnimalAvatar } from "./animal_avatars.js";' in script
+    assert 'avatar.innerHTML = renderAnimalAvatar(person.avatar_id);' in script
+    assert 'name.textContent = person.display_name;' in script
+    stylesheet = (Path(app_module.__file__).parent / "static" / "mm_navigation.css").read_text(encoding="utf-8")
+    assert ".mm-online-presence-avatar" in stylesheet
 
 
 @pytest.mark.parametrize("failure", ["database_unavailable", "missing_url", "wrong_project_url"])

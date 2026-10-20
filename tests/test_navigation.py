@@ -41,6 +41,7 @@ def test_navigation_reconstructs_admin_menu_destinations():
         'href="/user-management"',
         'href="/forgot-password"',
         'href="/snapshots"',
+        'href="/red-book/archive"',
         'href="/google-photos"',
         'href="/profile-settings"',
         'href="/change-password"',
@@ -49,6 +50,26 @@ def test_navigation_reconstructs_admin_menu_destinations():
         'action="/logout"',
     ):
         assert destination in html
+
+    construction_menu = html.split(
+        '<div class="mm-nav-submenu" id="mm-nav-construction">', 1
+    )[1].split("</div>", 1)[0]
+    management_menu = html.split(
+        '<div class="mm-nav-submenu" id="mm-nav-management">', 1
+    )[1].split("</div>", 1)[0]
+    assert 'href="/trade-builder"' not in construction_menu
+    assert 'href="/materials"' in construction_menu
+    assert 'href="/trade-builder"' in management_menu
+    assert 'href="/materials"' not in management_menu
+    assert '<span>Material Builder</span>' in construction_menu
+    assert '<span>User Management</span>' in management_menu
+    assert '<span>Snapshot</span>' in management_menu
+    assert 'href="/red-book/archive"' in management_menu
+    help_menu = html.split(
+        '<div class="mm-nav-submenu" id="mm-nav-help">', 1
+    )[1].split("</div>", 1)[0]
+    assert 'href="/developer-guide"' not in management_menu
+    assert 'href="/developer-guide"' in help_menu
 
     assert 'aria-label="Main navigation"' in html
     assert 'aria-controls="mm-nav-list"' in html
@@ -69,6 +90,7 @@ def test_navigation_reconstructs_admin_menu_destinations():
     assert 'href="/google-photos"' in html
     assert 'class="mm-nav-avatar"' in html
     assert 'data-animal-avatar="cute_cat"' in html
+    assert 'class="mm-nav-link mm-nav-dashboard is-active"' in html
     assert 'type="module"' in html
     assert "/static/mm_navigation.js" in html
 
@@ -85,6 +107,11 @@ def test_navigation_hides_super_admin_destinations_for_other_roles():
     assert 'href="/developer-guide"' not in html
     assert 'href="/trade-builder"' not in html
     assert 'href="/daily-reports"' in html
+    construction_menu = html.split(
+        '<div class="mm-nav-submenu" id="mm-nav-construction">', 1
+    )[1].split("</div>", 1)[0]
+    assert 'href="/materials"' in construction_menu
+    assert '<span>Material Builder</span>' in construction_menu
     assert 'action="/logout"' in html
     assert 'class="mm-nav-menu-link" href="/profile-settings"' in html
     assert 'class="mm-nav-menu-link" href="/change-password"' in html
@@ -167,6 +194,8 @@ def test_mobile_navigation_has_accessible_open_close_behavior():
     assert "color: #f0fff7;" in css
     assert "background: transparent;" in css
     assert ".mm-nav-submenu a:focus-visible" in css
+    assert ".mm-top-nav .mm-nav-link.mm-nav-dashboard.is-active" in css
+    assert "background: #38c99b;" in css
     assert "outline: 2px solid #83e5c1;" in css
     assert ".mm-menu-icon" in css
     assert "@keyframes mm-nav-reveal" in css

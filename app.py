@@ -5005,7 +5005,14 @@ def presence_roster_api():
             name = str(
                 candidate.get("full_name") or candidate.get("username") or "Staff member"
             ).strip()
-            online_staff[candidate_id] = {"display_name": name[:120], "status": "online"}
+            avatar_id = candidate.get("avatarId", candidate.get("avatar_id"))
+            if not isinstance(avatar_id, str) or avatar_id not in PROFILE_AVATAR_IDS:
+                avatar_id = DEFAULT_PROFILE_AVATAR_ID
+            online_staff[candidate_id] = {
+                "display_name": name[:120],
+                "avatar_id": avatar_id,
+                "status": "online",
+            }
 
         response = jsonify(staff=list(online_staff.values()))
         response.headers["Cache-Control"] = "no-store"

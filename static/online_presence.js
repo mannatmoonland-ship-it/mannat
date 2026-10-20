@@ -1,3 +1,5 @@
+import { renderAnimalAvatar } from "./animal_avatars.js";
+
 const HEARTBEAT_INTERVAL_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MIN_RETRY_DELAY_SECONDS = 2;
@@ -165,7 +167,14 @@ if (widget) {
           for (const person of staff) {
             if (!person || typeof person.display_name !== "string") continue;
             const item = document.createElement("li");
-            item.textContent = person.display_name;
+            const avatar = document.createElement("span");
+            avatar.className = "mm-online-presence-avatar";
+            avatar.setAttribute("aria-hidden", "true");
+            avatar.innerHTML = renderAnimalAvatar(person.avatar_id);
+            const name = document.createElement("span");
+            name.className = "mm-online-presence-name";
+            name.textContent = person.display_name;
+            item.append(avatar, name);
             list.append(item);
           }
         }

@@ -72,14 +72,22 @@ def test_snapshot_page_and_dashboard_card_are_admin_only(client):
     assert snapshot_page.status_code == 200
     assert b"<h1>Snapshot</h1>" in snapshot_page.data
     assert b'<a class="mm-app-brand" href="/" aria-label="Mannat Moon Construction Documentation home">' in snapshot_page.data
-    assert b'<a class="mm-nav-link"\n               href="/"' in snapshot_page.data
+    assert b'<a class="mm-nav-link mm-nav-dashboard"\n               href="/"' in snapshot_page.data
     assert b'<span>Dashboard</span>' in snapshot_page.data
     assert b"Snapshot Admin" in dashboard.data
     assert b"Super Admin" in dashboard.data
-    for card_text in (b"Trade Builder", b"User Management", b"Snapshot", b"OPEN TRADE BUILDER", b"MANAGE USERS"):
-        assert card_text in dashboard.data
+    assert b'aria-label="Open User Guide"' in dashboard.data
+    assert b"<h3 class=\"card-title\">User Help Guide</h3>" in dashboard.data
+    for management_card in (
+        b'<a href="/trade-builder" class="card-click-target"',
+        b'<a href="/user-management" class="card-click-target"',
+        b'<a href="/snapshots" class="card-click-target"',
+        b'aria-label="Open Developer Guide"',
+    ):
+        assert management_card not in dashboard.data
     for other_card in (b'href="/labour-payments"', b'href="/daily-reports"', b'href="/ledger-prints"', b'href="/drawings"'):
         assert other_card in dashboard.data
+    assert b'aria-label="Open Material Builder"' in dashboard.data
 
     for role in ("office_staff", "supervisor"):
         login(client, role)
@@ -87,6 +95,7 @@ def test_snapshot_page_and_dashboard_card_are_admin_only(client):
         role_label = "Office Staff" if role == "office_staff" else "Supervisor"
         assert b"Snapshot Admin" in dashboard.data
         assert role_label.encode() in dashboard.data
+        assert b'aria-label="Open User Guide"' in dashboard.data
         for restricted_card in (b'href="/trade-builder"', b'href="/user-management"', b'href="/snapshots"'):
             assert restricted_card not in dashboard.data
         for other_card in (b'href="/labour-payments"', b'href="/daily-reports"', b'href="/ledger-prints"', b'href="/drawings"'):

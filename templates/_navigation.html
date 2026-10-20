@@ -1,9 +1,9 @@
 {% set nav_user = current_user if current_user is defined else (profile if profile is defined else None) %}
 {% set nav_role = (nav_user.role|lower) if nav_user and nav_user.role is defined else '' %}
 {% set nav_endpoint = request.endpoint or '' %}
-{% set construction_endpoints = ['daily_reports', 'red_book_page', 'red_book_archive_page', 'trade_builder', 'material_builder', 'drawings'] %}
+{% set construction_endpoints = ['daily_reports', 'red_book_page', 'material_builder', 'drawings'] %}
 {% set finance_endpoints = ['labour_payments', 'owner_scope_page', 'building_cost_summary', 'ledger_prints'] %}
-{% set management_endpoints = ['user_management_page', 'user_management_details', 'forgot_password', 'snapshots.snapshot_page'] %}
+{% set management_endpoints = ['trade_builder', 'material_builder', 'user_management_page', 'user_management_details', 'forgot_password', 'snapshots.snapshot_page', 'red_book_archive_page'] %}
 {% set help_endpoints = ['user_guide', 'developer_guide'] %}
 
 <nav class="mm-top-nav" aria-label="Main navigation">
@@ -42,7 +42,7 @@
     </button>
     <ul class="mm-nav-list" id="mm-nav-list">
         <li class="mm-nav-item">
-            <a class="mm-nav-link{% if nav_endpoint == 'dashboard' %} is-active{% endif %}"
+            <a class="mm-nav-link mm-nav-dashboard{% if nav_endpoint == 'dashboard' %} is-active{% endif %}"
                href="{{ url_for('dashboard') }}"
                {% if nav_endpoint == 'dashboard' %}aria-current="page"{% endif %}>
                 <svg class="mm-menu-icon"><use href="#mm-icon-dashboard"></use></svg><span>Dashboard</span>
@@ -57,13 +57,7 @@
             <div class="mm-nav-submenu" id="mm-nav-construction">
                 <a href="{{ url_for('daily_reports') }}" {% if nav_endpoint == 'daily_reports' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-report"></use></svg><span>Daily Reports</span></a>
                 <a href="{{ url_for('red_book_page') }}" {% if nav_endpoint == 'red_book_page' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-book"></use></svg><span>Red Book</span></a>
-                {% if nav_user and nav_role.replace('_', ' ').replace('-', ' ') in ['admin', 'administrator', 'super admin', 'super administrator'] %}
-                <a href="{{ url_for('red_book_archive_page') }}" {% if nav_endpoint == 'red_book_archive_page' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-backup"></use></svg><span>Archive</span></a>
-                {% endif %}
-                {% if nav_user and nav_role == 'super_admin' %}
-                <a href="{{ url_for('trade_builder') }}" {% if nav_endpoint == 'trade_builder' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-trade"></use></svg><span>Trade Builder</span></a>
-                {% endif %}
-                <a href="{{ url_for('material_builder') }}" {% if nav_endpoint == 'material_builder' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-materials"></use></svg><span>Materials</span></a>
+                <a href="{{ url_for('material_builder') }}" {% if nav_endpoint == 'material_builder' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-materials"></use></svg><span>Material Builder</span></a>
                 <a href="{{ url_for('drawings') }}" {% if nav_endpoint == 'drawings' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-drawings"></use></svg><span>Drawings</span></a>
             </div>
         </li>
@@ -88,9 +82,11 @@
                 <svg class="mm-menu-icon"><use href="#mm-icon-management"></use></svg><span>Management</span><span class="mm-nav-chevron" aria-hidden="true"></span>
             </button>
             <div class="mm-nav-submenu" id="mm-nav-management">
+                <a href="{{ url_for('trade_builder') }}" {% if nav_endpoint == 'trade_builder' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-trade"></use></svg><span>Trade Builder</span></a>
                 <a href="{{ url_for('user_management_page') }}" {% if nav_endpoint in ['user_management_page', 'user_management_details'] %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-users"></use></svg><span>User Management</span></a>
                 <a href="{{ url_for('forgot_password') }}" {% if nav_endpoint == 'forgot_password' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-password"></use></svg><span>Reset User Password</span></a>
-                <a href="{{ url_for('snapshots.snapshot_page') }}" {% if nav_endpoint == 'snapshots.snapshot_page' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-backup"></use></svg><span>Snapshots / Backup &amp; Restore</span></a>
+                <a href="{{ url_for('snapshots.snapshot_page') }}" {% if nav_endpoint == 'snapshots.snapshot_page' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-backup"></use></svg><span>Snapshot</span></a>
+                <a href="{{ url_for('red_book_archive_page') }}" {% if nav_endpoint == 'red_book_archive_page' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-backup"></use></svg><span>Archive</span></a>
             </div>
         </li>
         {% endif %}

@@ -582,8 +582,24 @@
             {% endif %}
         {% endwith %}
 
-
         <div class="cards-grid">
+
+            <div class="card">
+                <a href="{{ url_for('todo_page') }}" class="card-click-target" aria-label="Open To-do list"></a>
+                <div class="card-content">
+                    <div class="card-header">
+                        <div class="card-icon todo-module" aria-hidden="true"></div>
+                        <h3 class="card-title">To-do list</h3>
+                    </div>
+                    <p class="card-description">Keep track of your tasks and organize what needs to get done.</p>
+                    <ul class="card-features">
+                        <li>Add and edit tasks</li>
+                        <li>Reorder your list</li>
+                        <li>Delete completed or unwanted tasks</li>
+                    </ul>
+                    <a href="{{ url_for('todo_page') }}" class="card-button">OPEN TO-DO LIST</a>
+                </div>
+            </div>
 
 
             <!-- =================================================

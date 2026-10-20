@@ -169,6 +169,8 @@
 .dashboard-page .card-icon::before { font: 800 11px/1 Inter, "Segoe UI", sans-serif; letter-spacing: .08em; }
 .dashboard-page .card-icon.trade-builder { background: linear-gradient(145deg, #476b78, #294855); }
 .dashboard-page .card-icon.trade-builder::before { content: "TB"; }
+.dashboard-page .card-icon.todo-module { background: linear-gradient(145deg, #19b9a6, #087f85); }
+.dashboard-page .card-icon.todo-module::before { content: "TD"; }
 .dashboard-page .card-icon.daily-reports { background: linear-gradient(145deg, #68836f, #496650); }
 .dashboard-page .card-icon.daily-reports::before { content: "DR"; }
 .dashboard-page .card-icon.red-book-module { background: linear-gradient(145deg, #68836f, #496650); }

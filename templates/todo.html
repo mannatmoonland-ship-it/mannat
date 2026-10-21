@@ -24,6 +24,10 @@
         <section class="todo-card" aria-labelledby="todo-list-title">
             <h2 id="todo-list-title">My tasks</h2>
             <p class="todo-reorder-hint">Drag tasks to change their order, or use Move up and Move down.</p>
+            <div class="todo-page-actions">
+                <a class="todo-print-button" href="{{ url_for('todo_archive_page') }}">Open archive</a>
+                <button class="todo-print-button" type="button" data-print-todos>Print / Save as PDF</button>
+            </div>
             <form class="todo-add-form" data-todo-form>
                 <label class="sr-only" for="todo-input">New task</label>
                 <input id="todo-input" name="text" type="text" maxlength="240" placeholder="What do you need to do?" autocomplete="off" required>
@@ -31,6 +35,7 @@
             </form>
             <p class="todo-status" data-todo-status role="status" aria-live="polite"></p>
             <ol class="todo-list" data-todo-list aria-label="Your tasks"></ol>
+            <div class="todo-context-menu" data-todo-context-menu role="menu" hidden></div>
         </section>
     </main>
     <footer>Mannat Moon Construction</footer>

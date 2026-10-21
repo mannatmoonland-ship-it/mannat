@@ -1577,8 +1577,9 @@ class InMemoryFirestoreStore:
     def add_user_todo(self, user_id, todo_id, text):
         now = iso_now()
         items = self.user_todos.setdefault(user_id, {})
-        next_order = max((item.get("sort_order", -1) for item in items.values()), default=-1) + 1
-        item = {"id": todo_id, "text": text, "created_at": now, "sort_order": next_order}
+        for existing in items.values():
+            existing["sort_order"] = existing.get("sort_order", 0) + 1
+        item = {"id": todo_id, "text": text, "created_at": now, "sort_order": 0, "completed": False}
         items[todo_id] = item
         return item
 
@@ -1590,15 +1591,23 @@ class InMemoryFirestoreStore:
         item["updated_at"] = iso_now()
         return {"id": todo_id, "text": text}
 
+    def set_user_todo_completed(self, user_id, todo_id, completed):
+        item = self.user_todos.get(user_id, {}).get(todo_id)
+        if item is None: return None
+        item["completed"] = completed
+        item["completed_at"] = iso_now() if completed else None
+        return {"id": todo_id, "completed": completed, "completed_at": item["completed_at"]}
+
     def delete_user_todo(self, user_id, todo_id):
         return self.user_todos.get(user_id, {}).pop(todo_id, None) is not None
 
     def reorder_user_todos(self, user_id, todo_ids):
         items = self.user_todos.get(user_id, {})
-        if len(todo_ids) != len(items) or set(todo_ids) != set(items):
+        active = {key: value for key, value in items.items() if not value.get("completed", False)}
+        if len(todo_ids) != len(active) or set(todo_ids) != set(active):
             return False
         for order, todo_id in enumerate(todo_ids):
-            items[todo_id]["sort_order"] = order
+            active[todo_id]["sort_order"] = order
         return True
 
     def claim_presence_request(
@@ -2077,9 +2086,13 @@ class FirebaseFirestoreStore:
     def add_user_todo(self, user_id, todo_id, text):
         now = iso_now()
         current = self.list_user_todos(user_id)
-        next_order = max((item.get("sort_order", -1) for item in current), default=-1) + 1
-        item = {"user_id": user_id, "text": text, "created_at": now, "sort_order": next_order}
-        self._collection("user_todos").document(todo_id).set(item)
+        item = {"user_id": user_id, "text": text, "created_at": now, "sort_order": 0, "completed": False}
+        batch = self.db.batch()
+        for existing in current:
+            if not existing.get("completed", False):
+                batch.update(self._collection("user_todos").document(existing["id"]), {"sort_order": existing.get("sort_order", 0) + 1})
+        batch.set(self._collection("user_todos").document(todo_id), item)
+        batch.commit()
         return {"id": todo_id, "text": text, "created_at": now}
 
     def update_user_todo(self, user_id, todo_id, text):
@@ -2089,6 +2102,14 @@ class FirebaseFirestoreStore:
             return None
         reference.update({"text": text, "updated_at": iso_now()})
         return {"id": todo_id, "text": text}
+
+    def set_user_todo_completed(self, user_id, todo_id, completed):
+        reference = self._collection("user_todos").document(todo_id)
+        snapshot = reference.get()
+        if not snapshot.exists or (snapshot.to_dict() or {}).get("user_id") != user_id: return None
+        completed_at = iso_now() if completed else None
+        reference.update({"completed": completed, "completed_at": completed_at})
+        return {"id": todo_id, "completed": completed, "completed_at": completed_at}
 
     def delete_user_todo(self, user_id, todo_id):
         reference = self._collection("user_todos").document(todo_id)
@@ -2103,7 +2124,8 @@ class FirebaseFirestoreStore:
         snapshots = list(collection.where(
             filter=FieldFilter("user_id", "==", user_id)
         ).stream())
-        if len(todo_ids) != len(snapshots) or set(todo_ids) != {snapshot.id for snapshot in snapshots}:
+        active = [snapshot for snapshot in snapshots if not (snapshot.to_dict() or {}).get("completed", False)]
+        if len(todo_ids) != len(active) or set(todo_ids) != {snapshot.id for snapshot in active}:
             return False
         batch = self.db.batch()
         for order, todo_id in enumerate(todo_ids):
@@ -5745,6 +5767,17 @@ def profile_settings():
     return render_template("profile_settings.html", profile=safe_profile, csrf_token=csrf_token, current_user=get_current_user())
 
 
+@app.route("/todo/archive")
+@require_login
+def todo_archive_page():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login_page"))
+    response = app.make_response(render_template("todo_archive.html", current_user=user))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @app.route("/api/profile/todos", methods=["GET", "POST"])
 @require_login
 def profile_todos():
@@ -5753,7 +5786,10 @@ def profile_todos():
         return jsonify({"error": "Sign in to manage your to-do list."}), 401
     if request.method == "GET":
         try:
-            return jsonify({"items": get_user_store().list_user_todos(user["id"])})
+            items = get_user_store().list_user_todos(user["id"])
+            return jsonify({"items": [item for item in items if not item.get("completed", False)],
+                            "archived": sorted((item for item in items if item.get("completed", False)),
+                                                key=lambda item: item.get("completed_at", ""), reverse=True)})
         except Exception as error:
             app.logger.exception("Unable to load profile to-do items")
             return jsonify({"error": "Unable to load your to-do list."}), 503
@@ -5820,6 +5856,10 @@ def delete_profile_todo(todo_id):
     try:
         store = get_user_store()
         if request.method == "PATCH":
+            if isinstance(payload.get("completed"), bool):
+                item = store.set_user_todo_completed(user["id"], todo_id, payload["completed"])
+                if not item: return jsonify({"error": "To-do item not found."}), 404
+                return jsonify({"item": item})
             text = payload.get("text", "")
             if not isinstance(text, str) or not text.strip():
                 return jsonify({"error": "Enter a to-do item."}), 400

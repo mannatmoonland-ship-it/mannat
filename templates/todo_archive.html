@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mannat Moon - To-do Archive</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='todo.css') }}">
+</head>
+<body class="dashboard-page todo-page">
+{% include "_page_loader.html" %}
+    <header class="dashboard-header mm-app-header">
+        {% include "_navigation.html" %}
+    </header>
+    <main class="container todo-main" data-todo-archive-page data-csrf-token="{{ authenticated_form_csrf_token() }}">
+        <section class="todo-heading">
+            <p class="dashboard-eyebrow"><span></span> YOUR ACCOUNT</p>
+            <h1>To-do archive</h1>
+            <p>Completed tasks with the date and time they were finished.</p>
+        </section>
+        <section class="todo-card" aria-labelledby="todo-archive-title">
+            <div class="todo-page-actions">
+                <a class="todo-print-button" href="{{ url_for('todo_page') }}">Back to to-do list</a>
+                <button class="todo-print-button" type="button" data-print-todos>Print / Save as PDF</button>
+            </div>
+            <h2 id="todo-archive-title">Archived tasks</h2>
+            <p class="todo-status" data-todo-status role="status" aria-live="polite"></p>
+            <ol class="todo-list" data-todo-archive aria-label="Archived tasks"></ol>
+            <div class="todo-context-menu" data-todo-context-menu role="menu" hidden></div>
+        </section>
+    </main>
+    <footer>Mannat Moon Construction</footer>
+    <script type="module" src="{{ url_for('static', filename='todo_archive.js') }}"></script>
+</body>
+</html>

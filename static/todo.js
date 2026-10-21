@@ -3,10 +3,54 @@ if (root) {
     const form = root.querySelector("[data-todo-form]");
     const input = form.querySelector("input[name='text']");
     const list = root.querySelector("[data-todo-list]");
+    const contextMenu = root.querySelector("[data-todo-context-menu]");
+    document.body.append(contextMenu);
     const status = root.querySelector("[data-todo-status]");
+    root.querySelector("[data-print-todos]").addEventListener("click", () => window.print());
     let busy = false;
     let dragChanged = false;
     const message = value => { status.textContent = value; };
+    const copyTaskText = async text => {
+        if (window.isSecureContext && navigator.clipboard?.writeText) {
+            try { await navigator.clipboard.writeText(text); return true; }
+            catch { /* Continue with the browser-compatible fallback. */ }
+        }
+        const field = document.createElement("textarea");
+        field.value = text;
+        field.setAttribute("readonly", "");
+        field.setAttribute("aria-hidden", "true");
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        field.style.pointerEvents = "none";
+        document.body.append(field);
+        field.focus();
+        field.select();
+        let copied = false;
+        try { copied = document.execCommand("copy"); }
+        catch { copied = false; }
+        field.remove();
+        return copied;
+    };
+    const setItemProgress = (row, value) => {
+        if (!row) return;
+        row.setAttribute("aria-busy", "true");
+        row.querySelectorAll("button").forEach(button => { button.disabled = true; });
+        let progress = row.querySelector(".todo-item-progress");
+        if (!progress) {
+            progress = document.createElement("div");
+            progress.className = "todo-item-progress";
+            progress.setAttribute("role", "status");
+            progress.setAttribute("aria-live", "polite");
+            row.append(progress);
+        }
+        progress.textContent = value;
+    };
+    const clearItemProgress = row => {
+        if (!row) return;
+        row.removeAttribute("aria-busy");
+        row.querySelector(".todo-item-progress")?.remove();
+        row.querySelectorAll("button").forEach(button => { button.disabled = false; });
+    };
     const readApiResponse = async response => {
         const body = await response.text();
         let result;
@@ -30,8 +74,9 @@ if (root) {
         if (target < 0 || target >= rows.length) return;
         if (offset < 0) list.insertBefore(row, rows[target]);
         else list.insertBefore(rows[target], row);
-        try { await persistOrder(); message("Task order saved."); }
-        catch (error) { message(error.message); await loadItems(); }
+        setItemProgress(row, "Saving task order...");
+        try { await persistOrder(); clearItemProgress(row); message("Task order saved."); }
+        catch (error) { clearItemProgress(row); message(error.message); await loadItems(); }
     };
     const loadItems = async () => {
         const response = await fetch("/api/profile/todos", {headers: {"Accept": "application/json"}, cache: "no-store"});
@@ -48,7 +93,6 @@ if (root) {
             emptyText.textContent = "No tasks yet. Add your first task above.";
             empty.append(emptyText);
             list.append(empty);
-            return;
         }
         items.forEach(item => {
             const row = document.createElement("li");
@@ -65,6 +109,28 @@ if (root) {
             text.textContent = item.text;
             actions.className = "todo-item-actions";
             up.type = down.type = edit.type = remove.type = "button";
+            row.addEventListener("contextmenu", event => {
+                event.preventDefault();
+                showContextMenu(event.clientX, event.clientY, [
+                    {label: "Copy task", action: async () => {
+                        const copied = await copyTaskText(item.text);
+                        message(copied ? "Task copied to clipboard." : "Clipboard access is unavailable.");
+                    }},
+                    {label: "Mark as done", action: async () => {
+                        if (busy) return;
+                        busy = true;
+                        setItemProgress(row, "Moving task to archive...");
+                        try {
+                            const response = await fetch(`/api/profile/todos/${encodeURIComponent(item.id)}`, {
+                                method: "PATCH", headers: {"Content-Type": "application/json"},
+                                body: JSON.stringify({completed: true, csrf_token: root.dataset.csrfToken})
+                            });
+                            await readApiResponse(response); await loadItems(); message("Task moved to the archive.");
+                        } catch (error) { clearItemProgress(row); message(error.message); }
+                        finally { busy = false; }
+                    }}
+                ]);
+            });
             up.className = "todo-move-button todo-move-up";
             down.className = "todo-move-button todo-move-down";
             up.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.59 5.58L20 12l-8-8-8 8z"/></svg>';
@@ -87,7 +153,7 @@ if (root) {
             remove.addEventListener("click", async () => {
                 if (busy) return;
                 busy = true;
-                remove.disabled = true;
+                setItemProgress(row, "Deleting task...");
                 try {
                     const response = await fetch(`/api/profile/todos/${encodeURIComponent(item.id)}`, {
                         method: "DELETE", headers: {"Content-Type": "application/json"},
@@ -96,7 +162,7 @@ if (root) {
                     await readApiResponse(response);
                     await loadItems();
                     message("Task deleted.");
-                } catch (error) { message(error.message); remove.disabled = false; }
+                } catch (error) { clearItemProgress(row); message(error.message); }
                 finally { busy = false; }
             });
             const startEdit = () => {
@@ -134,7 +200,7 @@ if (root) {
                     if (!updatedText) { message("Task cannot be empty."); input.focus(); return; }
                     if (busy) return;
                     busy = true;
-                    save.disabled = cancel.disabled = true;
+                    setItemProgress(row, "Saving task...");
                     try {
                         const response = await fetch(`/api/profile/todos/${encodeURIComponent(item.id)}`, {
                             method: "PATCH", headers: {"Content-Type": "application/json"},
@@ -143,7 +209,7 @@ if (root) {
                         await readApiResponse(response);
                         await loadItems();
                         message("Task updated.");
-                    } catch (error) { message(error.message); save.disabled = cancel.disabled = false; }
+                    } catch (error) { clearItemProgress(row); message(error.message); save.disabled = cancel.disabled = false; }
                     finally { busy = false; }
                 });
                 input.focus();
@@ -154,6 +220,24 @@ if (root) {
             list.append(row);
         });
     };
+    const showContextMenu = (x, y, actions) => {
+        contextMenu.replaceChildren();
+        actions.forEach(({label, action}) => {
+            const button = document.createElement("button");
+            button.type = "button"; button.role = "menuitem"; button.textContent = label;
+            button.addEventListener("click", async () => { hideContextMenu(); await action(); });
+            contextMenu.append(button);
+        });
+        contextMenu.hidden = false;
+        const bounds = contextMenu.getBoundingClientRect();
+        contextMenu.style.left = `${Math.max(8, Math.min(x, innerWidth - bounds.width - 8))}px`;
+        contextMenu.style.top = `${Math.max(8, Math.min(y, innerHeight - bounds.height - 8))}px`;
+        contextMenu.querySelector("button")?.focus();
+    };
+    const hideContextMenu = () => { contextMenu.hidden = true; };
+    document.addEventListener("pointerdown", event => { if (!contextMenu.contains(event.target)) hideContextMenu(); });
+    document.addEventListener("keydown", event => { if (event.key === "Escape") hideContextMenu(); });
+    window.addEventListener("scroll", hideContextMenu, true);
     list.addEventListener("dragstart", event => {
         const row = event.target.closest("li[data-todo-id]");
         if (!row) return;
@@ -174,11 +258,13 @@ if (root) {
     });
     list.addEventListener("drop", event => event.preventDefault());
     list.addEventListener("dragend", async event => {
-        event.target.closest("li[data-todo-id]")?.classList.remove("todo-dragging");
+        const row = event.target.closest("li[data-todo-id]");
+        row?.classList.remove("todo-dragging");
         if (!dragChanged) return;
         busy = true;
-        try { await persistOrder(); message("Task order saved."); }
-        catch (error) { message(error.message); await loadItems(); }
+        setItemProgress(row, "Saving task order...");
+        try { await persistOrder(); clearItemProgress(row); message("Task order saved."); }
+        catch (error) { clearItemProgress(row); message(error.message); await loadItems(); }
         finally { busy = false; dragChanged = false; }
     });
     form.addEventListener("submit", async event => {
@@ -188,6 +274,9 @@ if (root) {
         if (!text || busy) return;
         busy = true;
         button.disabled = true;
+        form.setAttribute("aria-busy", "true");
+        status.classList.add("todo-status-progress");
+        message("Adding task...");
         try {
             const response = await fetch("/api/profile/todos", {
                 method: "POST", headers: {"Content-Type": "application/json"},
@@ -198,7 +287,12 @@ if (root) {
             await loadItems();
             message("Task added.");
         } catch (error) { message(error.message); }
-        finally { busy = false; button.disabled = false; }
+        finally {
+            busy = false;
+            button.disabled = false;
+            form.removeAttribute("aria-busy");
+            status.classList.remove("todo-status-progress");
+        }
     });
     loadItems().catch(error => message(error.message));
 }

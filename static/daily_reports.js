@@ -1069,7 +1069,7 @@ const DailyReports = (function() {
           "error",
           6000
         );
-        return;
+        return false;
       }
       const targetButtons = [...row.querySelectorAll(".dr-evupload")];
       targetButtons.forEach(button => { button.disabled = true; });
@@ -1114,15 +1114,12 @@ const DailyReports = (function() {
         delete row.dataset.driveUploadId;
         delete row.dataset.driveUploadFingerprint;
         updatePreview();
-        showToast(
-          "Photo uploaded and added to this report form. Save the Daily Record to keep it.",
-          "success",
-          5000
-        );
+        return true;
       } catch (error) {
         uploadButton.setAttribute("aria-label", "Retry photo upload");
         uploadButton.title = "Retry photo upload";
         showToast(error.message || "Unable to upload the photo.", "error", 5000);
+        return false;
       } finally {
         targetButtons.forEach(button => { button.disabled = false; });
         if (!row.dataset.driveUploadId) {
@@ -1138,12 +1135,33 @@ const DailyReports = (function() {
       const uploadButton = uploadButtons[uploadInputs.indexOf(uploadInput)];
       const photos = [...(uploadInput.files || [])];
       if (!photos.length) return;
-      if (photos.length === 1 || uploadInput.classList.contains("dr-evupload-camera-input")) {
+      if (!driveConnected) {
         await uploadPhoto(photos[0], row, uploadButton);
+        uploadInput.value = "";
+        return;
+      }
+      if (photos.length === 1 || uploadInput.classList.contains("dr-evupload-camera-input")) {
+        const succeeded = await uploadPhoto(photos[0], row, uploadButton);
+        if (succeeded) {
+          showToast("Photo uploaded. Save the Daily Record to keep it.", "success", 5000);
+        }
       } else {
+        const targetRows = photos.map((photo, index) =>
+          index === 0 ? row : addEvidenceRow()
+        );
+        let uploadedCount = 0;
         for (let index = 0; index < photos.length; index += 1) {
-          const targetRow = index === 0 ? row : addEvidenceRow();
-          await uploadPhoto(photos[index], targetRow, targetRow.querySelector(".dr-evupload-gallery"));
+          const targetRow = targetRows[index];
+          if (await uploadPhoto(
+            photos[index],
+            targetRow,
+            targetRow.querySelector(".dr-evupload-gallery")
+          )) uploadedCount += 1;
+        }
+        if (uploadedCount === photos.length) {
+          showToast(`${uploadedCount} photos uploaded. Save the Daily Record to keep them.`, "success", 6000);
+        } else {
+          showToast(`${uploadedCount} of ${photos.length} photos uploaded. Retry any failed photo rows, then save the Daily Record.`, "error", 7000);
         }
       }
       uploadInput.value = "";
@@ -1159,6 +1177,7 @@ const DailyReports = (function() {
 
     $("dr-evidenceRows").appendChild(row);
     updatePreview();
+    return row;
   }
 
   async function initializeDailyReportsDrive() {

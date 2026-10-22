@@ -56,12 +56,8 @@ service cloud.firestore {
     }
 
     match /trades/{tradeId} {
-      allow get, list: if hasAnyPermission([
-        'trade_builder.read',
-        'labour_payments.read',
-        'ledger.read',
-        'building_cost_summary.read'
-      ]);
+      // Trade documents contain mixed operational and financial fields. Browser reads use Flask projections.
+      allow get, list: if false;
       allow write: if false;
     }
 

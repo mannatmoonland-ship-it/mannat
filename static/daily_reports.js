@@ -93,6 +93,7 @@ const DailyReports = (function() {
   // Debounce timer for URL input
   let previewDebounceTimer = null;
   let driveConnected = false;
+  let driveConfigured = false;
   const PREVIEW_DEBOUNCE_MS = 800;
   const GOOGLE_PHOTOS_EXTRACTION_TIMEOUT_MS = 15000;
   const GOOGLE_PHOTOS_PREVIEW_WAIT_TIMEOUT_MS = 15000;
@@ -945,8 +946,10 @@ const DailyReports = (function() {
         class="dr-evurl"
         placeholder="YouTube, Google Drive, or Google Photos link"
         value="${escapeHtml(data.url || "")}">
-      <input class="dr-evupload-input" type="file" accept="image/*" capture="environment" hidden>
-      <button type="button" class="dr-evupload dr-form-action"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m-5 5 5-5 5 5M4 15v5h16v-5"/></svg><span>Take / Upload Photo</span></button>
+      <input class="dr-evupload-input dr-evupload-gallery-input" type="file" accept="image/*" hidden>
+      <input class="dr-evupload-input dr-evupload-camera-input" type="file" accept="image/*" capture="environment" hidden>
+      <button type="button" class="dr-evupload dr-evupload-gallery dr-form-action"><span>Choose from Gallery</span></button>
+      <button type="button" class="dr-evupload dr-evupload-camera dr-form-action"><span>Take Photo</span></button>
       <button type="button" class="dr-remove" aria-label="Remove evidence" title="Remove evidence"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
     `;
 
@@ -966,16 +969,29 @@ const DailyReports = (function() {
       updatePreview();
     };
 
-    const uploadInput = row.querySelector(".dr-evupload-input");
-    const uploadButton = row.querySelector(".dr-evupload");
-    uploadButton.disabled = !driveConnected;
-    uploadButton.addEventListener("click", () => {
-      uploadInput.click();
+    const uploadInputs = [...row.querySelectorAll(".dr-evupload-input")];
+    const uploadButtons = [...row.querySelectorAll(".dr-evupload")];
+    uploadButtons.forEach((button, index) => {
+      button.disabled = false;
+      button.addEventListener("click", () => uploadInputs[index].click());
     });
-    uploadInput.addEventListener("change", async () => {
+    const handlePhotoSelection = async event => {
+      const uploadInput = event.currentTarget;
+      const uploadButton = uploadButtons[uploadInputs.indexOf(uploadInput)];
       const photo = uploadInput.files?.[0];
       if (!photo) return;
-      uploadButton.disabled = true;
+      if (!driveConnected) {
+        uploadInput.value = "";
+        showToast(
+          driveConfigured
+            ? "Connect Google Drive before uploading this photo."
+            : "Google Drive needs administrator setup before photos can be uploaded.",
+          "error",
+          6000
+        );
+        return;
+      }
+      uploadButtons.forEach(button => { button.disabled = true; });
       uploadButton.querySelector("span").textContent = "Uploading...";
       try {
         const photoFingerprint = `${photo.name}:${photo.size}:${photo.lastModified}`;
@@ -1022,16 +1038,18 @@ const DailyReports = (function() {
           5000
         );
       } catch (error) {
-        uploadButton.querySelector("span").textContent = "Retry / Choose Photo";
+        uploadButton.querySelector("span").textContent = "Retry upload";
         showToast(error.message || "Unable to upload the photo.", "error", 5000);
       } finally {
-        uploadInput.value = "";
-        uploadButton.disabled = false;
+        uploadInputs.forEach(input => { input.value = ""; });
+        uploadButtons.forEach(button => { button.disabled = false; });
         if (!row.dataset.driveUploadId) {
-          uploadButton.querySelector("span").textContent = "Take / Upload Photo";
+          uploadButtons[0].querySelector("span").textContent = "Choose from Gallery";
+          uploadButtons[1].querySelector("span").textContent = "Take Photo";
         }
       }
-    });
+    };
+    uploadInputs.forEach(input => input.addEventListener("change", handlePhotoSelection));
 
     // Debounced URL input to avoid excessive extraction requests
     row.querySelector(".dr-evurl").oninput = () => {
@@ -1055,23 +1073,26 @@ const DailyReports = (function() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Google Drive status is unavailable.");
-      if (payload.message) {
+      if (payload.connected) {
+        statusElement.textContent = payload.message || "Google Drive connected";
+      } else if (payload.message === "Google Drive is connected for Daily Reports.") {
+        statusElement.textContent = "OAuth returned, but no usable Drive connection was found. Connect Google Drive again.";
+      } else if (payload.message) {
         statusElement.textContent = payload.message;
-      } else if (payload.connected) {
-        statusElement.textContent = "Google Drive connected";
       } else {
         statusElement.textContent = payload.configured
           ? "Google Drive not connected"
-          : "Google Drive needs administrator setup";
+          : "OAuth setup required: configure GOOGLE_OAUTH_CLIENT_SECRETS_FILE. Local authorization requires localhost; mobile or LAN access requires an HTTPS callback.";
       }
       if (connectButton) {
         connectButton.hidden = !payload.can_connect || Boolean(payload.connected);
         connectButton.disabled = !payload.configured;
+        connectButton.title = payload.configured
+          ? "Connect your Google Drive account"
+          : "Administrator setup is required before Google OAuth can start";
       }
       driveConnected = Boolean(payload.connected);
-      document.querySelectorAll(".dr-evupload").forEach(button => {
-        button.disabled = !driveConnected;
-      });
+      driveConfigured = Boolean(payload.configured);
       if (connectButton && !connectButton.dataset.bound) {
         connectButton.dataset.bound = "true";
         connectButton.addEventListener("click", async () => {

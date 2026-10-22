@@ -83,22 +83,47 @@ if (root) {
         items.forEach(item => {
             const row = document.createElement("li");
             const text = document.createElement("span");
-            const stamp = document.createElement("time");
+            const timestamps = document.createElement("span");
+            const createdStamp = document.createElement("time");
+            const completedStamp = document.createElement("time");
             row.dataset.todoId = item.id;
             row.className = "todo-archive-row";
             text.className = "todo-item-text";
             text.textContent = item.text;
-            const date = item.completed_at ? new Date(item.completed_at) : null;
-            stamp.className = "todo-completed-at";
-            stamp.dateTime = date && !Number.isNaN(date.getTime()) ? date.toISOString() : "";
-            stamp.textContent = date && !Number.isNaN(date.getTime()) ? date.toLocaleString("en-GB") : "Completion time unavailable";
-            row.append(text, stamp);
+            const createdDate = item.created_at ? new Date(item.created_at) : null;
+            const completedDate = item.completed_at ? new Date(item.completed_at) : null;
+            const formatStamp = (stamp, label, date, fallback) => {
+                const validDate = date && !Number.isNaN(date.getTime());
+                stamp.className = "todo-archive-timestamp";
+                stamp.dateTime = validDate ? date.toISOString() : "";
+                const formatted = validDate
+                    ? date.toLocaleString("en-GB", {hour12: true}).replace(/\b(am|pm)\b/i, value => value.toUpperCase())
+                    : fallback;
+                stamp.textContent = `${label}: ${formatted}`;
+            };
+            timestamps.className = "todo-archive-timestamps";
+            formatStamp(createdStamp, "Created", createdDate, "Creation time unavailable");
+            formatStamp(completedStamp, "Completed", completedDate, "Completion time unavailable");
+            timestamps.append(createdStamp, completedStamp);
+            row.append(text, timestamps);
             row.addEventListener("contextmenu", event => {
                 event.preventDefault();
                 showContextMenu(event.clientX, event.clientY, [
                     {label: "Copy task", action: async () => {
                         const copied = await copyTaskText(item.text);
                         message(copied ? "Task copied to clipboard." : "Clipboard access is unavailable.");
+                    }},
+                    {label: "Restore to to-do list", action: async () => {
+                        setItemProgress(row, "Restoring task...");
+                        try {
+                            const response = await fetch(`/api/profile/todos/${encodeURIComponent(item.id)}`, {
+                                method: "PATCH", headers: {"Content-Type": "application/json"},
+                                body: JSON.stringify({completed: false, csrf_token: root.dataset.csrfToken})
+                            });
+                            await readApiResponse(response);
+                            await loadArchive();
+                            message("Task restored to your to-do list.");
+                        } catch (error) { clearItemProgress(row); message(error.message); }
                     }},
                     {label: "Delete from archive", action: async () => {
                         setItemProgress(row, "Deleting archived task...");

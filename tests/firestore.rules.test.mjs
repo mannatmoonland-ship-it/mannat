@@ -97,12 +97,12 @@ rulesTest("unauthenticated clients cannot read or write Firestore data", async (
   await assertFails(setDoc(doc(db, "material_categories", "unauth-create"), { name: "No" }));
 });
 
-rulesTest("module permissions allow only their required browser reads", async () => {
+rulesTest("browser trade reads are denied while other module reads remain permission-scoped", async () => {
   const permissionReads = [
     {
       permission: "trade_builder.read",
-      allowed: ["trades/seed"],
-      denied: ["daily_records/seed"]
+      allowed: [],
+      denied: ["trades/seed", "daily_records/seed"]
     },
     {
       permission: "daily_reports.read",
@@ -111,13 +111,13 @@ rulesTest("module permissions allow only their required browser reads", async ()
     },
     {
       permission: "labour_payments.read",
-      allowed: ["trades/seed"],
-      denied: ["daily_records/seed"]
+      allowed: [],
+      denied: ["trades/seed", "daily_records/seed"]
     },
     {
       permission: "ledger.read",
-      allowed: ["trades/seed"],
-      denied: ["daily_records/seed"]
+      allowed: [],
+      denied: ["trades/seed", "daily_records/seed"]
     },
     {
       permission: "materials.read",
@@ -139,12 +139,11 @@ rulesTest("module permissions allow only their required browser reads", async ()
     {
       permission: "building_cost_summary.read",
       allowed: [
-        "trades/seed",
         "material_categories/seed",
         "material_purchases/seed",
         "owner_scopes/owner-scope/payments/seed"
       ],
-      denied: ["material_consumptions/seed"]
+      denied: ["trades/seed", "material_consumptions/seed"]
     }
   ];
 
@@ -160,6 +159,13 @@ rulesTest("module permissions allow only their required browser reads", async ()
 
   const reportsDb = await createUserContext({ permissions: ["daily_reports.read"] });
   await assertSucceeds(getDocs(collection(reportsDb, "daily_records")));
+  const allPermissionsDb = await createUserContext({ permissions: [
+    "trade_builder.read", "labour_payments.read", "ledger.read",
+    "building_cost_summary.read", "daily_reports.read"
+  ] });
+  await assertFails(getDoc(doc(allPermissionsDb, "trades", "seed")));
+  await assertFails(getDocs(collection(allPermissionsDb, "trades")));
+  await assertSucceeds(getDocs(collection(allPermissionsDb, "daily_records")));
   const materialsDb = await createUserContext({ permissions: ["materials.read"] });
   await assertSucceeds(getDocs(collection(materialsDb, "material_categories")));
 });

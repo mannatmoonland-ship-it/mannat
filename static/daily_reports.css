@@ -744,6 +744,10 @@ h1 {
     gap: 8px;
 }
 
+#dr-connectDrive[hidden] {
+    display: none !important;
+}
+
 .dr-form-action .dr-form-icon {
     width: 18px;
     height: 18px;
@@ -893,6 +897,7 @@ textarea {
     cursor: not-allowed;
     opacity: 0.55;
 }
+.dr-evupload-camera { background: #e0eaff; color: #243b74; }
 
 .dr-secondary {
     background: #e9eef5;
@@ -901,7 +906,7 @@ textarea {
 
 .dr-evrow {
     display: grid;
-    grid-template-columns: 110px minmax(120px, 1fr) minmax(180px, 2fr) auto 40px;
+    grid-template-columns: 110px minmax(120px, 1fr) minmax(180px, 2fr) repeat(2, auto) 40px;
     gap: 7px;
     margin: 8px 0;
 }

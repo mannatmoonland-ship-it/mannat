@@ -96,7 +96,9 @@ if (root) {
         }
         items.forEach(item => {
             const row = document.createElement("li");
+            const itemContent = document.createElement("div");
             const text = document.createElement("span");
+            const createdStamp = document.createElement("time");
             const actions = document.createElement("div");
             const up = document.createElement("button");
             const down = document.createElement("button");
@@ -107,6 +109,15 @@ if (root) {
             row.setAttribute("aria-label", `Task: ${item.text}. Drag to reorder.`);
             text.className = "todo-item-text";
             text.textContent = item.text;
+            itemContent.className = "todo-item-content";
+            createdStamp.className = "todo-item-created-at";
+            const createdDate = item.created_at ? new Date(item.created_at) : null;
+            const hasCreatedDate = createdDate && !Number.isNaN(createdDate.getTime());
+            createdStamp.dateTime = hasCreatedDate ? createdDate.toISOString() : "";
+            createdStamp.textContent = hasCreatedDate
+                ? `Created: ${createdDate.toLocaleString("en-GB", {hour12: true}).replace(/\b(am|pm)\b/i, value => value.toUpperCase())}`
+                : "Creation time unavailable";
+            itemContent.append(text, createdStamp);
             actions.className = "todo-item-actions";
             up.type = down.type = edit.type = remove.type = "button";
             row.addEventListener("contextmenu", event => {
@@ -216,7 +227,7 @@ if (root) {
                 input.select();
             };
             actions.append(up, down, edit, remove);
-            row.append(text, actions);
+            row.append(itemContent, actions);
             list.append(row);
         });
     };

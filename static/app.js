@@ -10,13 +10,6 @@ import {
 } from "./dialogs.js";
 
 import {
-    describeFirebaseError,
-    firebaseAuthReady,
-    getFirebaseApp,
-    getFirebaseFirestoreSdk
-} from "./firebase_auth.js";
-
-import {
     calculateAdvanceBalance,
     calculateMaximumSettlementAmount,
     calculateSettlementBreakdown,
@@ -37,10 +30,6 @@ import {
 import {
     formatDateWithDay
 } from "./date_format.js";
-
-import {
-    LEGACY_OWNER_ACCOUNT_DOCUMENT_ID
-} from "./owner_scope_constants.mjs";
 
 
 function generateUuid() {
@@ -71,62 +60,6 @@ function generateUuid() {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 
 }
-
-
-/* =========================================================
-   FIREBASE
-========================================================= */
-
-function withTimeout(promise, timeoutMs, message) {
-    return new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-        Promise.resolve(promise).then(
-            value => {
-                clearTimeout(timeoutId);
-                resolve(value);
-            },
-            error => {
-                clearTimeout(timeoutId);
-                reject(error);
-            }
-        );
-    });
-}
-
-let db = null;
-let firebaseInitializationError = null;
-let firestoreSdk = null;
-const firestoreMethod = name => (...args) => {
-    const method = firestoreSdk?.[name];
-    if (typeof method !== "function") {
-        throw firebaseInitializationError || new Error("The Firebase Firestore SDK is unavailable.");
-    }
-    return method(...args);
-};
-const collection = firestoreMethod("collection");
-const getDocs = firestoreMethod("getDocs");
-const getDoc = firestoreMethod("getDoc");
-const doc = firestoreMethod("doc");
-try {
-    await firebaseAuthReady;
-    firestoreSdk = await getFirebaseFirestoreSdk();
-    const firebaseApp = await getFirebaseApp();
-    db = firestoreSdk.getFirestore(firebaseApp);
-} catch (error) {
-    firebaseInitializationError = error;
-    console.error("Firebase initialization failed:", error?.stage || error?.code || error?.name);
-}
-
-
-/* =========================================================
-   COLLECTION
-========================================================= */
-
-const TRADES_COLLECTION =
-    "trades";
-
-const COMPLETED_WORK_PAYMENT_TYPE =
-    "completed_work_payment";
 
 
 /* =========================================================
@@ -161,6 +94,35 @@ async function sendTradeMutation(url, method, payload = null) {
         throw error;
     }
     return result;
+}
+
+async function readTradeApi(url) {
+    const response = await fetch(url, {
+        credentials: "same-origin",
+        cache: "no-store"
+    });
+    let result;
+    try {
+        result = await response.json();
+    } catch {
+        throw new Error("The server returned an unreadable trade response.");
+    }
+    if (!response.ok) {
+        const error = new Error(result.error || "Unable to load trade data.");
+        error.safeApiMessage = true;
+        throw error;
+    }
+    return result;
+}
+
+async function readTradeForView(tradeId, view) {
+    const result = await readTradeApi(
+        `/api/trades/${encodeURIComponent(tradeId)}?view=${encodeURIComponent(view)}`
+    );
+    if (!result.trade || typeof result.trade !== "object") {
+        throw new Error("Trade data is unavailable.");
+    }
+    return result.trade;
 }
 
 let currentPaymentTrade = null;
@@ -724,64 +686,17 @@ function resetForm() {
 
 async function loadTrades() {
 
-    const list =
-        document.getElementById(
-            "tradeList"
-        );
+    const list = document.getElementById("tradeList");
 
     try {
-
-        if (!db) {
-            throw firebaseInitializationError || new Error("Firebase is not initialized.");
+        const view = financialOnly ? "labour_payments" : "trade_builder";
+        const result = await readTradeApi(`/api/trades?view=${view}`);
+        if (!Array.isArray(result.trades)) {
+            throw new Error("The server returned invalid trade data.");
         }
-
-        const snapshot =
-            await withTimeout(getDocs(
-                collection(
-                    db,
-                    TRADES_COLLECTION
-                )
-            ), 20000, "Timed out while loading trades. Please check your connection and try again.");
-
         tradesById.clear();
+        const trades = result.trades;
 
-        const trades = [];
-        snapshot.forEach(item => {
-            if (item.id === LEGACY_OWNER_ACCOUNT_DOCUMENT_ID) {
-                return;
-            }
-            trades.push({
-                id: item.id,
-                ...item.data()
-            });
-        });
-
-        if (!trades.length) {
-
-            const selector = document.getElementById("financialTradeSelect");
-            if (selector) {
-                selector.innerHTML = '<option value="">No trades available.</option>';
-                selector.disabled = true;
-            }
-
-            list.innerHTML = `
-
-                <div class="empty">
-
-                    No Trades created yet.
-
-                    <br><br>
-
-                    Create the first Trade
-                    on the left.
-
-                </div>
-
-            `;
-
-            return;
-
-        }
 
         trades.forEach(trade => tradesById.set(trade.id, trade));
 
@@ -850,7 +765,7 @@ async function loadTrades() {
 
                 <br><br>
 
-                ${escapeHtml(describeFirebaseError(error))}
+                ${escapeHtml(error?.message || "Please try again.")}
 
             </div>
 
@@ -2560,24 +2475,7 @@ async function saveTrade() {
 
         if (tradeId) {
 
-            const existing =
-                await getDoc(
-                    doc(
-                        db,
-                        TRADES_COLLECTION,
-                        tradeId
-                    )
-                );
-
-
-            if (
-                existing.exists()
-            ) {
-
-                oldTrade =
-                    existing.data();
-
-            }
+            oldTrade = await readTradeForView(tradeId, "trade_builder");
 
         }
 
@@ -4550,33 +4448,10 @@ async function deletePayment(
 
     try {
 
-        const tradeRef =
-            doc(
-                db,
-                TRADES_COLLECTION,
-                currentPaymentTrade.id
-            );
-
-
-        const freshSnapshot =
-            await getDoc(
-                tradeRef
-            );
-
-
-        if (
-            !freshSnapshot.exists()
-        ) {
-
-            throw new Error(
-                "Trade no longer exists."
-            );
-
-        }
-
-
-        const freshTrade =
-            freshSnapshot.data();
+        const freshTrade = await readTradeForView(
+            currentPaymentTrade.id,
+            "labour_payments"
+        );
 
 
         const freshTransactions =
@@ -5093,33 +4968,10 @@ async function savePayment() {
 
     try {
 
-        const tradeRef =
-            doc(
-                db,
-                TRADES_COLLECTION,
-                currentPaymentTrade.id
-            );
-
-
-        const freshSnapshot =
-            await getDoc(
-                tradeRef
-            );
-
-
-        if (
-            !freshSnapshot.exists()
-        ) {
-
-            throw new Error(
-                "Trade no longer exists."
-            );
-
-        }
-
-
-        const freshTrade =
-            freshSnapshot.data();
+        const freshTrade = await readTradeForView(
+            currentPaymentTrade.id,
+            "labour_payments"
+        );
 
         if (type === "labour_settlement") {
             currentPaymentTrade = {

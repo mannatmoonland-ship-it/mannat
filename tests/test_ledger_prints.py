@@ -14,8 +14,9 @@ assert 'href="/ledger-prints"' in dashboard
 assert 'View, print, and download trade ledgers.' in dashboard
 assert 'id="tradeSearch"' in template
 assert 'id="ledgerModal"' in template
-assert 'collection(db, "trades")' in page_js
-assert 'getDocs' in page_js
+assert 'fetch("/api/trades?view=ledger"' in page_js
+assert 'collection(db, "trades")' not in page_js
+assert 'getDocs' not in page_js
 assert 'data-action="view"' in page_js
 assert 'data-action="download"' in page_js
 assert 'downloadLedgerPDF' in page_js
@@ -51,7 +52,7 @@ assert 'paymentLedgerSummary(trade)' in page_js
 assert 'uniquePaymentTransactions' in page_js
 assert 'uniquePaymentTransactions' in pdf_js
 assert 'transaction.amount' in (ROOT / "static/trade_payment_history.mjs").read_text(encoding="utf-8")
-assert 'id !== LEGACY_OWNER_ACCOUNT_DOCUMENT_ID' in page_js
+assert 'trade.get("id") != LEGACY_OWNER_ACCOUNT_DOCUMENT_ID' in app
 assert 'formatDate(item.date)' in page_js
 assert "Date / Type</th>" in page_js
 assert "Labour Earned</th>" in page_js

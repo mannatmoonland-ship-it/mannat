@@ -394,9 +394,15 @@ const DailyReports = (function() {
   }
 
   async function loadTrades() {
-    if (!db) return;
-    const snapshot = await getDocs(collection(db, "trades"));
-    trades = snapshot.docs.map(item => ({ id: item.id, ...item.data() }));
+    const response = await fetch("/api/daily-records/trades", {
+      credentials: "same-origin",
+      cache: "no-store"
+    });
+    const payload = await response.json();
+    if (!response.ok || !Array.isArray(payload.trades)) {
+      throw new Error(payload.error || "Daily Reports trade options could not be loaded.");
+    }
+    trades = payload.trades;
     populateTrades();
     renderWorkerCategories(getTradeCategories(getSelectedTrade()));
   }

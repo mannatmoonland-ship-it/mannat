@@ -1647,6 +1647,10 @@ class InMemoryFirestoreStore:
             for trade_id, trade in self.trades.items()
         ]
 
+    def get_trade(self, trade_id):
+        trade = self.trades.get(trade_id)
+        return {**dict(trade), "id": trade_id} if isinstance(trade, dict) else None
+
     def save_user(self, user):
         if not user.get("id"):
             raise ValueError("User id is required")
@@ -2179,6 +2183,12 @@ class FirebaseFirestoreStore:
             {**(snapshot.to_dict() or {}), "id": snapshot.id}
             for snapshot in self._collection("trades").stream()
         ]
+
+    def get_trade(self, trade_id):
+        snapshot = self._collection("trades").document(trade_id).get()
+        if not snapshot.exists:
+            return None
+        return {**(snapshot.to_dict() or {}), "id": snapshot.id}
 
     def mutate_material_category(self, action, category_id, payload=None):
         categories = self._collection("material_categories")
@@ -7366,6 +7376,7 @@ def trade_builder():
         contract_values_csrf=csrf_token,
         trade_builder_csrf=trade_builder_csrf,
         can_edit_contract_values=True,
+        can_read_contract_values=True,
     )
 
 
@@ -8862,6 +8873,9 @@ def labour_payments():
         can_edit_contract_values = _user_has_compiled_permission(
             user, "contract_values.edit"
         )
+        can_read_contract_values = can_edit_contract_values or _user_has_compiled_permission(
+            user, "ledger.read"
+        )
     except Exception as error:
         app.logger.error(
             "Labour Payments contract authorization failed (%s).",
@@ -8890,6 +8904,7 @@ def labour_payments():
         labour_payments_csrf=csrf_token,
         contract_values_csrf=contract_values_csrf,
         can_edit_contract_values=can_edit_contract_values,
+        can_read_contract_values=can_read_contract_values,
     )
 
 
@@ -9153,6 +9168,150 @@ def _trade_api_authorize(permission):
     return user, None
 
 
+TRADE_READ_VIEW_PERMISSIONS = {
+    "trade_builder": "trade_builder.read",
+    "labour_payments": "labour_payments.read",
+    "ledger": "ledger.read",
+    "building_cost_summary": "building_cost_summary.read",
+}
+TRADE_WORKER_PUBLIC_FIELDS = frozenset({
+    "id", "name", "payment_type", "effective_from", "effectiveFrom"
+})
+TRADE_CONTRACT_ITEM_FIELDS = frozenset({"id", "name", "amount", "createdAt", "updatedAt"})
+TRADE_PAYMENT_FIELDS = frozenset({
+    "id", "type", "date", "amount", "labourEarned", "advanceAdjustment",
+    "outstandingBalance", "paymentMode", "remarks", "createdAt", "updatedAt",
+    "workerCategoryId", "workerCategoryName",
+})
+
+
+def _project_trade_worker(worker, *, financial_access, contract_access):
+    if not isinstance(worker, dict):
+        return None
+    allowed = set(TRADE_WORKER_PUBLIC_FIELDS)
+    if financial_access:
+        allowed.update({"currentWage", "lump_sum_amount"})
+        history = worker.get("wageHistory", [])
+        if isinstance(history, list):
+            allowed.add("wageHistory")
+    if contract_access:
+        allowed.add("work_description")
+    projected = {key: value for key, value in worker.items() if key in allowed}
+    if financial_access and isinstance(worker.get("wageHistory"), list):
+        projected["wageHistory"] = [
+            {key: entry[key] for key in ("dailyWage", "effectiveFrom", "recordedAt") if key in entry}
+            for entry in worker["wageHistory"] if isinstance(entry, dict)
+        ]
+    return projected
+
+
+def _project_trade_document(trade, view, permissions):
+    if not isinstance(trade, dict):
+        return None
+    can_read_payments = bool(
+        {"labour_payments.read", "ledger.read"} & permissions
+        or (view == "building_cost_summary" and "building_cost_summary.read" in permissions)
+    )
+    can_read_contracts = bool({"contract_values.edit", "ledger.read"} & permissions)
+    result = {
+        key: trade[key]
+        for key in ("id", "name")
+        if key in trade and isinstance(trade[key], str)
+    }
+    if view in {"trade_builder", "labour_payments", "ledger"}:
+        result["commonFields"] = [
+            value for value in trade.get("commonFields", [])
+            if isinstance(value, str)
+        ] if isinstance(trade.get("commonFields"), list) else []
+        source_key = "workerCategories" if isinstance(trade.get("workerCategories"), list) else "workers"
+        workers = trade.get(source_key, [])
+        result["workerCategories"] = [
+            projected for worker in workers
+            if (projected := _project_trade_worker(
+                worker,
+                financial_access=can_read_payments,
+                contract_access=can_read_contracts,
+            )) is not None
+        ] if isinstance(workers, list) else []
+    if view == "trade_builder" and can_read_contracts:
+        result["completedWorkValue"] = trade.get("completedWorkValue")
+    if view in {"trade_builder", "labour_payments", "ledger"} and can_read_contracts:
+        contracts = trade.get("contractItems", [])
+        result["contractItems"] = [
+            {key: item[key] for key in TRADE_CONTRACT_ITEM_FIELDS if key in item}
+            for item in contracts if isinstance(item, dict)
+        ] if isinstance(contracts, list) else []
+    if view in {"labour_payments", "ledger", "building_cost_summary"} and can_read_payments:
+        transactions = trade.get("paymentTransactions", [])
+        if view == "building_cost_summary":
+            allowed = frozenset({"id", "type", "date", "amount"})
+        else:
+            allowed = TRADE_PAYMENT_FIELDS
+        result["paymentTransactions"] = [
+            {key: item[key] for key in allowed if key in item}
+            for item in transactions if isinstance(item, dict)
+        ] if isinstance(transactions, list) else []
+    if "createdAt" in trade and view == "trade_builder":
+        result["createdAt"] = trade["createdAt"]
+    if "updatedAt" in trade and view == "trade_builder":
+        result["updatedAt"] = trade["updatedAt"]
+    return result
+
+
+def _trade_read_api_authorize(permission):
+    user = get_current_user()
+    if not user:
+        return None, _trade_api_response({"error": "Authentication required."}, 401)
+    if user.get("must_change_password"):
+        return None, _trade_api_response(
+            {"error": "Change your password before continuing."}, 403
+        )
+    try:
+        permissions = _trade_read_permissions(user)
+        if permission not in permissions:
+            return None, _trade_api_response(
+                {"error": "You do not have permission to read this trade data."}, 403
+            )
+    except Exception as error:
+        app.logger.error("Trade read authorization failed (%s).", type(error).__name__)
+        return None, _trade_api_response(
+            {"error": "Unable to verify trade read permissions."}, 503
+        )
+    return (user, permissions), None
+
+
+def _trade_read_permissions(user):
+    store = get_user_store()
+    return compile_effective_permissions(
+        user,
+        _custom_role_definition_for_user(user, store),
+        get_non_admin_permissions(),
+    )
+
+
+@app.route("/api/trades", methods=["GET"])
+def trade_list_read_api():
+    view = request.args.get("view", "")
+    permission = TRADE_READ_VIEW_PERMISSIONS.get(view)
+    if permission is None:
+        return _trade_api_response({"error": "A valid trade view is required."}, 400)
+    authorized, denied = _trade_read_api_authorize(permission)
+    if denied:
+        return denied
+    user, permissions = authorized
+    try:
+        trades = [
+            projected
+            for trade in get_user_store().list_trades()
+            if trade.get("id") != LEGACY_OWNER_ACCOUNT_DOCUMENT_ID
+            and (projected := _project_trade_document(trade, view, permissions)) is not None
+        ]
+    except Exception as error:
+        app.logger.error("Trade list read failed (%s).", type(error).__name__)
+        return _trade_api_response({"error": "Trade data is temporarily unavailable."}, 503)
+    return _trade_api_response({"trades": trades})
+
+
 def _validate_contract_item(item, *, allow_id):
     if not isinstance(item, dict):
         raise ContractMutationError("Provide valid contract item details.")
@@ -9324,8 +9483,29 @@ def trade_create_api():
     )
 
 
-@app.route("/api/trades/<trade_id>", methods=["PATCH", "DELETE"])
+@app.route("/api/trades/<trade_id>", methods=["GET", "PATCH", "DELETE"])
 def trade_item_api(trade_id):
+    if request.method == "GET":
+        view = request.args.get("view", "")
+        read_permission = TRADE_READ_VIEW_PERMISSIONS.get(view)
+        if read_permission is None:
+            return _trade_api_response({"error": "A valid trade view is required."}, 400)
+        authorized, denied = _trade_read_api_authorize(read_permission)
+        if denied:
+            return denied
+        user, permissions = authorized
+        if not _valid_trade_id(trade_id):
+            return _trade_api_response({"error": "Invalid trade ID."}, 400)
+        try:
+            trade = get_user_store().get_trade(trade_id)
+            projected = _project_trade_document(trade, view, permissions)
+        except Exception as error:
+            app.logger.error("Trade read failed (%s).", type(error).__name__)
+            return _trade_api_response({"error": "Trade data is temporarily unavailable."}, 503)
+        if projected is None:
+            return _trade_api_response({"error": "Trade not found."}, 404)
+        return _trade_api_response({"trade": projected})
+
     permission = (
         "trade_builder.delete"
         if request.method == "DELETE"

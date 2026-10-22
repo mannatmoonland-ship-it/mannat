@@ -10,35 +10,8 @@ import {
   calculateOutstandingBalanceAfterTransaction,
   calculateOutstandingLabourBalance
 } from "./settlement_logic.mjs";
-import { LEGACY_OWNER_ACCOUNT_DOCUMENT_ID } from "./owner_scope_constants.mjs";
-import {
-  describeFirebaseError,
-  firebaseAuthReady,
-  getFirebaseApp,
-  getFirebaseFirestoreSdk
-} from "./firebase_auth.js";
 import { registerEscClose, unregisterEscClose } from "./dialogs.js";
 
-let db = null;
-let firestoreSdk = null;
-let firebaseBootstrapError = null;
-try {
-  await firebaseAuthReady;
-  firestoreSdk = await getFirebaseFirestoreSdk();
-  db = firestoreSdk.getFirestore(await getFirebaseApp());
-} catch (error) {
-  firebaseBootstrapError = error;
-  console.error("Firebase initialization failed:", error?.stage || error?.code || error?.name);
-}
-const firestoreMethod = name => (...args) => {
-  const method = firestoreSdk?.[name];
-  if (typeof method !== "function") {
-    throw firebaseBootstrapError || new Error("The Firebase Firestore SDK is unavailable.");
-  }
-  return method(...args);
-};
-const collection = firestoreMethod("collection");
-const getDocs = firestoreMethod("getDocs");
 const tradeList = document.getElementById("tradeList");
 const status = document.getElementById("ledgerStatus");
 const search = document.getElementById("tradeSearch");
@@ -293,17 +266,21 @@ async function saveLedgerEdits(event) {
 async function loadTrades() {
   try {
     showStatus("Loading trades...");
-    if (!db) throw firebaseBootstrapError || new Error("Firebase is not initialized.");
-    const snapshot = await getDocs(collection(db, "trades"));
-    trades = snapshot.docs
-      .filter(item => item.id !== LEGACY_OWNER_ACCOUNT_DOCUMENT_ID)
-      .map(item => ({ id: item.id, ...item.data() }))
+    const response = await fetch("/api/trades?view=ledger", {
+      credentials: "same-origin",
+      cache: "no-store"
+    });
+    const payload = await response.json();
+    if (!response.ok || !Array.isArray(payload.trades)) {
+      throw new Error(payload.error || "Unable to load trade ledger data.");
+    }
+    trades = payload.trades
       .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
     showStatus(`${trades.length} trade${trades.length === 1 ? "" : "s"} available.`);
     renderTrades();
   } catch (error) {
     console.error("Unable to load Trade Ledger data:", error?.code || error?.stage || error?.name);
-    showStatus(describeFirebaseError(error), "error");
+    showStatus(error?.message || "Unable to load ledger data.", "error");
     tradeList.innerHTML = "";
   }
 }

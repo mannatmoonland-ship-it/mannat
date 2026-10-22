@@ -86,7 +86,7 @@ function render() {
     status.textContent = `Some cost data failed to load (${[...loadErrors].join(", ")}); totals may be incomplete.`;
   } else {
     status.className = "summary-status";
-    status.textContent = loaded.size === 4 ? "Totals update automatically when recorded costs change." : "Loading recorded costs...";
+    status.textContent = loaded.size === 4 ? "Trade costs refresh automatically while this page is open." : "Loading recorded costs...";
   }
 }
 
@@ -118,7 +118,29 @@ async function initialize() {
     db = firestoreSdk.getFirestore(await getFirebaseApp());
     subscribe("material_categories", value => { categories = value; });
     subscribe("material_purchases", value => { purchases = value; });
-    subscribe("trades", value => { trades = value; });
+    const refreshTrades = async () => {
+      try {
+        const response = await fetch("/api/trades?view=building_cost_summary", {
+          credentials: "same-origin",
+          cache: "no-store"
+        });
+        const payload = await response.json();
+        if (!response.ok || !Array.isArray(payload.trades)) {
+          throw new Error(payload.error || "Trade costs could not be loaded.");
+        }
+        trades = payload.trades;
+        loaded.add("trades");
+        loadErrors.delete("trades");
+        render();
+      } catch (error) {
+        loadErrors.add("trades");
+        console.error("Unable to load trade costs:", error?.status || error?.name);
+        status.textContent = "Trade cost data could not be loaded.";
+        status.className = "summary-status error";
+      }
+    };
+    await refreshTrades();
+    window.setInterval(refreshTrades, 30000);
     onSnapshot(
       collection(db, OWNER_SCOPE_COLLECTION, OWNER_SCOPE_DOCUMENT_ID, "payments"),
       snapshot => {

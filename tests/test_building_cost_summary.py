@@ -59,7 +59,9 @@ def test_summary_reads_existing_data_and_never_writes_firestore():
     source = (ROOT / "static/building_cost_summary.js").read_text(encoding="utf-8")
     assert 'subscribe("material_categories"' in source
     assert 'subscribe("material_purchases"' in source
-    assert 'subscribe("trades"' in source
+    assert 'fetch("/api/trades?view=building_cost_summary"' in source
+    assert 'subscribe("trades"' not in source
+    assert 'window.setInterval(refreshTrades, 30000)' in source
     assert 'collection(db, OWNER_SCOPE_COLLECTION, OWNER_SCOPE_DOCUMENT_ID, "payments")' in source
     assert "ownerScopePayments" in source
     assert "onSnapshot(" in source

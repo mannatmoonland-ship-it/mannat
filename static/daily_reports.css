@@ -889,15 +889,22 @@ textarea {
 }
 
 .dr-evupload {
-    background: #d1fadf;
-    color: #05603a;
+    background: #087f5b;
+    color: #fff;
+    width: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    padding: 10px;
 }
 
 .dr-evupload:disabled {
     cursor: not-allowed;
     opacity: 0.55;
 }
-.dr-evupload-camera { background: #e0eaff; color: #243b74; }
+.dr-evupload-gallery { background: #087f5b; color: #fff; }
+.dr-evupload-camera { background: #175cd3; color: #fff; }
+.dr-evupload:hover:not(:disabled) { filter: brightness(1.12); }
+.dr-evupload .dr-form-icon { width: 28px; height: 28px; fill: currentColor; }
 
 .dr-secondary {
     background: #e9eef5;

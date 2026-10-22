@@ -948,8 +948,8 @@ const DailyReports = (function() {
         value="${escapeHtml(data.url || "")}">
       <input class="dr-evupload-input dr-evupload-gallery-input" type="file" accept="image/*" hidden>
       <input class="dr-evupload-input dr-evupload-camera-input" type="file" accept="image/*" capture="environment" hidden>
-      <button type="button" class="dr-evupload dr-evupload-gallery dr-form-action"><span>Choose from Gallery</span></button>
-      <button type="button" class="dr-evupload dr-evupload-camera dr-form-action"><span>Take Photo</span></button>
+      <button type="button" class="dr-evupload dr-evupload-gallery dr-form-action" aria-label="Choose from Gallery" title="Choose from Gallery"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 4v12H8V4h12m0-2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2ZM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6Zm10 2.5L12 11l-1.5-2L8 13h10l-4-4.5Z"/></svg></button>
+      <button type="button" class="dr-evupload dr-evupload-camera dr-form-action" aria-label="Take Photo" title="Take Photo"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 12.2a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6ZM9 3 7.2 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9Zm3 15.8a4.6 4.6 0 1 1 0-9.2 4.6 4.6 0 0 1 0 9.2Z"/></svg></button>
       <button type="button" class="dr-remove" aria-label="Remove evidence" title="Remove evidence"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
     `;
 
@@ -992,7 +992,8 @@ const DailyReports = (function() {
         return;
       }
       uploadButtons.forEach(button => { button.disabled = true; });
-      uploadButton.querySelector("span").textContent = "Uploading...";
+      uploadButton.setAttribute("aria-label", "Uploading photo");
+      uploadButton.title = "Uploading photo";
       try {
         const photoFingerprint = `${photo.name}:${photo.size}:${photo.lastModified}`;
         if (
@@ -1038,14 +1039,17 @@ const DailyReports = (function() {
           5000
         );
       } catch (error) {
-        uploadButton.querySelector("span").textContent = "Retry upload";
+        uploadButton.setAttribute("aria-label", "Retry photo upload");
+        uploadButton.title = "Retry photo upload";
         showToast(error.message || "Unable to upload the photo.", "error", 5000);
       } finally {
         uploadInputs.forEach(input => { input.value = ""; });
         uploadButtons.forEach(button => { button.disabled = false; });
         if (!row.dataset.driveUploadId) {
-          uploadButtons[0].querySelector("span").textContent = "Choose from Gallery";
-          uploadButtons[1].querySelector("span").textContent = "Take Photo";
+          uploadButtons[0].setAttribute("aria-label", "Choose from Gallery");
+          uploadButtons[0].title = "Choose from Gallery";
+          uploadButtons[1].setAttribute("aria-label", "Take Photo");
+          uploadButtons[1].title = "Take Photo";
         }
       }
     };

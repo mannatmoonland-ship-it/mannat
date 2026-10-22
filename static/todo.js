@@ -235,7 +235,8 @@ if (root) {
         contextMenu.replaceChildren();
         actions.forEach(({label, action}) => {
             const button = document.createElement("button");
-            button.type = "button"; button.role = "menuitem"; button.textContent = label;
+            button.type = "button"; button.className = "red-book-context-menu-item";
+            button.setAttribute("role", "menuitem"); button.textContent = label;
             button.addEventListener("click", async () => { hideContextMenu(); await action(); });
             contextMenu.append(button);
         });

@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='todo.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='red_book_context_menu.css') }}">
 </head>
 <body class="dashboard-page todo-page">
 {% include "_page_loader.html" %}
@@ -29,7 +30,7 @@
             <h2 id="todo-archive-title">Archived tasks</h2>
             <p class="todo-status" data-todo-status role="status" aria-live="polite"></p>
             <ol class="todo-list" data-todo-archive aria-label="Archived tasks"></ol>
-            <div class="todo-context-menu" data-todo-context-menu role="menu" hidden></div>
+            <div class="todo-context-menu red-book-context-menu" data-todo-context-menu role="menu" hidden></div>
         </section>
     </main>
     <footer>Mannat Moon Construction</footer>

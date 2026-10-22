@@ -15,6 +15,10 @@
     box-shadow: 0 14px 34px rgba(0, 0, 0, .42);
 }
 
+.red-book-context-menu[hidden] {
+    display: none !important;
+}
+
 body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item {
     min-height: 38px;
     padding: 0 10px;

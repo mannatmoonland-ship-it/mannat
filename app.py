@@ -5034,9 +5034,12 @@ def presence_roster_api():
             ):
                 continue
             candidate = users_by_id[candidate_id][0]
-            name = str(
-                candidate.get("full_name") or candidate.get("username") or "Staff member"
-            ).strip()
+            username = str(candidate.get("username") or "").strip().lstrip("@")
+            name = (
+                f"@{username}"
+                if username
+                else str(candidate.get("full_name") or "Staff member").strip()
+            )
             avatar_id = candidate.get("avatarId", candidate.get("avatar_id"))
             if not isinstance(avatar_id, str) or avatar_id not in PROFILE_AVATAR_IDS:
                 avatar_id = DEFAULT_PROFILE_AVATAR_ID

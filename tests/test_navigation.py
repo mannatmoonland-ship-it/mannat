@@ -58,10 +58,10 @@ def test_navigation_reconstructs_admin_menu_destinations():
         '<div class="mm-nav-submenu" id="mm-nav-management">', 1
     )[1].split("</div>", 1)[0]
     assert 'href="/trade-builder"' not in construction_menu
-    assert 'href="/materials"' in construction_menu
+    assert 'href="/materials"' not in construction_menu
     assert 'href="/trade-builder"' in management_menu
     assert 'href="/materials"' not in management_menu
-    assert '<span>Material Builder</span>' in construction_menu
+    assert '<span>Material Builder</span>' not in construction_menu
     assert '<span>User Management</span>' in management_menu
     assert '<span>Snapshot</span>' in management_menu
     assert 'href="/red-book/archive"' in management_menu
@@ -110,8 +110,13 @@ def test_navigation_hides_super_admin_destinations_for_other_roles():
     construction_menu = html.split(
         '<div class="mm-nav-submenu" id="mm-nav-construction">', 1
     )[1].split("</div>", 1)[0]
-    assert 'href="/materials"' in construction_menu
-    assert '<span>Material Builder</span>' in construction_menu
+    finance_menu = html.split(
+        '<div class="mm-nav-submenu" id="mm-nav-finance">', 1
+    )[1].split("</div>", 1)[0]
+    assert 'href="/materials"' not in construction_menu
+    assert '<span>Material Builder</span>' not in construction_menu
+    assert 'href="/materials"' in finance_menu
+    assert '<span>Material Builder</span>' in finance_menu
     assert 'action="/logout"' in html
     assert 'class="mm-nav-menu-link" href="/profile-settings"' in html
     assert 'class="mm-nav-menu-link" href="/change-password"' in html

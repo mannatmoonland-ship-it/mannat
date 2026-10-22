@@ -874,6 +874,91 @@ const DailyReports = (function() {
     preview.replaceChildren(iframe);
   }
 
+  function openEvidenceImageViewer(clickedImage) {
+    const card = clickedImage.closest(".dr-card");
+    if (!card) return;
+    const images = [...card.querySelectorAll(".dr-ev img.dr-ev-img")]
+      .filter(image => image.isConnected && image.naturalWidth > 0 && image.currentSrc);
+    let currentIndex = images.indexOf(clickedImage);
+    if (currentIndex < 0) return;
+
+    const overlay = document.createElement("div");
+    overlay.className = "dr-image-viewer";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", "Evidence image viewer");
+    overlay.innerHTML = `
+      <button type="button" class="dr-image-viewer-close" aria-label="Close image viewer">&times;</button>
+      <button type="button" class="dr-image-viewer-prev" aria-label="Previous image">&#8249;</button>
+      <figure class="dr-image-viewer-figure">
+        <img class="dr-image-viewer-image" alt="">
+        <figcaption class="dr-image-viewer-caption" aria-live="polite"></figcaption>
+      </figure>
+      <button type="button" class="dr-image-viewer-next" aria-label="Next image">&#8250;</button>
+      <div class="dr-image-viewer-count" aria-live="polite"></div>`;
+    document.body.append(overlay);
+
+    const viewerImage = overlay.querySelector(".dr-image-viewer-image");
+    const caption = overlay.querySelector(".dr-image-viewer-caption");
+    const count = overlay.querySelector(".dr-image-viewer-count");
+    const previous = overlay.querySelector(".dr-image-viewer-prev");
+    const next = overlay.querySelector(".dr-image-viewer-next");
+    const closeButton = overlay.querySelector(".dr-image-viewer-close");
+    const priorOverflow = document.body.style.overflow;
+    const priorFocus = document.activeElement;
+    document.body.style.overflow = "hidden";
+
+    const render = () => {
+      const source = images[currentIndex];
+      viewerImage.src = source.currentSrc || source.src;
+      viewerImage.alt = source.alt || `Evidence image ${currentIndex + 1}`;
+      const title = source.closest(".dr-ev")?.querySelector(".dr-evtitle")?.textContent?.trim();
+      caption.textContent = title || "";
+      count.textContent = `${currentIndex + 1} / ${images.length}`;
+      previous.disabled = images.length < 2;
+      next.disabled = images.length < 2;
+    };
+    const move = direction => {
+      currentIndex = (currentIndex + direction + images.length) % images.length;
+      render();
+    };
+    const close = () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = priorOverflow;
+      overlay.remove();
+      if (priorFocus instanceof HTMLElement) priorFocus.focus();
+    };
+    const onKeyDown = event => {
+      if (event.key === "Escape") { event.preventDefault(); close(); }
+      else if (event.key === "ArrowLeft") { event.preventDefault(); move(-1); }
+      else if (event.key === "ArrowRight") { event.preventDefault(); move(1); }
+    };
+    previous.addEventListener("click", () => move(-1));
+    next.addEventListener("click", () => move(1));
+    closeButton.addEventListener("click", close);
+    overlay.addEventListener("click", event => { if (event.target === overlay) close(); });
+    document.addEventListener("keydown", onKeyDown);
+
+    let touchStartX = null;
+    overlay.addEventListener("touchstart", event => {
+      touchStartX = event.changedTouches[0]?.clientX ?? null;
+    }, {passive: true});
+    overlay.addEventListener("touchend", event => {
+      if (touchStartX === null) return;
+      const delta = event.changedTouches[0].clientX - touchStartX;
+      if (Math.abs(delta) > 48) move(delta > 0 ? -1 : 1);
+      touchStartX = null;
+    }, {passive: true});
+
+    render();
+    closeButton.focus();
+  }
+
+  function handleEvidenceImageClick(event) {
+    const image = event.target.closest(".dr-ev img.dr-ev-img");
+    if (image && image.closest(".dr-card")) openEvidenceImageViewer(image);
+  }
+
   function escapeHtml(s){
     return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
@@ -946,7 +1031,7 @@ const DailyReports = (function() {
         class="dr-evurl"
         placeholder="YouTube, Google Drive, or Google Photos link"
         value="${escapeHtml(data.url || "")}">
-      <input class="dr-evupload-input dr-evupload-gallery-input" type="file" accept="image/*" hidden>
+      <input class="dr-evupload-input dr-evupload-gallery-input" type="file" accept="image/*" multiple hidden>
       <input class="dr-evupload-input dr-evupload-camera-input" type="file" accept="image/*" capture="environment" hidden>
       <button type="button" class="dr-evupload dr-evupload-gallery dr-form-action" aria-label="Choose from Gallery" title="Choose from Gallery"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 4v12H8V4h12m0-2H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2ZM4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6Zm10 2.5L12 11l-1.5-2L8 13h10l-4-4.5Z"/></svg></button>
       <button type="button" class="dr-evupload dr-evupload-camera dr-form-action" aria-label="Take Photo" title="Take Photo"><svg class="dr-form-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 12.2a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6ZM9 3 7.2 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.2L15 3H9Zm3 15.8a4.6 4.6 0 1 1 0-9.2 4.6 4.6 0 0 1 0 9.2Z"/></svg></button>
@@ -975,13 +1060,8 @@ const DailyReports = (function() {
       button.disabled = false;
       button.addEventListener("click", () => uploadInputs[index].click());
     });
-    const handlePhotoSelection = async event => {
-      const uploadInput = event.currentTarget;
-      const uploadButton = uploadButtons[uploadInputs.indexOf(uploadInput)];
-      const photo = uploadInput.files?.[0];
-      if (!photo) return;
+    const uploadPhoto = async (photo, row, uploadButton) => {
       if (!driveConnected) {
-        uploadInput.value = "";
         showToast(
           driveConfigured
             ? "Connect Google Drive before uploading this photo."
@@ -991,7 +1071,8 @@ const DailyReports = (function() {
         );
         return;
       }
-      uploadButtons.forEach(button => { button.disabled = true; });
+      const targetButtons = [...row.querySelectorAll(".dr-evupload")];
+      targetButtons.forEach(button => { button.disabled = true; });
       uploadButton.setAttribute("aria-label", "Uploading photo");
       uploadButton.title = "Uploading photo";
       try {
@@ -1026,7 +1107,7 @@ const DailyReports = (function() {
           throw new Error(payload.error || "Unable to upload the photo.");
         }
         row.querySelector(".dr-evtype").value = "Photo";
-        row.querySelector(".dr-evtitle").value = payload.title || "Site photo";
+        row.querySelector(".dr-evtitle").value = payload.title || photo.name || "Site photo";
         row.querySelector(".dr-evurl").value = payload.url;
         row.dataset.driveFileId = payload.file_id;
         row.dataset.drivePreviewUrl = payload.preview_url;
@@ -1043,17 +1124,31 @@ const DailyReports = (function() {
         uploadButton.title = "Retry photo upload";
         showToast(error.message || "Unable to upload the photo.", "error", 5000);
       } finally {
-        uploadInputs.forEach(input => { input.value = ""; });
-        uploadButtons.forEach(button => { button.disabled = false; });
+        targetButtons.forEach(button => { button.disabled = false; });
         if (!row.dataset.driveUploadId) {
-          uploadButtons[0].setAttribute("aria-label", "Choose from Gallery");
-          uploadButtons[0].title = "Choose from Gallery";
-          uploadButtons[1].setAttribute("aria-label", "Take Photo");
-          uploadButtons[1].title = "Take Photo";
+          targetButtons[0].setAttribute("aria-label", "Choose from Gallery");
+          targetButtons[0].title = "Choose from Gallery";
+          targetButtons[1].setAttribute("aria-label", "Take Photo");
+          targetButtons[1].title = "Take Photo";
         }
       }
     };
-    uploadInputs.forEach(input => input.addEventListener("change", handlePhotoSelection));
+    const handlePhotoSelection = async event => {
+      const uploadInput = event.currentTarget;
+      const uploadButton = uploadButtons[uploadInputs.indexOf(uploadInput)];
+      const photos = [...(uploadInput.files || [])];
+      if (!photos.length) return;
+      if (photos.length === 1 || uploadInput.classList.contains("dr-evupload-camera-input")) {
+        await uploadPhoto(photos[0], row, uploadButton);
+      } else {
+        for (let index = 0; index < photos.length; index += 1) {
+          const targetRow = index === 0 ? row : addEvidenceRow();
+          await uploadPhoto(photos[index], targetRow, targetRow.querySelector(".dr-evupload-gallery"));
+        }
+      }
+      uploadInput.value = "";
+    };
+    uploadInputs.forEach(uploadInput => uploadInput.addEventListener("change", handlePhotoSelection));
 
     // Debounced URL input to avoid excessive extraction requests
     row.querySelector(".dr-evurl").oninput = () => {
@@ -2169,6 +2264,7 @@ const DailyReports = (function() {
 
     // Button listeners
     $("dr-records").addEventListener("click", activateYouTubePreview);
+    $("dr-records").addEventListener("click", handleEvidenceImageClick);
     $("dr-livePreview").addEventListener("click", activateYouTubePreview);
     $("dr-records").addEventListener("click", retryGooglePhotosPreview);
     $("dr-livePreview").addEventListener("click", retryGooglePhotosPreview);

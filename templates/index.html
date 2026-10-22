@@ -1698,10 +1698,12 @@
 
 </header>
 
+{% if not financial_only %}
 <section class="mm-page-heading" aria-labelledby="tradeBuilderPageTitle">
     <h1 id="tradeBuilderPageTitle">Trade Builder</h1>
     <p>Trade Builder &amp; Labour Payment Management</p>
 </section>
+{% endif %}
 
 <div id="status"></div>
 
@@ -1860,13 +1862,9 @@
 
             <div class="card">
 
-                <h2>
-                    {% if financial_only %}
-                    Labour Payments &amp; Contract Capping
-                    {% else %}
-                    Trades
-                    {% endif %}
-                </h2>
+                {% if not financial_only %}
+                <h2>Trades</h2>
+                {% endif %}
 
                 {% if financial_only %}
                 <label

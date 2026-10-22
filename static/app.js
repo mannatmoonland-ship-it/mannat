@@ -2219,6 +2219,7 @@ function renderTrade(
 
 
             <button
+                type="button"
                 class="btn-primary payment-btn"
             >
                 Open Payment Ledger
@@ -2894,106 +2895,50 @@ async function copyPaymentTransactionId(transactionId) {
 function openPaymentModal(
     trade
 ) {
-
-    currentPaymentTrade =
-        trade;
-
-
-    editingPaymentId =
-        null;
-
-    settlementAmountUserEdited = false;
-
-
-    document.getElementById(
-        "paymentTradeId"
-    ).value =
-        trade.id;
-
-
-    document.getElementById(
-        "paymentTradeName"
-    ).textContent =
-        trade.name;
-
-
-    document.getElementById(
-        "paymentDate"
-    ).value =
-        todayString();
-
-
-    document.getElementById(
-        "paymentAmount"
-    ).value =
-        "";
-
-
-    document.getElementById(
-        "labourEarned"
-    ).value =
-        "";
-
-
-    document.getElementById(
-        "adjustmentAmount"
-    ).value =
-        "";
-
-
-    document.getElementById(
-        "paymentRemarks"
-    ).value =
-        "";
-
-
-    document.getElementById(
-        "paymentType"
-    ).value =
-        "mobilization_advance";
-
-
-    document.getElementById(
-        "advanceAdjustmentMode"
-    ).value =
-        "none";
-
-
-    document.getElementById(
-        "paymentMode"
-    ).value =
-        "Cash";
-
-
-    document.getElementById(
-        "savePaymentBtn"
-    ).textContent =
-        "Save Payment";
-
-
-    updatePaymentForm();
-
-
-    renderPaymentHistory(
-        trade
-    );
-
-
     const paymentModal =
         document.getElementById(
             "paymentModal"
         );
 
+    if (!paymentModal) {
+        showStatus("The payment ledger could not open. Reload the page and try again.", true);
+        return;
+    }
 
+    currentPaymentTrade = trade;
+    editingPaymentId = null;
+    settlementAmountUserEdited = false;
     paymentModal.classList.add(
         "show"
     );
-
     registerEscClose(
         paymentModal,
         () => closePaymentModal()
     );
 
+    try {
+        document.getElementById("paymentTradeId").value = trade.id;
+        document.getElementById("paymentTradeName").textContent = trade.name || "Unnamed trade";
+        document.getElementById("paymentDate").value = todayString();
+        document.getElementById("paymentAmount").value = "";
+        document.getElementById("labourEarned").value = "";
+        document.getElementById("adjustmentAmount").value = "";
+        document.getElementById("paymentRemarks").value = "";
+        document.getElementById("paymentType").value = "mobilization_advance";
+        document.getElementById("advanceAdjustmentMode").value = "none";
+        document.getElementById("paymentMode").value = "Cash";
+        document.getElementById("savePaymentBtn").textContent = "Save Payment";
+
+        updatePaymentForm();
+        renderPaymentHistory(trade);
+    } catch (error) {
+        console.error("Payment ledger failed to render", error);
+        const history = document.getElementById("paymentHistory");
+        if (history) {
+            history.textContent = "Payment history could not be displayed. Reload the page and try again.";
+        }
+        showStatus("The payment ledger opened, but some details could not be displayed.", true);
+    }
 
     setPaymentModalWidth();
 

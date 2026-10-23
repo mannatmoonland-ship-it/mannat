@@ -38,7 +38,7 @@ function describeError(error, fallback) {
 
 function describeNotificationError(error, fallback) {
   if (error?.name === "AbortError" && /push service error/i.test(error?.message || "")) {
-    return "The browser could not create a push subscription. Confirm FIREBASE_WEB_PUSH_VAPID_KEY is the Web Push key for this same Firebase project. In Brave, allow Google/Firebase push connections and check Shields, VPN, firewall, or DNS filtering, then reload and try again. If it still fails, try Chrome or Edge to check whether the browser is blocking push.";
+    return "Brave's push service rejected the subscription. Open brave://settings/privacy and enable “Use Google services for push messaging,” then check that notifications are allowed for this site and temporarily turn off Shields or VPN/DNS filtering. Also confirm FIREBASE_WEB_PUSH_VAPID_KEY is the Web Push key for this same Firebase project. Reload and try again; if it still fails, test in Chrome or Edge.";
   }
   return describeError(error, fallback);
 }

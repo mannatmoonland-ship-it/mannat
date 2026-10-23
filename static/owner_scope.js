@@ -62,6 +62,7 @@ const money = new Intl.NumberFormat("en-IN", {
 });
 
 let ownerScopeData = null;
+let ownerScopeLoadInFlight = false;
 let editingItemId = null;
 let editingPaymentDetails = false;
 let createRequestIdReady = false;
@@ -272,14 +273,18 @@ function ownerScopeCreateRequestId(payload) {
     return requestId;
 }
 
-async function loadOwnerScope() {
-    showStatus("Loading Owner Scope data…");
+async function loadOwnerScope({ silent = false } = {}) {
+    if (ownerScopeLoadInFlight) return;
+    ownerScopeLoadInFlight = true;
+    if (!silent && !ownerScopeData) showStatus("Loading Owner Scope data...");
     try {
-        ownerScopeData = await requestJson("/api/owner-scope");
+        ownerScopeData = await requestJson("/api/owner-scope", { cache: "no-store" });
         renderItems();
         showStatus("");
     } catch (error) {
         showStatus(error.message, "error");
+    } finally {
+        ownerScopeLoadInFlight = false;
     }
 }
 
@@ -375,7 +380,12 @@ page.itemsBody.addEventListener("click", async event => {
     try {
         await requestJson(`/api/owner-scope/items/${encodeURIComponent(item.id)}`, { method: "DELETE" });
         await loadOwnerScope();
-    } catch (error) {
+window.setInterval(() => {
+    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
+}, 5000);
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
+});    } catch (error) {
         showStatus(error.message, "error");
     }
 });
@@ -418,7 +428,12 @@ page.form.addEventListener("submit", async event => {
             });
             closeItemDialog();
             await loadOwnerScope();
-            try {
+window.setInterval(() => {
+    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
+}, 5000);
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
+});            try {
                 initializeOwnerScopeCreateRequestId({ forceNew: true });
             } catch (error) {
                 showStatus(error.message, "error");
@@ -427,7 +442,12 @@ page.form.addEventListener("submit", async event => {
         }
         closeItemDialog();
         await loadOwnerScope();
-    } catch (error) {
+window.setInterval(() => {
+    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
+}, 5000);
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
+});    } catch (error) {
         page.formError.textContent = error.message;
         page.formError.hidden = false;
     } finally {
@@ -444,3 +464,9 @@ try {
 }
 
 loadOwnerScope();
+window.setInterval(() => {
+    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
+}, 5000);
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
+});

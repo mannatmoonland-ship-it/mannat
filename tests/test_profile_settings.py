@@ -109,6 +109,7 @@ def test_profile_settings_shows_safe_authenticated_user_information(profile_clie
     assert 'function describeError(error, fallback)' in web_push_script
     assert 'function describeNotificationError(error, fallback)' in web_push_script
     assert "Confirm FIREBASE_WEB_PUSH_VAPID_KEY is the Web Push key for this same Firebase project." in web_push_script
+    assert "brave://settings/privacy and enable “Use Google services for push messaging,”" in web_push_script
     assert 'showStatus(describeNotificationError(error, "Unable to enable notifications on this device.")' in web_push_script
     token_setup = web_push_script.split("async function getCurrentDeviceToken", 1)[1].split(
         "async function attachForegroundListener", 1

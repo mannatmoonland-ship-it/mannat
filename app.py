@@ -10776,6 +10776,21 @@ def daily_reports():
     return response
 
 
+@app.route("/daily-report-summary")
+def daily_report_summary():
+    if not get_current_user():
+        return _unauthenticated_response()
+
+    current_user, denied = _daily_record_api_authorize("daily_reports.read")
+    if denied:
+        return denied
+
+    response = app.make_response(render_template(
+        "daily_report_summary.html", current_user=current_user
+    ))
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
 @app.route("/user-guide")
 @require_login
 def user_guide():

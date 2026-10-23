@@ -1,7 +1,7 @@
 {% set nav_user = current_user if current_user is defined else (profile if profile is defined else None) %}
 {% set nav_role = (nav_user.role|lower) if nav_user and nav_user.role is defined else '' %}
 {% set nav_endpoint = request.endpoint or '' %}
-{% set construction_endpoints = ['daily_reports', 'red_book_page', 'red_book_archive_page', 'drawings'] %}
+{% set construction_endpoints = ['daily_reports', 'daily_report_summary', 'red_book_page', 'red_book_archive_page', 'drawings'] %}
 {% set finance_endpoints = ['labour_payments', 'owner_scope_page', 'building_cost_summary', 'ledger_prints', 'material_builder'] %}
 {% set management_endpoints = ['trade_builder', 'user_management_page', 'user_management_details', 'forgot_password', 'snapshots.snapshot_page'] %}
 {% set help_endpoints = ['user_guide', 'developer_guide'] %}
@@ -56,6 +56,7 @@
             </button>
             <div class="mm-nav-submenu" id="mm-nav-construction">
                 <a href="{{ url_for('daily_reports') }}" {% if nav_endpoint == 'daily_reports' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-report"></use></svg><span>Daily Reports</span></a>
+                <a href="{{ url_for('daily_report_summary') }}" {% if nav_endpoint == 'daily_report_summary' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-report"></use></svg><span>Daily Report Summary</span></a>
                 <a href="{{ url_for('red_book_page') }}" {% if nav_endpoint == 'red_book_page' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-book"></use></svg><span>Red Book</span></a>
                 <a href="{{ url_for('red_book_archive_page') }}" {% if nav_endpoint == 'red_book_archive_page' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-backup"></use></svg><span>Red Book Archieve</span></a>
                 <a href="{{ url_for('drawings') }}" {% if nav_endpoint == 'drawings' %}aria-current="page"{% endif %}><svg class="mm-menu-icon"><use href="#mm-icon-drawings"></use></svg><span>Drawings</span></a>

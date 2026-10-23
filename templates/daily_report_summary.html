@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mannat Moon - Daily Report Summary</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('favicon') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='daily_report_summary.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='design_system.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='site_motion.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mm_navigation.css') }}">
+</head>
+<body class="daily-summary-page">
+{% include "_page_loader.html" %}
+<header class="mm-app-header">{% include "_navigation.html" %}</header>
+<main class="summary-main">
+    <section class="summary-hero">
+        <div><p class="summary-eyebrow">CONSTRUCTION</p><h1>Daily Report Summary</h1><p>Work completed by date, collected from Daily Reports.</p></div>
+        <button class="summary-print" id="summaryPrint" type="button">Print / Save PDF</button>
+    </section>
+    <section class="summary-count" aria-live="polite"><strong id="workDays">—</strong><span>Total work days</span></section>
+    <p id="summaryStatus" class="summary-status" role="status">Loading daily reports…</p>
+    <section class="summary-card" aria-label="Work completed by date">
+        <div class="summary-table-wrap"><table><thead><tr><th scope="col">Date</th><th scope="col">Work done</th></tr></thead><tbody id="summaryRows"><tr><td colspan="2">Loading…</td></tr></tbody></table></div>
+    </section>
+</main>
+<script type="module" src="{{ url_for('static', filename='daily_report_summary.js') }}"></script>
+</body>
+</html>

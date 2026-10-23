@@ -20,6 +20,9 @@
 }
 
 body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
     min-height: 38px;
     padding: 0 10px;
     border: 1px solid transparent;
@@ -32,6 +35,13 @@ body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item {
     cursor: pointer;
     filter: none;
     transform: none;
+}
+
+.red-book-context-menu-icon {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+    fill: currentColor;
 }
 
 body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item:hover,
@@ -47,6 +57,13 @@ body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item:f
 body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item:focus-visible {
     outline: 2px solid #83e5c1;
     outline-offset: 1px;
+}
+
+body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item[data-menu-initial-focus]:focus-visible {
+    border-color: transparent;
+    color: inherit;
+    background: transparent;
+    outline: none;
 }
 
 body:not(.login-page) .red-book-context-menu button.red-book-context-menu-item:disabled {

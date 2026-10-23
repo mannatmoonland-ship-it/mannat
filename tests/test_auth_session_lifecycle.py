@@ -132,8 +132,8 @@ def test_inactive_user_session_is_rejected_and_invalidated(auth_clients):
 
     response = staff_client.get("/")
 
-    assert response.status_code == 401
-    assert b"You need to sign in to view this page." in response.data
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/login?next=/"
     assert store.get_user("staff-user")["active_sessions"] == []
     with staff_client.session_transaction() as flask_session:
         assert not flask_session
@@ -151,7 +151,9 @@ def test_deactivation_invalidates_sessions_and_reactivation_requires_login(auth_
     assert inactive_user["is_active"] is False
     assert inactive_user["active_sessions"] == []
     assert inactive_user["authorization_version"] == 4
-    assert staff_client.get("/").status_code == 401
+    login_redirect = staff_client.get("/", follow_redirects=False)
+    assert login_redirect.status_code == 302
+    assert login_redirect.headers["Location"] == "/login?next=/"
 
     reactivated = admin_client.post(
         "/user-management/staff-user/toggle-status",
@@ -162,7 +164,9 @@ def test_deactivation_invalidates_sessions_and_reactivation_requires_login(auth_
     assert active_user["is_active"] is True
     assert active_user["active_sessions"] == []
     assert active_user["authorization_version"] == 5
-    assert staff_client.get("/").status_code == 401
+    login_redirect = staff_client.get("/", follow_redirects=False)
+    assert login_redirect.status_code == 302
+    assert login_redirect.headers["Location"] == "/login?next=/"
 
     fresh_client = app.test_client()
     login_response = fresh_client.post(
@@ -308,8 +312,8 @@ def test_incomplete_or_mismatched_user_record_fails_closed(auth_clients):
 
     response = staff_client.get("/")
 
-    assert response.status_code == 401
-    assert b"You need to sign in to view this page." in response.data
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/login?next=/"
 
 
 def test_password_reset_invalidates_sessions_and_advances_authorization_version(auth_clients):

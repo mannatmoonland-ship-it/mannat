@@ -98,14 +98,9 @@ document.querySelectorAll("[data-animal-avatar]").forEach(avatar => {
             menu.hidden = !shouldOpen;
         };
 
-        let closeTimer;
         if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
             account.addEventListener("pointerenter", () => {
-                window.clearTimeout(closeTimer);
                 setOpen(true);
-            });
-            account.addEventListener("pointerleave", () => {
-                closeTimer = window.setTimeout(() => setOpen(false), 150);
             });
         }
 

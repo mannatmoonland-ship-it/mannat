@@ -122,6 +122,25 @@ def test_navigation_hides_super_admin_destinations_for_other_roles():
     assert 'class="mm-nav-menu-link" href="/change-password"' in html
 
 
+def test_logout_uses_a_native_csrf_protected_post_form():
+    html = render_navigation({
+        "username": "admin",
+        "full_name": "Admin User",
+        "role": "super_admin",
+        "id": "admin-user",
+        "active_sessions": ["admin-session"],
+    })
+
+    assert '<form method="post" action="/logout" class="mm-nav-logout">' in html
+    assert 'name="csrf_token"' in html
+    assert 'type="submit"><svg class="mm-menu-icon"><use href="#mm-icon-logout"' in html
+    navigation_script = (
+        Path(__file__).resolve().parents[1] / "static" / "mm_navigation.js"
+    ).read_text(encoding="utf-8")
+    assert 'account.querySelector(".mm-nav-logout")' not in navigation_script
+    assert 'account.addEventListener("pointerleave"' not in navigation_script
+
+
 def test_authenticated_pages_share_navigation_partial_and_styles():
     templates_dir = Path(__file__).resolve().parents[1] / "templates"
     template_names = (

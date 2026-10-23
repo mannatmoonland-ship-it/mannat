@@ -1,10 +1,11 @@
+import "./red_book_context_menu.js";
+
 const root = document.querySelector("[data-todo-page]");
 if (root) {
     const form = root.querySelector("[data-todo-form]");
     const input = form.querySelector("input[name='text']");
     const list = root.querySelector("[data-todo-list]");
-    const contextMenu = root.querySelector("[data-todo-context-menu]");
-    document.body.append(contextMenu);
+    const touchOnly = window.matchMedia("(hover: none) and (pointer: coarse)").matches;
     const status = root.querySelector("[data-todo-status]");
     root.querySelector("[data-print-todos]").addEventListener("click", () => window.print());
     let busy = false;
@@ -105,8 +106,11 @@ if (root) {
             const edit = document.createElement("button");
             const remove = document.createElement("button");
             row.dataset.todoId = item.id;
-            row.draggable = true;
-            row.setAttribute("aria-label", `Task: ${item.text}. Drag to reorder.`);
+            row.dataset.contextItemId = item.id;
+            row.draggable = !touchOnly;
+            row.setAttribute("aria-label", touchOnly
+                ? `Task: ${item.text}. Long press for task actions.`
+                : `Task: ${item.text}. Drag to reorder.`);
             text.className = "todo-item-text";
             text.textContent = item.text;
             itemContent.className = "todo-item-content";
@@ -120,28 +124,6 @@ if (root) {
             itemContent.append(text, createdStamp);
             actions.className = "todo-item-actions";
             up.type = down.type = edit.type = remove.type = "button";
-            row.addEventListener("contextmenu", event => {
-                event.preventDefault();
-                showContextMenu(event.clientX, event.clientY, [
-                    {label: "Copy task", action: async () => {
-                        const copied = await copyTaskText(item.text);
-                        message(copied ? "Task copied to clipboard." : "Clipboard access is unavailable.");
-                    }},
-                    {label: "Mark as done", action: async () => {
-                        if (busy) return;
-                        busy = true;
-                        setItemProgress(row, "Moving task to archive...");
-                        try {
-                            const response = await fetch(`/api/profile/todos/${encodeURIComponent(item.id)}`, {
-                                method: "PATCH", headers: {"Content-Type": "application/json"},
-                                body: JSON.stringify({completed: true, csrf_token: root.dataset.csrfToken})
-                            });
-                            await readApiResponse(response); await loadItems(); message("Task moved to the archive.");
-                        } catch (error) { clearItemProgress(row); message(error.message); }
-                        finally { busy = false; }
-                    }}
-                ]);
-            });
             up.className = "todo-move-button todo-move-up";
             down.className = "todo-move-button todo-move-down";
             up.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.59 5.58L20 12l-8-8-8 8z"/></svg>';
@@ -231,25 +213,32 @@ if (root) {
             list.append(row);
         });
     };
-    const showContextMenu = (x, y, actions) => {
-        contextMenu.replaceChildren();
-        actions.forEach(({label, action}) => {
-            const button = document.createElement("button");
-            button.type = "button"; button.className = "red-book-context-menu-item";
-            button.setAttribute("role", "menuitem"); button.textContent = label;
-            button.addEventListener("click", async () => { hideContextMenu(); await action(); });
-            contextMenu.append(button);
-        });
-        contextMenu.hidden = false;
-        const bounds = contextMenu.getBoundingClientRect();
-        contextMenu.style.left = `${Math.max(8, Math.min(x, innerWidth - bounds.width - 8))}px`;
-        contextMenu.style.top = `${Math.max(8, Math.min(y, innerHeight - bounds.height - 8))}px`;
-        contextMenu.querySelector("button")?.focus();
-    };
-    const hideContextMenu = () => { contextMenu.hidden = true; };
-    document.addEventListener("pointerdown", event => { if (!contextMenu.contains(event.target)) hideContextMenu(); });
-    document.addEventListener("keydown", event => { if (event.key === "Escape") hideContextMenu(); });
-    window.addEventListener("scroll", hideContextMenu, true);
+    window.MannatRedBookContextMenu.bind(list, {
+        getActions(row) {
+            const item = [...list.querySelectorAll("li[data-todo-id]")].find(candidate => candidate === row);
+            if (!item) return [];
+            return [
+                {action: async () => {
+                    const copied = await copyTaskText(item.querySelector(".todo-item-text")?.textContent || "");
+                    message(copied ? "Task copied to clipboard." : "Clipboard access is unavailable.");
+                }, label: "Copy task"},
+                {action: async () => {
+                    if (busy) return;
+                    busy = true;
+                    setItemProgress(item, "Moving task to archive...");
+                    try {
+                        const response = await fetch(`/api/profile/todos/${encodeURIComponent(item.dataset.todoId)}`, {
+                            method: "PATCH", headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({completed: true, csrf_token: root.dataset.csrfToken})
+                        });
+                        await readApiResponse(response); await loadItems(); message("Task moved to the archive.");
+                    } catch (error) { clearItemProgress(item); message(error.message); }
+                    finally { busy = false; }
+                }, label: "Mark as done"}
+            ];
+        },
+        onAction(action, row) { if (typeof action === "function") void action(row); }
+    });
     list.addEventListener("dragstart", event => {
         const row = event.target.closest("li[data-todo-id]");
         if (!row) return;

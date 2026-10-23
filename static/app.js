@@ -68,6 +68,7 @@ function generateUuid() {
 
 let editingTradeId = null;
 let pendingTradeCreateRequest = null;
+let tradeOrderSaving = false;
 
 async function sendTradeMutation(url, method, payload = null) {
     const csrfToken = document.body.dataset.tradeBuilderCsrf
@@ -700,21 +701,13 @@ async function loadTrades() {
 
         trades.forEach(trade => tradesById.set(trade.id, trade));
 
-        trades.sort(
-            (
-                a,
-                b
-            ) =>
-
-                String(
-                    a.name || ""
-                ).localeCompare(
-                    String(
-                        b.name || ""
-                    )
-                )
-
-        );
+        trades.sort((a, b) => {
+            const aHasOrder = Number.isInteger(a.sortOrder) && a.sortOrder >= 0;
+            const bHasOrder = Number.isInteger(b.sortOrder) && b.sortOrder >= 0;
+            if (aHasOrder && bHasOrder) return a.sortOrder - b.sortOrder;
+            if (aHasOrder !== bHasOrder) return aHasOrder ? -1 : 1;
+            return String(a.name || "").localeCompare(String(b.name || ""));
+        });
 
         if (financialOnly) {
             const selector = document.getElementById("financialTradeSelect");
@@ -748,6 +741,7 @@ async function loadTrades() {
 
             }
         );
+        updateTradeSortButtons();
 
     }
 
@@ -779,6 +773,46 @@ async function loadTrades() {
 
     }
 
+}
+
+function updateTradeSortButtons() {
+    const cards = [...(document.getElementById("tradeList")?.querySelectorAll(":scope > .trade-card") || [])];
+    cards.forEach((card, index) => {
+        const up = card.querySelector(".trade-sort-up");
+        const down = card.querySelector(".trade-sort-down");
+        if (up) up.disabled = tradeOrderSaving || index === 0;
+        if (down) down.disabled = tradeOrderSaving || index === cards.length - 1;
+    });
+}
+
+async function moveTrade(tradeId, offset) {
+    if (tradeOrderSaving || financialOnly) return;
+    const list = document.getElementById("tradeList");
+    const cards = [...list.querySelectorAll(":scope > .trade-card")];
+    const index = cards.findIndex(card => card.dataset.tradeId === tradeId);
+    const targetIndex = index + offset;
+    if (index < 0 || targetIndex < 0 || targetIndex >= cards.length) return;
+
+    const movingCard = cards[index];
+    if (offset < 0) list.insertBefore(movingCard, cards[targetIndex]);
+    else list.insertBefore(cards[targetIndex], movingCard);
+    tradeOrderSaving = true;
+    updateTradeSortButtons();
+    try {
+        const tradeIds = [...list.querySelectorAll(":scope > .trade-card")].map(card => card.dataset.tradeId);
+        await sendTradeMutation("/api/trades/order", "PUT", { tradeIds });
+        tradeIds.forEach((id, sortOrder) => {
+            const trade = tradesById.get(id);
+            if (trade) trade.sortOrder = sortOrder;
+        });
+        showStatus("Trade order saved.");
+    } catch (error) {
+        await loadTrades();
+        showStatus(error.message || "Unable to save trade order.", true);
+    } finally {
+        tradeOrderSaving = false;
+        updateTradeSortButtons();
+    }
 }
 
 function renderSelectedFinancialTrade(tradeId) {
@@ -2228,6 +2262,25 @@ function renderTrade(
         </div>
 
     `;
+
+    if (!financialOnly) {
+        const toolbar = card.querySelector(".trade-buttons");
+        const up = document.createElement("button");
+        const down = document.createElement("button");
+        up.type = down.type = "button";
+        up.className = "btn-secondary btn-small trade-sort-button trade-sort-up";
+        down.className = "btn-secondary btn-small trade-sort-button trade-sort-down";
+        up.title = "Move trade up";
+        down.title = "Move trade down";
+        up.setAttribute("aria-label", `Move ${trade.name} up`);
+        down.setAttribute("aria-label", `Move ${trade.name} down`);
+        up.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.59 5.58L20 12l-8-8-8 8z"/></svg>';
+        down.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12l-1.41-1.41L13 16.17V4h-2v12.17l-5.59-5.58L4 12l8 8 8-8z"/></svg>';
+        up.addEventListener("click", () => moveTrade(trade.id, -1));
+        down.addEventListener("click", () => moveTrade(trade.id, 1));
+        toolbar.prepend(down);
+        toolbar.prepend(up);
+    }
 
 
     /* =====================================================

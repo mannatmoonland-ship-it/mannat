@@ -1647,6 +1647,11 @@ class InMemoryFirestoreStore:
             for trade_id, trade in self.trades.items()
         ]
 
+    def set_trade_order(self, trade_ids):
+        with self._trade_mutation_lock:
+            for sort_order, trade_id in enumerate(trade_ids):
+                self.trades[trade_id]["sortOrder"] = sort_order
+
     def get_trade(self, trade_id):
         trade = self.trades.get(trade_id)
         return {**dict(trade), "id": trade_id} if isinstance(trade, dict) else None
@@ -1712,8 +1717,10 @@ class InMemoryFirestoreStore:
                     return {"id": trade_id, "duplicate": True}
                 raise TradeMutationError("This trade request ID has already been used.", 409)
             now = iso_now()
+            next_sort_order = max((int(trade.get("sortOrder", -1)) for trade in self.trades.values()), default=-1) + 1
             self.trades[trade_id] = {
                 **payload,
+                "sortOrder": next_sort_order,
                 "contractItems": [],
                 "paymentTransactions": [],
                 "createdAt": now,
@@ -2184,8 +2191,16 @@ class FirebaseFirestoreStore:
             for snapshot in self._collection("trades").stream()
         ]
 
+    def set_trade_order(self, trade_ids):
+        collection = self._collection('trades')
+        for offset in range(0, len(trade_ids), 450):
+            batch = self.db.batch()
+            for sort_order, trade_id in enumerate(trade_ids[offset:offset + 450], start=offset):
+                batch.update(collection.document(trade_id), {'sortOrder': sort_order})
+            batch.commit()
+
     def get_trade(self, trade_id):
-        snapshot = self._collection("trades").document(trade_id).get()
+        snapshot = self._collection('trades').document(trade_id).get()
         if not snapshot.exists:
             return None
         return {**(snapshot.to_dict() or {}), "id": snapshot.id}
@@ -5445,6 +5460,12 @@ def _unauthenticated_response():
         return response
     if request.method == "GET" and not request.path.startswith("/api/"):
         next_url = _safe_local_redirect_target(request.full_path.rstrip("?"))
+        if request.path == "/":
+            response = redirect(
+                url_for("login_page", next=next_url) if next_url else url_for("login_page")
+            )
+            response.headers["Cache-Control"] = "no-store"
+            return response
         response = app.make_response(
             render_template("sign_in_required.html", next_url=next_url)
         )
@@ -9254,7 +9275,9 @@ def _project_trade_document(trade, view, permissions):
             {key: item[key] for key in allowed if key in item}
             for item in transactions if isinstance(item, dict)
         ] if isinstance(transactions, list) else []
-    if "createdAt" in trade and view == "trade_builder":
+    if view == 'trade_builder' and isinstance(trade.get('sortOrder'), int) and not isinstance(trade.get('sortOrder'), bool):
+        result['sortOrder'] = trade['sortOrder']
+    if 'createdAt' in trade and view == 'trade_builder':
         result["createdAt"] = trade["createdAt"]
     if "updatedAt" in trade and view == "trade_builder":
         result["updatedAt"] = trade["updatedAt"]
@@ -9314,6 +9337,31 @@ def trade_list_read_api():
         return _trade_api_response({"error": "Trade data is temporarily unavailable."}, 503)
     return _trade_api_response({"trades": trades})
 
+
+@app.route("/api/trades/order", methods=["PUT"])
+def trade_order_update_api():
+    _user, denied = _trade_api_authorize("trade_builder.write")
+    if denied:
+        return denied
+    payload = request.get_json(silent=True)
+    trade_ids = payload.get("tradeIds") if isinstance(payload, dict) and set(payload) == {"tradeIds"} else None
+    if not isinstance(trade_ids, list) or len(trade_ids) > 5000:
+        return _trade_api_response({"error": "Provide a valid trade order."}, 400)
+    if any(not _valid_trade_id(trade_id) for trade_id in trade_ids) or len(trade_ids) != len(set(trade_ids)):
+        return _trade_api_response({"error": "Trade order contains invalid or duplicate IDs."}, 400)
+    try:
+        store = get_user_store()
+        current_ids = {
+            trade.get("id") for trade in store.list_trades()
+            if trade.get("id") != LEGACY_OWNER_ACCOUNT_DOCUMENT_ID
+        }
+        if set(trade_ids) != current_ids:
+            return _trade_api_response({"error": "The trade list changed. Reload and try again."}, 409)
+        store.set_trade_order(trade_ids)
+    except Exception as error:
+        app.logger.error("Trade reorder failed (%s).", type(error).__name__)
+        return _trade_api_response({"error": "Unable to save trade order. Please try again."}, 503)
+    return _trade_api_response({"success": True})
 
 def _validate_contract_item(item, *, allow_id):
     if not isinstance(item, dict):

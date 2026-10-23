@@ -20,6 +20,14 @@
 .todo-item-created-at { color: #91a99b; font-size: 12px; }
 .todo-list li[draggable="true"] { cursor: grab; }
 .todo-list li.todo-dragging { opacity: .45; cursor: grabbing; }
+@media (hover: none) and (pointer: coarse) {
+    .todo-list li[data-context-item-id] {
+        touch-action: pan-y;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+    }
+}
 .todo-item-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .todo-item-actions button { min-height: 44px; padding: 0 11px; border: 1px solid rgba(123, 224, 182, .3); border-radius: 7px; color: #baf5db; background: rgba(77, 205, 157, .12); font-weight: 600; cursor: pointer; }
 .todo-item-actions button:hover:not(:disabled) { border-color: #50d2ad; background: rgba(77, 205, 157, .24); }
@@ -34,32 +42,6 @@
 .todo-item-actions [hidden] { display: none; }
 .todo-list li.todo-empty { justify-content: center; color: #91a99b; }
 
-/* Keep task menus aligned with Red Book even if the shared stylesheet loads late. */
-.todo-context-menu.red-book-context-menu {
-    position: fixed; z-index: 2000; display: grid; min-width: 184px;
-    max-width: min(260px, calc(100vw - 12px)); max-height: min(70vh, 420px);
-    overflow-y: auto; gap: 2px; padding: 6px;
-    border: 1px solid rgba(123, 224, 182, .22); border-radius: 10px;
-    color: #d9e9df; background: #08120d; box-shadow: 0 14px 34px rgba(0, 0, 0, .42);
-}
-.todo-context-menu.red-book-context-menu[hidden] { display: none !important; }
-body:not(.login-page) .todo-context-menu.red-book-context-menu button.red-book-context-menu-item {
-    min-height: 38px; padding: 0 10px; border: 1px solid transparent; border-radius: 6px;
-    color: inherit; background: transparent; box-shadow: none;
-    font: 600 13px/1.2 Inter, "Segoe UI", Arial, sans-serif; text-align: left;
-    cursor: pointer; filter: none; transform: none;
-}
-body:not(.login-page) .todo-context-menu.red-book-context-menu button.red-book-context-menu-item:hover,
-body:not(.login-page) .todo-context-menu.red-book-context-menu button.red-book-context-menu-item:focus-visible {
-    border-color: rgba(93, 221, 180, .18); color: #f0fff7;
-    background: rgba(77, 205, 157, .16); box-shadow: none; filter: none; transform: none;
-}
-body:not(.login-page) .todo-context-menu.red-book-context-menu button.red-book-context-menu-item:focus-visible {
-    outline: 2px solid #83e5c1; outline-offset: 1px;
-}
-body:not(.login-page) .todo-context-menu.red-book-context-menu button.red-book-context-menu-item:disabled {
-    opacity: .42; cursor: not-allowed;
-}
 .todo-empty-text { min-width: 0; }
 @media (max-width: 600px) {
     .todo-main { padding: 26px 14px 48px; }
@@ -101,6 +83,16 @@ body:not(.login-page) .todo-context-menu.red-book-context-menu button.red-book-c
 .todo-archive-row .todo-item-text { text-decoration: line-through; color: #82978a; }
 .todo-archive-timestamps { display: grid; flex: 0 0 auto; gap: 4px; color: #91a99b; font-size: 12px; }
 .todo-archive-timestamp { display: block; }
+@media (max-width: 600px) {
+    .todo-archive-row .todo-item-text { grid-column: 2; grid-row: 1; min-width: 0; }
+    .todo-archive-timestamps {
+        grid-column: 2;
+        grid-row: 2;
+        min-width: 0;
+        font-size: clamp(10px, 3vw, 12px);
+    }
+    .todo-archive-timestamp { white-space: nowrap; }
+}
 
 .todo-print-button { min-height: 40px; margin: 0 0 8px; padding: 0 14px; border: 1px solid rgba(123, 224, 182, .3); border-radius: 7px; color: #06140e; background: #50d2ad; font: inherit; font-weight: 700; cursor: pointer; }
 @media print {

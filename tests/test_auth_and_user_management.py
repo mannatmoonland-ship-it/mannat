@@ -179,8 +179,8 @@ def test_user_deletion_does_not_recreate_deleted_account(client):
             deleted_session["user_id"] = "deleted-user"
             deleted_session["session_id"] = "deleted-user-session"
         session_response = deleted_user_client.get("/", follow_redirects=False)
-    assert session_response.status_code == 401
-    assert b"You need to sign in to view this page." in session_response.data
+    assert session_response.status_code == 302
+    assert session_response.headers["Location"] == "/login?next=/"
 
 
 def test_user_deletion_failure_shows_error_without_audit_or_removing_user(client):
@@ -404,7 +404,19 @@ def test_office_staff_and_supervisor_share_full_operational_permissions(client):
     assert "super_admin_recovery" not in ROLE_PERMISSIONS["supervisor"]
 
 
-def test_dashboard_shows_sign_in_prompt_when_firestore_not_configured(client):
+def test_unauthenticated_dashboard_redirects_directly_to_login(client):
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/login?next=/"
+    assert response.headers["Cache-Control"] == "no-store"
+
+    login_response = client.get(response.headers["Location"])
+    assert login_response.status_code == 200
+    assert b'<title>Mannat Moon - Sign In</title>' in login_response.data
+
+
+def test_dashboard_returns_service_unavailable_when_session_user_cannot_be_verified(client):
     import app as app_module
 
     original = app_module.get_user_store
@@ -416,9 +428,8 @@ def test_dashboard_shows_sign_in_prompt_when_firestore_not_configured(client):
             sess["session_id"] = "missing-session"
 
         response = client.get("/", follow_redirects=False)
-        assert response.status_code == 401
-        assert b"You need to sign in to view this page." in response.data
-        assert b'href="/login?next=/"' in response.data
+        assert response.status_code == 503
+        assert b"Unable to verify your sign-in right now." in response.data
     finally:
         app_module.get_user_store = original
 

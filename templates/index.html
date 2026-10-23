@@ -674,6 +674,10 @@
            TRADE CARD
         ================================================= */
 
+        .trade-list-heading {
+            margin: 0 0 16px;
+        }
+
         .trade-card {
 
             background:
@@ -733,9 +737,35 @@
             display:
                 flex;
 
+            flex-wrap:
+                wrap;
+
+            justify-content:
+                flex-end;
+
             gap:
                 7px;
 
+        }
+
+        .trade-sort-button {
+            display: inline-grid;
+            width: 38px;
+            min-width: 38px;
+            padding: 0;
+            place-items: center;
+        }
+
+        .trade-sort-button svg {
+            display: block;
+            width: 20px;
+            height: 20px;
+            fill: currentColor;
+        }
+
+        .trade-sort-button:disabled {
+            opacity: .42;
+            cursor: not-allowed;
         }
 
 
@@ -1860,11 +1890,11 @@
 
         <div>
 
+            {% if financial_only %}
             <div class="card">
-
-                {% if not financial_only %}
-                <h2>Trades</h2>
-                {% endif %}
+            {% else %}
+            <h2 class="trade-list-heading">Trades</h2>
+            {% endif %}
 
                 {% if financial_only %}
                 <label
@@ -1890,7 +1920,9 @@
 
                 </div>
 
+            {% if financial_only %}
             </div>
+            {% endif %}
 
         </div>
 

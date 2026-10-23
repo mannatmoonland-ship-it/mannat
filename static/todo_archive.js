@@ -1,9 +1,9 @@
+import "./red_book_context_menu.js";
+
 const root = document.querySelector("[data-todo-archive-page]");
 if (root) {
     const list = root.querySelector("[data-todo-archive]");
     const status = root.querySelector("[data-todo-status]");
-    const contextMenu = root.querySelector("[data-todo-context-menu]");
-    document.body.append(contextMenu);
     const message = value => { status.textContent = value; };
     const copyTaskText = async text => {
         if (window.isSecureContext && navigator.clipboard?.writeText) {
@@ -48,27 +48,6 @@ if (root) {
         if (!response.ok) throw new Error(result.error || `Request failed (HTTP ${response.status}).`);
         return result;
     };
-    const hideContextMenu = () => { contextMenu.hidden = true; };
-    const showContextMenu = (x, y, actions) => {
-        contextMenu.replaceChildren();
-        actions.forEach(({label, action}) => {
-            const button = document.createElement("button");
-            button.type = "button";
-            button.className = "red-book-context-menu-item";
-            button.setAttribute("role", "menuitem");
-            button.textContent = label;
-            button.addEventListener("click", async () => { hideContextMenu(); await action(); });
-            contextMenu.append(button);
-        });
-        contextMenu.hidden = false;
-        const bounds = contextMenu.getBoundingClientRect();
-        contextMenu.style.left = `${Math.max(8, Math.min(x, innerWidth - bounds.width - 8))}px`;
-        contextMenu.style.top = `${Math.max(8, Math.min(y, innerHeight - bounds.height - 8))}px`;
-        contextMenu.querySelector("button")?.focus();
-    };
-    document.addEventListener("pointerdown", event => { if (!contextMenu.contains(event.target)) hideContextMenu(); });
-    document.addEventListener("keydown", event => { if (event.key === "Escape") hideContextMenu(); });
-    window.addEventListener("scroll", hideContextMenu, true);
     const loadArchive = async () => {
         const response = await fetch("/api/profile/todos", {headers: {"Accept": "application/json"}, cache: "no-store"});
         const result = await readApiResponse(response);
@@ -88,6 +67,7 @@ if (root) {
             const createdStamp = document.createElement("time");
             const completedStamp = document.createElement("time");
             row.dataset.todoId = item.id;
+            row.dataset.contextItemId = item.id;
             row.className = "todo-archive-row";
             text.className = "todo-item-text";
             text.textContent = item.text;
@@ -107,41 +87,45 @@ if (root) {
             formatStamp(completedStamp, "Completed", completedDate, "Completion time unavailable");
             timestamps.append(createdStamp, completedStamp);
             row.append(text, timestamps);
-            row.addEventListener("contextmenu", event => {
-                event.preventDefault();
-                showContextMenu(event.clientX, event.clientY, [
-                    {label: "Copy task", action: async () => {
-                        const copied = await copyTaskText(item.text);
-                        message(copied ? "Task copied to clipboard." : "Clipboard access is unavailable.");
-                    }},
-                    {label: "Restore to to-do list", action: async () => {
-                        setItemProgress(row, "Restoring task...");
-                        try {
-                            const response = await fetch(`/api/profile/todos/${encodeURIComponent(item.id)}`, {
-                                method: "PATCH", headers: {"Content-Type": "application/json"},
-                                body: JSON.stringify({completed: false, csrf_token: root.dataset.csrfToken})
-                            });
-                            await readApiResponse(response);
-                            await loadArchive();
-                            message("Task restored to your to-do list.");
-                        } catch (error) { clearItemProgress(row); message(error.message); }
-                    }},
-                    {label: "Delete from archive", action: async () => {
-                        setItemProgress(row, "Deleting archived task...");
-                        try {
-                            const response = await fetch(`/api/profile/todos/${encodeURIComponent(item.id)}`, {
-                                method: "DELETE", headers: {"Content-Type": "application/json"},
-                                body: JSON.stringify({csrf_token: root.dataset.csrfToken})
-                            });
-                            await readApiResponse(response);
-                            await loadArchive();
-                            message("Archived task deleted.");
-                        } catch (error) { clearItemProgress(row); message(error.message); }
-                    }}
-                ]);
-            });
             list.append(row);
         });
     };
+    window.MannatRedBookContextMenu.bind(list, {
+        getActions(row) {
+            if (!row.matches("li[data-todo-id]")) return [];
+            const taskId = row.dataset.todoId;
+            const text = row.querySelector(".todo-item-text")?.textContent || "";
+            return [
+                {label: "Copy task", action: async () => {
+                    const copied = await copyTaskText(text);
+                    message(copied ? "Task copied to clipboard." : "Clipboard access is unavailable.");
+                }},
+                {label: "Restore to to-do list", action: async () => {
+                    setItemProgress(row, "Restoring task...");
+                    try {
+                        const response = await fetch(`/api/profile/todos/${encodeURIComponent(taskId)}`, {
+                            method: "PATCH", headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({completed: false, csrf_token: root.dataset.csrfToken})
+                        });
+                        await readApiResponse(response);
+                        await loadArchive();
+                        message("Task restored to your to-do list.");
+                    } catch (error) { clearItemProgress(row); message(error.message); }
+                }},
+                {label: "Delete from archive", action: async () => {
+                    setItemProgress(row, "Deleting archived task...");
+                    try {
+                        const response = await fetch(`/api/profile/todos/${encodeURIComponent(taskId)}`, {
+                            method: "DELETE", headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({csrf_token: root.dataset.csrfToken})
+                        });
+                        await readApiResponse(response);
+                        await loadArchive();
+                        message("Archived task deleted.");
+                    } catch (error) { clearItemProgress(row); message(error.message); }
+                }}
+            ];
+        }
+    });
     loadArchive().catch(error => message(error.message));
 }

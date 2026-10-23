@@ -291,7 +291,7 @@
                 <h1>Sign In</h1>
                 <p class="subhead">Secure access to your construction workspace</p>
 
-                {% if next_url %}
+                {% if next_url and next_url != "/" %}
                     <div class="flash warning" role="status">Please sign in to continue. You'll be returned to the page you requested.</div>
                 {% endif %}
 

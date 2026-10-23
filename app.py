@@ -8200,19 +8200,27 @@ def red_book_page():
     return response
 
 
+def _red_book_archive_view_authorize():
+    user = get_current_user()
+    if not user:
+        return None, _red_book_api_response({"error": "Authentication required."}, 401)
+    if user.get("must_change_password"):
+        return None, _red_book_api_response(
+            {"error": "Change your password before continuing."}, 403
+        )
+    return user, None
+
 @app.route("/red-book/archive")
 def red_book_archive_page():
-    user, denied = _red_book_api_authorize("red_book.read")
+    user, denied = _red_book_archive_view_authorize()
     if denied:
         return denied
-    if not is_admin_or_super_admin_role(user.get("role")):
-        return _red_book_api_response({"error": "Archive is available to admins only."}, 403)
     csrf_token = session.get("red_book_csrf")
     if not csrf_token:
         csrf_token = secrets.token_urlsafe(32)
         session["red_book_csrf"] = csrf_token
     try:
-        can_restore = _user_has_compiled_permission(user, "red_book.delete")
+        can_restore = is_admin_or_super_admin_role(user.get("role")) and _user_has_compiled_permission(user, "red_book.delete")
         can_delete_archived = can_restore
     except Exception as error:
         app.logger.error("Red Book Archive permissions failed (%s).", type(error).__name__)
@@ -8311,11 +8319,9 @@ def web_push_device_api():
 
 @app.route("/api/red-book/archive", methods=["GET"])
 def red_book_archive_api():
-    user, denied = _red_book_api_authorize("red_book.read")
+    user, denied = _red_book_archive_view_authorize()
     if denied:
         return denied
-    if not is_admin_or_super_admin_role(user.get("role")):
-        return _red_book_api_response({"error": "Archive is available to admins only."}, 403)
     try:
         store = get_user_store()
         items = store.list_archived_red_book_items()

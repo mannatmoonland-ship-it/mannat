@@ -26,7 +26,7 @@ def test_daily_report_delete_uses_flask_api_and_not_browser_firestore_delete():
     assert "`/api/daily-records/${encodeURIComponent(deletingId)}`" in LEGACY_DAILY_REPORTS_JS
 
 
-def test_daily_report_delete_confirmation_and_success_refresh_remain():
+def test_daily_report_delete_confirmation_and_listener_sync_remain():
     confirm_source = source_between(
         DAILY_REPORTS_JS,
         "function openDeleteConfirm(id)",
@@ -44,10 +44,11 @@ def test_daily_report_delete_confirmation_and_success_refresh_remain():
     assert "errorMessage = errorResponse.error" in delete_source
     assert delete_source.index("if (!response.ok)") < delete_source.index("deletingId = null")
     assert delete_source.index("deletingId = null") < delete_source.index('showToast("Record deleted successfully."')
-    assert delete_source.index('showToast("Record deleted successfully."') < delete_source.index("await loadRecords()")
+    assert "await loadRecords()" not in delete_source
+    assert 'showToast("Record deleted successfully."' in delete_source
     assert "error instanceof Error ? error.message" in delete_source
     assert "Unable to delete the daily report. Please try again." in delete_source
 
 
 def test_daily_reports_page_exposes_session_csrf_for_delete_request():
-    assert '<body data-daily-reports-csrf="{{ daily_reports_csrf }}">' in DAILY_REPORTS_TEMPLATE
+    assert '<body class="daily-reports-page" data-daily-reports-csrf="{{ daily_reports_csrf }}">' in DAILY_REPORTS_TEMPLATE

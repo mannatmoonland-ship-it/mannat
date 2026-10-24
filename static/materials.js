@@ -36,7 +36,7 @@ const firestoreMethod = name => (...args) => {
   return method(...args);
 };
 const collection = firestoreMethod("collection");
-const getDocs = firestoreMethod("getDocs");
+const onSnapshot = firestoreMethod("onSnapshot");
 const $ = id => document.getElementById(id);
 const status = $("materialsStatus");
 const entityDialog = $("materialEntityDialog");
@@ -48,6 +48,7 @@ let brands = [];
 let suppliers = [];
 let purchases = [];
 let consumptions = [];
+let materialUnsubscribers = [];
 let saving = false;
 let brandIdSequence = 0;
 let pendingCategoryCreate = null;
@@ -442,6 +443,32 @@ function populateTransactionSelectors() {
   updatePurchaseSupplierOptions(Boolean($("purchaseForm").elements.id.value));
 }
 
+function captureMaterialFormValues() {
+  return ["purchaseForm", "consumptionForm"].map(formId => {
+    const form = $(formId);
+    return [...form.elements].filter(element => element.name).map(element => ({
+      name: element.name,
+      type: element.type,
+      value: element.value,
+      checked: element.checked
+    }));
+  });
+}
+
+function restoreMaterialFormValues(savedValues) {
+  ["purchaseForm", "consumptionForm"].forEach((formId, index) => {
+    const form = $(formId);
+    savedValues[index].forEach(saved => {
+      const element = form.elements.namedItem(saved.name);
+      if (!element) return;
+      if (saved.type === "checkbox" || saved.type === "radio") element.checked = saved.checked;
+      else if (element.tagName !== "SELECT" || [...element.options].some(option => option.value === saved.value)) {
+        element.value = saved.value;
+      }
+    });
+  });
+}
+
 function updatePurchaseSupplierOptions(keepCurrent = false) {
   const form = $("purchaseForm");
   const selector = form.elements.supplierId;
@@ -642,7 +669,6 @@ async function savePurchase(event) {
     }
     resetTransactionForm("purchaseForm");
     await showSuccess(fields.id ? "Purchase updated." : "Purchase recorded.", "Materials");
-    await loadData();
   } catch (error) {
     console.error("Unable to save material purchase:", error);
     setStatus("Unable to save purchase. Check the connection and try again.", true);
@@ -701,7 +727,6 @@ async function saveConsumption(event) {
     }
     resetTransactionForm("consumptionForm");
     await showSuccess(fields.id ? "Consumption updated." : "Consumption recorded.", "Materials");
-    await loadData();
   } catch (error) {
     console.error("Unable to save material consumption:", error);
     setStatus("Unable to save consumption. Check the connection and try again.", true);
@@ -723,7 +748,6 @@ async function deleteTransaction(kind, transaction, label) {
   try {
     await sendMaterialTransaction(kind, transaction.id, "DELETE");
     await showSuccess(`${label} deleted.`, "Materials");
-    await loadData();
   } catch (error) {
     console.error(`Unable to delete material ${label.toLocaleLowerCase()}:`, error);
     setStatus(`Unable to delete ${label.toLocaleLowerCase()}. Check the connection and try again.`, true);
@@ -859,7 +883,6 @@ async function saveCategory(event) {
     }
     closeEntityDialog();
     await showSuccess(fields.id ? "Category updated." : "Category created.", "Material Builder");
-    await loadData();
   } catch (error) {
     console.error("Unable to save material category:", error);
     setStatus("Unable to save the category. Please check your connection and try again.", true);
@@ -885,7 +908,6 @@ async function deleteCategory(category) {
       "DELETE"
     );
     await showSuccess("Category deleted.", "Material Builder");
-    await loadData();
   } catch (error) {
     console.error("Unable to delete material category:", error);
     setStatus(
@@ -968,7 +990,6 @@ async function saveSupplier(event) {
     }
     closeEntityDialog();
     await showSuccess(fields.id ? "Supplier updated." : "Supplier created.", "Material Builder");
-    await loadData();
   } catch (error) {
     console.error("Unable to save supplier:", error);
     setStatus(error?.safeApiMessage ? error.message : "Unable to save supplier. Check the connection and try again.", true);
@@ -1005,7 +1026,6 @@ async function deleteSupplier(supplier) {
       "DELETE"
     );
     await showSuccess("Supplier deleted.", "Material Builder");
-    await loadData();
   } catch (error) {
     console.error("Unable to delete supplier:", error);
     setStatus("Unable to delete supplier. Check the connection and try again.", true);
@@ -1027,30 +1047,42 @@ function handleListAction(event, items, actions) {
 }
 
 async function loadData() {
+  if (materialUnsubscribers.length) return;
   try {
     setStatus("Loading categories, suppliers, and transactions...");
-    const [categorySnapshot, materialSnapshot, brandSnapshot, supplierSnapshot, purchaseSnapshot, consumptionSnapshot] = await Promise.all([
-      getDocs(collection(db, COLLECTIONS.categories)),
-      getDocs(collection(db, COLLECTIONS.materials)),
-      getDocs(collection(db, COLLECTIONS.brands)),
-      getDocs(collection(db, COLLECTIONS.suppliers)),
-      getDocs(collection(db, COLLECTIONS.purchases)),
-      getDocs(collection(db, COLLECTIONS.consumptions))
-    ]);
-    categories = categorySnapshot.docs.map(item => ({ id: item.id, ...item.data() })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    materials = materialSnapshot.docs.map(item => ({ id: item.id, ...item.data() })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    brands = brandSnapshot.docs.map(item => ({ id: item.id, ...item.data() })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    suppliers = supplierSnapshot.docs.map(item => ({ id: item.id, ...item.data() })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    purchases = purchaseSnapshot.docs.map(item => ({ id: item.id, ...item.data() }));
-    consumptions = consumptionSnapshot.docs.map(item => ({ id: item.id, ...item.data() }));
-    populateTransactionSelectors();
-    renderCategories();
-    renderStock();
-    renderInvestmentSummary();
-    renderSuppliers();
-    renderPurchases();
-    renderConsumptions();
-    setStatus(`${categories.length} categories · ${suppliers.length} suppliers · ${purchases.length} purchases · ${consumptions.length} consumptions`);
+    materialUnsubscribers = Object.entries(COLLECTIONS).map(([key, collectionName]) => {
+      const documents = new Map();
+      return onSnapshot(collection(db, collectionName), snapshot => {
+        snapshot.docChanges().forEach(change => {
+          if (change.type === "removed") documents.delete(change.doc.id);
+          else documents.set(change.doc.id, { id: change.doc.id, ...change.doc.data() });
+        });
+        const values = [...documents.values()];
+        if (key === "categories") categories = values.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        else if (key === "materials") materials = values.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        else if (key === "brands") brands = values.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        else if (key === "suppliers") suppliers = values.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        else if (key === "purchases") purchases = values;
+        else if (key === "consumptions") consumptions = values;
+        const savedFormValues = captureMaterialFormValues();
+        populateTransactionSelectors();
+        restoreMaterialFormValues(savedFormValues);
+        renderCategories();
+        renderStock();
+        renderInvestmentSummary();
+        renderSuppliers();
+        renderPurchases();
+        renderConsumptions();
+        setStatus(`${categories.length} categories · ${suppliers.length} suppliers · ${purchases.length} purchases · ${consumptions.length} consumptions`);
+      }, error => {
+        console.error(`Unable to subscribe to ${collectionName}:`, error?.code || error?.name);
+        setStatus(`Unable to receive live ${collectionName} updates. ${describeFirebaseError(error)}`, true);
+      });
+    });
+    window.addEventListener("pagehide", () => {
+      materialUnsubscribers.forEach(unsubscribe => unsubscribe());
+      materialUnsubscribers = [];
+    }, { once: true });
   } catch (error) {
     console.error("Unable to load Material Builder data:", error);
     setStatus(describeFirebaseError(error), true);

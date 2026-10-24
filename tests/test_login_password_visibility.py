@@ -22,6 +22,8 @@ def test_login_password_field_has_accessible_non_submit_visibility_toggle():
 
     assert response.status_code == 200
     html = response.get_data(as_text=True)
+    assert '<input id="username" name="username" type="text" required>' in html
+    assert '<input id="username" name="username" type="text" required autofocus>' not in html
     assert '<form method="post" action="/login">' in html
     assert '<button type="submit">Sign In</button>' in html
     assert 'addEventListener("submit"' not in html

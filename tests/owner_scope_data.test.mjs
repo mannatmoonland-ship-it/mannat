@@ -5,6 +5,7 @@ import {
   LEGACY_OWNER_ACCOUNT_DOCUMENT_ID,
   OWNER_SCOPE_CATEGORIES,
   OWNER_SCOPE_DOCUMENT_ID,
+  applyOwnerScopeMutation,
   loadOwnerScope,
   loadOwnerScopeMetadata,
   validateOwnerScopeCategory
@@ -155,4 +156,36 @@ test("invalid Owner Scope legacy reference fails explicitly", async () => {
     /unexpected legacy trade reference/
   );
   assert.deepEqual(firestore.writes, []);
+});
+
+
+test("Owner Scope mutations update only the affected item and linked payment in memory", () => {
+  const data = {
+    metadata: { id: OWNER_SCOPE_DOCUMENT_ID },
+    items: [
+      { id: "item-1", name: "Old", category: "labour", remarks: "", createdAt: "original" },
+      { id: "item-2", name: "Keep", category: "material", remarks: "" }
+    ],
+    payments: [
+      { id: "payment-1", expenseItemId: "item-1", date: "2026-10-01", amount: 100, paymentMode: "Cash" },
+      { id: "payment-2", expenseItemId: "item-2", date: "2026-10-02", amount: 250, paymentMode: "UPI" }
+    ]
+  };
+
+  assert.equal(applyOwnerScopeMutation(data, "edit", "item-1", null, {
+    name: "  New   name ", category: "material", remarks: " edited ",
+    paymentDate: "2026-10-03", amountPaid: "175", paymentMode: " Bank Transfer "
+  }, "2026-10-03T00:00:00.000Z"), true);
+  assert.deepEqual(data.items[0], {
+    id: "item-1", name: "New name", category: "material", remarks: "edited",
+    createdAt: "original", updatedAt: "2026-10-03T00:00:00.000Z"
+  });
+  assert.equal(data.payments[0].amount, 175);
+  assert.equal(data.payments[0].date, "2026-10-03");
+  assert.equal(data.payments[0].paymentMode, "Bank Transfer");
+  assert.equal(data.payments[1].amount, 250);
+
+  assert.equal(applyOwnerScopeMutation(data, "delete", "item-1", null, {}, "2026-10-04"), true);
+  assert.deepEqual(data.items.map(item => item.id), ["item-2"]);
+  assert.deepEqual(data.payments.map(payment => payment.id), ["payment-2"]);
 });

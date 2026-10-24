@@ -49,6 +49,14 @@ class FakeQuery:
         self.field = field
         self.expected = expected
         self.limit_count = limit_count
+        self.order_field = None
+        self.order_direction = "ASCENDING"
+
+    def order_by(self, field, direction="ASCENDING"):
+        query = FakeQuery(self.collection_ref, self.field, self.expected, self.limit_count)
+        query.order_field = field
+        query.order_direction = direction
+        return query
 
     def where(self, field=None, operator=None, expected=None, *, filter=None):
         if filter is not None:
@@ -57,7 +65,10 @@ class FakeQuery:
             expected = filter.value
         if operator != "==":
             raise AssertionError(f"Unsupported fake query operator: {operator}")
-        return FakeQuery(self.collection_ref, field, expected, self.limit_count)
+        query = FakeQuery(self.collection_ref, field, expected, self.limit_count)
+        query.order_field = self.order_field
+        query.order_direction = self.order_direction
+        return query
 
     def limit(self, count):
         return FakeQuery(self.collection_ref, self.field, self.expected, count)
@@ -69,7 +80,16 @@ class FakeQuery:
                 snapshot for snapshot in values
                 if (snapshot.to_dict() or {}).get(self.field) == self.expected
             ]
-        return values[: self.limit_count] if self.limit_count is not None else values
+        if self.order_field is not None:
+            values.sort(
+                key=lambda snapshot: str((snapshot.to_dict() or {}).get(self.order_field) or ""),
+                reverse=self.order_direction == "DESCENDING",
+            )
+        limited = values[: self.limit_count] if self.limit_count is not None else values
+        self.collection_ref.database.reads.extend(
+            (self.collection_ref.collection_path, snapshot.id) for snapshot in limited
+        )
+        return limited
 
 
 class FakeDocumentReference:
@@ -97,6 +117,10 @@ class FakeDocumentReference:
         self.database.documents[self.key].update(deepcopy(data))
         self.database.writes.append(self.key)
 
+    def set(self, data):
+        self.database.documents[self.key] = deepcopy(data)
+        self.database.writes.append(self.key)
+
     def delete(self):
         self.database.documents.pop(self.key, None)
         self.database.writes.append(self.key)
@@ -108,6 +132,16 @@ class FakeDocumentReference:
         )
 
 
+class FakeCountQuery:
+    def __init__(self, collection):
+        self.collection_ref = collection
+
+    def get(self):
+        from types import SimpleNamespace
+        count = len(self.collection_ref._snapshots())
+        return [(SimpleNamespace(value=count),)]
+
+
 class FakeCollectionReference(FakeQuery):
     def __init__(self, database, collection_path):
         self.database = database
@@ -116,6 +150,11 @@ class FakeCollectionReference(FakeQuery):
         self.field = None
         self.expected = None
         self.limit_count = None
+        self.order_field = None
+        self.order_direction = "ASCENDING"
+
+    def count(self, alias=None):
+        return FakeCountQuery(self)
 
     def document(self, document_id=None):
         if document_id is None:
@@ -342,6 +381,14 @@ def test_owner_scope_page_is_login_protected_and_has_one_finance_navigation_link
     assert b"budgetAmount" not in response.data
 
 
+def test_owner_scope_version_polling_endpoint_is_removed():
+    from app import app as flask_app
+
+    assert "/api/owner-scope/version" not in {
+        rule.rule for rule in flask_app.url_map.iter_rules()
+    }
+
+
 def test_owner_scope_read_api_requires_compiled_permission_and_password_change(client):
     test_client, store = client
 
@@ -373,7 +420,7 @@ def test_add_form_defaults_to_local_today_and_keeps_payment_date_editable():
     assert "reserveSecureRequestId" in script
     assert "initializeOwnerScopeCreateRequestId();" in script
     assert script.index("initializeOwnerScopeCreateRequestId();") < script.rindex(
-        "loadOwnerScope();"
+        "void subscribeToOwnerScope();"
     )
     assert 'page.saveButton.disabled = true;' in script
     assert "createRequestIdError" in script
@@ -732,6 +779,9 @@ def test_owner_scope_create_retry_is_idempotent_and_conflicting_reuse_is_rejecte
         headers=headers,
     )
     assert first.status_code == 201
+    assert first.get_json()["paymentId"] == str(
+        uuid.uuid5(uuid.NAMESPACE_URL, f"owner-scope-payment:{request_id}")
+    )
     assert retry.status_code == 200
     assert retry.get_json() == first.get_json()
     assert conflict.status_code == 409
@@ -793,6 +843,12 @@ def test_owner_scope_browser_source_has_no_direct_firestore_mutations():
     assert 'method: "DELETE"' in script
     assert "sessionStorage.setItem(createRequestStorageKey" in script
     assert "initializeOwnerScopeCreateRequestId({ forceNew: true })" in script
+    assert "applyOwnerScopeMutation(\"create\"" in script
+    assert "applyOwnerScopeMutation(\"edit\"" in script
+    assert "applyOwnerScopeMutation(\"delete\"" in script
+    assert 'firestore.doc(db, "sync_metadata", "owner-scope")' in script
+    assert "checkOwnerScopeVersion" not in script
+    assert "setInterval" not in script
 
 
 def test_date_only_edit_preserves_owner_scope_paid_total(client):

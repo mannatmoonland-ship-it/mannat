@@ -61,6 +61,32 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /sync_metadata/{documentId} {
+      allow get: if (
+          documentId == 'trade-projection'
+          && hasAnyPermission([
+            'trade_builder.read',
+            'daily_reports.read',
+            'labour_payments.read',
+            'ledger.read',
+            'building_cost_summary.read'
+          ])
+        )
+        || (
+          documentId == 'red-book-archive'
+          && hasPermission('red_book.read')
+        )
+        || (
+          documentId == 'red-book-items'
+          && hasPermission('red_book.read')
+        )
+        || (
+          documentId == 'owner-scope'
+          && hasPermission('owner_scope.read')
+        );
+      allow list, write: if false;
+    }
+
     match /daily_records/{recordId} {
       allow get, list: if hasPermission('daily_reports.read');
       allow write: if false;

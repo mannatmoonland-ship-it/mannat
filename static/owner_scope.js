@@ -1,5 +1,6 @@
 import { formatDateWithDay, localDateInputValue } from "./date_format.js";
 import { sortOwnerScopeItemsByPaymentDate } from "./owner_scope_sort.mjs";
+import { applyOwnerScopeMutation as updateOwnerScopeData } from "./owner_scope_data.mjs";
 import { downloadOwnerScopePDF } from "./owner_scope_pdf.js";
 import { showConfirmDialog } from "./dialogs.js";
 import { buildOwnerScopeDeleteConfirmation } from "./owner_scope_delete_confirmation.mjs";
@@ -7,6 +8,7 @@ import {
     generateSecureRequestId,
     reserveSecureRequestId
 } from "./secure_request_id.mjs";
+import { firebaseAuthReady, getFirebaseApp, getFirebaseFirestoreSdk } from "./firebase_auth.js";
 
 const categoryLabels = Object.freeze({
     labour: "Labour",
@@ -63,6 +65,8 @@ const money = new Intl.NumberFormat("en-IN", {
 
 let ownerScopeData = null;
 let ownerScopeLoadInFlight = false;
+let ownerScopeUnsubscribers = [];
+let ownerScopeRefreshPending = false;
 let editingItemId = null;
 let editingPaymentDetails = false;
 let createRequestIdReady = false;
@@ -194,9 +198,13 @@ async function requestJson(url, options = {}) {
     try {
         body = await response.json();
     } catch {
-        throw new Error("The server returned an unreadable response.");
+        throw new Error(`Owner Scope request failed (HTTP ${response.status}).`);
     }
-    if (!response.ok) throw new Error(body.error || "Owner Scope request failed.");
+    if (!response.ok) {
+        const error = new Error(body.error || "Owner Scope request failed.");
+        error.status = response.status;
+        throw error;
+    }
     return body;
 }
 
@@ -273,6 +281,25 @@ function ownerScopeCreateRequestId(payload) {
     return requestId;
 }
 
+function applyOwnerScopeMutation(action, itemId, paymentId, payload, version) {
+    if (!ownerScopeData) return false;
+    const hadItem = ownerScopeData.items.some(item => item.id === itemId);
+    if (!updateOwnerScopeData(ownerScopeData, action, itemId, paymentId, payload)) return false;
+    if (version && typeof version === "object") {
+        ownerScopeData.version = version;
+    } else {
+        const countDelta = action === "create" && !hadItem
+            ? 1
+            : action === "delete" && hadItem ? -1 : 0;
+        ownerScopeData.version = {
+            latest: version || null,
+            count: Math.max(0, Number(ownerScopeData.version?.count || 0) + countDelta)
+        };
+    }
+    renderItems();
+    return true;
+}
+
 async function loadOwnerScope({ silent = false } = {}) {
     if (ownerScopeLoadInFlight) return;
     ownerScopeLoadInFlight = true;
@@ -285,6 +312,44 @@ async function loadOwnerScope({ silent = false } = {}) {
         showStatus(error.message, "error");
     } finally {
         ownerScopeLoadInFlight = false;
+        if (ownerScopeRefreshPending && !page.dialog.open) scheduleOwnerScopeReload();
+    }
+}
+
+function scheduleOwnerScopeReload() {
+    ownerScopeRefreshPending = true;
+    if (ownerScopeLoadInFlight || page.dialog.open) return;
+    ownerScopeRefreshPending = false;
+    void loadOwnerScope({ silent: true });
+}
+
+async function subscribeToOwnerScope() {
+    try {
+        await firebaseAuthReady;
+        const firestore = await getFirebaseFirestoreSdk();
+        const db = firestore.getFirestore(await getFirebaseApp());
+        let isInitialSnapshot = true;
+        ownerScopeUnsubscribers = [firestore.onSnapshot(
+            firestore.doc(db, "sync_metadata", "owner-scope"),
+            () => {
+                if (isInitialSnapshot) isInitialSnapshot = false;
+                scheduleOwnerScopeReload();
+            },
+            error => {
+                console.error("Unable to subscribe to Owner Scope revisions:", error?.code || error?.name);
+                showStatus("Owner Scope could not receive live updates.", "error");
+                if (isInitialSnapshot) void loadOwnerScope();
+            }
+        )];
+        page.dialog.addEventListener("close", scheduleOwnerScopeReload);
+        window.addEventListener("pagehide", () => {
+            ownerScopeUnsubscribers.forEach(unsubscribe => unsubscribe());
+            ownerScopeUnsubscribers = [];
+        }, { once: true });
+    } catch (error) {
+        console.error("Unable to initialize Owner Scope live updates:", error?.stage || error?.code || error?.name);
+        showStatus("Owner Scope could not receive live updates.", "error");
+        await loadOwnerScope();
     }
 }
 
@@ -378,14 +443,9 @@ page.itemsBody.addEventListener("click", async event => {
 
     showStatus("Deleting Owner Scope item…");
     try {
-        await requestJson(`/api/owner-scope/items/${encodeURIComponent(item.id)}`, { method: "DELETE" });
-        await loadOwnerScope();
-window.setInterval(() => {
-    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
-}, 5000);
-document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
-});    } catch (error) {
+        const result = await requestJson(`/api/owner-scope/items/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+        applyOwnerScopeMutation("delete", item.id, null, {}, result.version);
+    } catch (error) {
         showStatus(error.message, "error");
     }
 });
@@ -414,26 +474,27 @@ page.form.addEventListener("submit", async event => {
     page.saveButton.disabled = true;
     try {
         if (editingItemId) {
-            await requestJson(`/api/owner-scope/items/${encodeURIComponent(editingItemId)}`, {
+            const itemId = editingItemId;
+            const result = await requestJson(`/api/owner-scope/items/${encodeURIComponent(itemId)}`, {
                 method: "PUT",
                 body: JSON.stringify(payload)
             });
+            if (!applyOwnerScopeMutation("edit", itemId, null, payload, result.version)) {
+                await loadOwnerScope();
+            }
         } else {
-            await requestJson("/api/owner-scope/items", {
+            const result = await requestJson("/api/owner-scope/items", {
                 method: "POST",
                 body: JSON.stringify(payload),
                 headers: {
                     "Idempotency-Key": ownerScopeCreateRequestId(payload)
                 }
             });
+            if (!applyOwnerScopeMutation("create", result.id, result.paymentId, payload, result.version)) {
+                await loadOwnerScope();
+            }
             closeItemDialog();
-            await loadOwnerScope();
-window.setInterval(() => {
-    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
-}, 5000);
-document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
-});            try {
+            try {
                 initializeOwnerScopeCreateRequestId({ forceNew: true });
             } catch (error) {
                 showStatus(error.message, "error");
@@ -441,13 +502,7 @@ document.addEventListener("visibilitychange", () => {
             return;
         }
         closeItemDialog();
-        await loadOwnerScope();
-window.setInterval(() => {
-    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
-}, 5000);
-document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
-});    } catch (error) {
+    } catch (error) {
         page.formError.textContent = error.message;
         page.formError.hidden = false;
     } finally {
@@ -463,10 +518,4 @@ try {
     showStatus(error.message, "error");
 }
 
-loadOwnerScope();
-window.setInterval(() => {
-    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
-}, 5000);
-document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") loadOwnerScope({ silent: true });
-});
+void subscribeToOwnerScope();

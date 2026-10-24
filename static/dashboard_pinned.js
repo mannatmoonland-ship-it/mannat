@@ -1,3 +1,5 @@
+import { firebaseAuthReady, getFirebaseApp, getFirebaseFirestoreSdk } from "./firebase_auth.js";
+
 (() => {
   const section = document.getElementById("pinnedInstructions");
   if (!section) return;
@@ -7,8 +9,8 @@
   const status = document.getElementById("pinnedInstructionsStatus");
   const csrfToken = section.dataset.redBookCsrf || "";
   let items;
-  let isMutating = false;
-  let isRefreshing = false;
+  let pendingRevision = null;
+  let revisionRefreshInFlight = false;
 
   function showStatus(message, kind = "success") {
     status.textContent = message;
@@ -33,7 +35,9 @@
       throw new Error("The pinned instructions service returned an invalid response.");
     }
     if (!response.ok) {
-      throw new Error(payload.error || "Unable to load pinned site instructions.");
+      const error = new Error(payload.error || "Unable to load pinned site instructions.");
+      error.status = response.status;
+      throw error;
     }
     return payload;
   }
@@ -103,7 +107,6 @@
           showStatus("Could not copy the instruction text.", "error");
         }
       } else if (action === "unpin") {
-        isMutating = true;
         try {
           await request(`/api/red-book/items/${encodeURIComponent(item.id)}/pin`, {
             method: "PUT",
@@ -114,8 +117,6 @@
           showStatus("Instruction unpinned.");
         } catch (error) {
           showStatus(error.message, "error");
-        } finally {
-          isMutating = false;
         }
       } else {
         imageAction(item, action);
@@ -123,24 +124,88 @@
     }
   });
 
-  async function refresh() {
-    if (document.hidden || isMutating || isRefreshing) return;
-    isRefreshing = true;
+  async function refreshPinnedItems(revision) {
+    if (pendingRevision) {
+      const refreshAll = pendingRevision.refresh_all || revision.refresh_all;
+      pendingRevision = {
+        refresh_all: refreshAll,
+        item_ids: refreshAll
+          ? []
+          : [...new Set([...(pendingRevision.item_ids || []), ...(revision.item_ids || [])])],
+        deleted_ids: [...new Set([...(pendingRevision.deleted_ids || []), ...(revision.deleted_ids || [])])]
+      };
+    } else {
+      pendingRevision = revision;
+    }
+    if (revisionRefreshInFlight) return;
+    revisionRefreshInFlight = true;
     try {
-      const payload = await request("/api/red-book/pinned");
-      if (isMutating) return;
-      const nextItems = payload.items;
-      if (JSON.stringify(items) !== JSON.stringify(nextItems)) {
-        items = nextItems;
+      while (pendingRevision) {
+        const next = pendingRevision;
+        pendingRevision = null;
+        if (next.refresh_all || !next.item_ids?.length && !next.deleted_ids?.length) {
+          const payload = await request("/api/red-book/pinned");
+          items = payload.items;
+        } else {
+          for (const id of next.deleted_ids || []) {
+            items = items.filter(item => item.id !== id);
+          }
+          for (const id of next.item_ids || []) {
+            try {
+              const payload = await request(`/api/red-book/items/${encodeURIComponent(id)}`);
+              items = [...items.filter(item => item.id !== id), payload.item]
+                .filter(item => item.pinned === true);
+            } catch (error) {
+              if (error.status === 404) items = items.filter(item => item.id !== id);
+              else throw error;
+            }
+          }
+          items.sort((a, b) => Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER)
+            || String(a.id).localeCompare(String(b.id)));
+        }
         contextMenu.close();
         render();
+        status.textContent = "";
+        delete status.dataset.kind;
       }
-      status.textContent = "";
-      delete status.dataset.kind;
     } catch (error) {
       showStatus(error.message, "error");
     } finally {
-      isRefreshing = false;
+      revisionRefreshInFlight = false;
+      if (pendingRevision) void refreshPinnedItems(pendingRevision);
+    }
+  }
+
+  async function subscribe() {
+    try {
+      await firebaseAuthReady;
+      const firestore = await getFirebaseFirestoreSdk();
+      const db = firestore.getFirestore(await getFirebaseApp());
+      let isInitialSnapshot = true;
+      const unsubscribe = firestore.onSnapshot(
+        firestore.doc(db, "sync_metadata", "red-book-items"),
+        snapshot => {
+          const revision = isInitialSnapshot
+            ? { refresh_all: true, item_ids: [], deleted_ids: [] }
+            : snapshot.exists()
+              ? {
+                  refresh_all: snapshot.data().refresh_all === true,
+                  item_ids: snapshot.data().item_id && !snapshot.data().deleted ? [snapshot.data().item_id] : [],
+                  deleted_ids: snapshot.data().item_id && snapshot.data().deleted ? [snapshot.data().item_id] : []
+                }
+              : { refresh_all: true, item_ids: [], deleted_ids: [] };
+          isInitialSnapshot = false;
+          void refreshPinnedItems(revision);
+        },
+        error => {
+        console.error("Unable to subscribe to pinned Red Book instructions:", error?.code || error?.name);
+        showStatus("Pinned site instructions could not receive live updates.", "error");
+        void refreshPinnedItems({ refresh_all: true, item_ids: [], deleted_ids: [] });
+      });
+      window.addEventListener("pagehide", unsubscribe, { once: true });
+    } catch (error) {
+      console.error("Unable to initialize pinned-instruction updates:", error?.stage || error?.code || error?.name);
+      showStatus("Pinned site instructions could not receive live updates.", "error");
     }
   }
 
@@ -154,11 +219,6 @@
     showStatus("Pinned site instructions could not be displayed.", "error");
   }
 
-  refresh();
-  const refreshTimer = window.setInterval(refresh, 10000);
-  document.addEventListener("visibilitychange", refresh);
-  window.addEventListener("pagehide", () => {
-    window.clearInterval(refreshTimer);
-    contextMenu.close();
-  }, { once: true });
+  void subscribe();
+  window.addEventListener("pagehide", () => contextMenu.close(), { once: true });
 })();

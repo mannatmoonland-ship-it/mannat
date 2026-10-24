@@ -974,7 +974,7 @@ def test_daily_reports_upload_updates_evidence_metadata_and_preview_immediately(
         app_module.Path(__file__).parents[1] / "static" / "daily_reports.js"
     ).read_text(encoding="utf-8")
     upload_flow = source[
-        source.index('uploadInput.addEventListener("change"'):
+        source.index("const uploadPhoto = async"):
         source.index("function initializeDailyReportsDrive")
     ]
     submit_flow = source[
@@ -1029,7 +1029,7 @@ def test_daily_reports_update_one_record_card_and_deduplicate_by_drive_file_id()
     ).read_text(encoding="utf-8")
     update_function = source[
         source.index("function updateDisplayedDailyRecord"):
-        source.index("async function loadRecords")
+        source.index("function getUniqueDailyReportEvidence")
     ]
     render_function = source[
         source.index("function renderDailyRecordCard"):

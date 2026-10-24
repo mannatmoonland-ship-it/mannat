@@ -29,7 +29,7 @@ assert 'const canWriteDrawings = document.body.dataset.canWrite === "true";' in 
 assert 'const canDeleteDrawings = document.body.dataset.canDelete === "true";' in js
 assert '${canWriteDrawings ? `' in js
 assert '${canDeleteDrawings ? `' in js
-assert 'collection(db, "drawings")' in js
+assert 'watchCollection("drawings", drawingsById)' in js
 assert 'sortCategoriesByCreationOrder' in js
 assert 'sortDrawingsByCreationOrder' in js
 assert 'aCreated.getTime() - bCreated.getTime()' in js
@@ -57,7 +57,8 @@ assert 'No drawings found.' in js
 assert 'No drawings added yet.' in js
 assert 'if (!categories.length || (!drawings.length && !query))' not in js
 assert 'category-empty' in js
-assert 'await loadData();' in js[js.index('async function createCategory'):js.index('async function editCategory')]
+assert 'onSnapshot(collection(db, name)' in js
+assert 'await loadData();' not in js[js.index('async function createCategory'):js.index('async function editCategory')]
 assert 'rel="noopener noreferrer"' in js
 assert 'showConfirmDialog' in js
 assert 'savingDrawing' in js

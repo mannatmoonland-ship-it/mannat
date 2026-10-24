@@ -64,8 +64,9 @@ def test_material_api_uses_session_csrf_idempotency_and_refreshes_data():
     assert 'headers["Idempotency-Key"] = requestId' in helper
     assert "if (!response.ok)" in helper
     assert 'data-material-transactions-csrf="{{ material_transactions_csrf }}"' in TEMPLATE
-    assert "await loadData();" in purchase
-    assert "await loadData();" in consumption
+    assert "await loadData();" not in purchase
+    assert "await loadData();" not in consumption
+    assert "onSnapshot(collection(db, collectionName)" in SOURCE
 
 
 def test_delete_confirmation_and_failed_api_keep_existing_error_behavior():
@@ -73,7 +74,7 @@ def test_delete_confirmation_and_failed_api_keep_existing_error_behavior():
 
     assert "await showConfirmDialog({" in deletion
     assert deletion.index("await sendMaterialTransaction(") < deletion.index('await showSuccess(`${label} deleted.`')
-    assert deletion.index('await showSuccess(`${label} deleted.`') < deletion.index("await loadData();")
+    assert 'await loadData();' not in deletion
     assert "Unable to delete material ${label.toLocaleLowerCase()}" in deletion
     helper = section("async function sendMaterialTransaction(", "async function saveCategory")
     assert "if (!response.ok)" in helper

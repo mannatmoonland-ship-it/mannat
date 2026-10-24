@@ -107,6 +107,28 @@ def test_red_book_create_edit_delete_and_audit(red_book_client):
     assert client.get("/api/red-book/items").get_json()["items"] == []
 
 
+def test_red_book_edit_rejects_a_stale_snapshot(red_book_client):
+    store, client = red_book_client
+    item_id = add_item(client, "Inspect the excavation.")
+    expected_updated_at = store.red_book_items[item_id]["updated_at"]
+    store.red_book_items[item_id].update({
+        "text": "Concurrent update from another user.",
+        "updated_at": "2099-01-01T00:00:00+00:00",
+    })
+
+    response = client.patch(
+        f"/api/red-book/items/{item_id}",
+        json={
+            "text": "Stale edit must not replace the newer content.",
+            "expected_updated_at": expected_updated_at,
+        },
+        headers=headers(),
+    )
+
+    assert response.status_code == 409
+    assert store.red_book_items[item_id]["text"] == "Concurrent update from another user."
+
+
 def test_red_book_preserves_multiline_instruction_text(red_book_client):
     _store, client = red_book_client
     text = "Check excavation depth.\nConfirm dimensions before placing PCC."
@@ -603,7 +625,7 @@ def test_red_book_policy_and_delete_confirmation_are_explicit():
     assert 'orderIsSaving || index === items.length - 1, "Move Down"' in javascript
     assert "dragstart" in javascript
     assert 'await apiRequest("/api/red-book/order"' in javascript
-    assert "await saveOrder();" in javascript
+    assert "await saveOrder(previousOrder);" in javascript
     assert "saveOrderButton" not in javascript
     assert 'window.print();' in javascript
     stylesheet = (Path(__file__).parents[1] / "static" / "red_book.css").read_text(
@@ -641,13 +663,19 @@ def test_context_menu_and_pinned_dashboard_assets_are_connected():
     assert ".red-book-item.red-book-item-pinned" in red_book_css
     assert 'row.classList.toggle("red-book-item-pinned", item.pinned === true)' in red_book_js
     assert 'row.classList.toggle("red-book-item-pinned", pinned)' in red_book_js
+    assert 'firestore.doc(db, "sync_metadata", "red-book-items")' in red_book_js
+    assert 'firestore.onSnapshot(' in red_book_js
+    assert "setInterval" not in red_book_js
+    assert 'firestore.doc(db, "sync_metadata", "red-book-items")' in dashboard_js
+    assert 'firestore.onSnapshot(' in dashboard_js
+    assert "setInterval" not in dashboard_js
     assert "Open Red Book" not in pinned_section
     assert "View in Red Book" not in dashboard_js
     assert 'id="dashboardHero"' in dashboard_template
     assert ".dashboard-intro[hidden] { display: none; }" in dashboard_css
     assert "pinnedInstructionsData" in dashboard_template
     assert "red_book_context_menu.js" in dashboard_template
-    assert "/api/red-book/pinned" in dashboard_js
+    assert 'request("/api/red-book/pinned")' in dashboard_js
     assert 'JSON.stringify({ pinned: false })' in dashboard_js
     assert "section.hidden = items.length === 0;" in dashboard_js
     assert "hero.hidden = items.length !== 0;" in dashboard_js

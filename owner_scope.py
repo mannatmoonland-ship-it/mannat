@@ -4,7 +4,7 @@ import math
 import uuid
 
 from google.api_core.exceptions import AlreadyExists
-from google.cloud.firestore_v1 import FieldFilter
+from google.cloud.firestore_v1 import FieldFilter, Query
 
 
 OWNER_SCOPE_COLLECTION = "owner_scopes"
@@ -137,6 +137,30 @@ def _json_value(value):
     return value
 
 
+def owner_scope_version_for_item(updated_at, item_id):
+    serialized = _json_value(updated_at)
+    if not serialized or not item_id:
+        return None
+    return f"{serialized}|{item_id}"
+
+
+def get_owner_scope_version(db):
+    scope_ref, _metadata = _owner_scope_references(db)
+    items_collection = scope_ref.collection("items")
+    latest = next(iter(
+        items_collection.order_by("updatedAt", direction=Query.DESCENDING)
+        .limit(1)
+        .stream()
+    ), None)
+    latest_version = None
+    if latest is not None:
+        item = latest.to_dict() or {}
+        latest_version = owner_scope_version_for_item(item.get("updatedAt"), latest.id)
+    count_result = items_collection.count(alias="item_count").get()
+    item_count = int(count_result[0][0].value) if count_result else 0
+    return {"latest": latest_version, "count": item_count}
+
+
 def get_owner_scope_data(db):
     scope_ref, metadata = _owner_scope_references(db)
 
@@ -203,6 +227,15 @@ def get_owner_scope_data(db):
         ),
         "items": items,
         "payments": payments,
+        "version": {
+            "latest": max(
+                (version for item in items if (version := owner_scope_version_for_item(
+                    item.get("updatedAt"), item.get("id")
+                )) is not None),
+                default=None,
+            ),
+            "count": len(items),
+        },
     }
 
 
@@ -280,7 +313,7 @@ def _validated_payment_payload(payload):
     }
 
 
-def create_owner_scope_item(db, payload, item_id=None, payment_id=None):
+def create_owner_scope_item(db, payload, item_id=None, payment_id=None, *, return_created=False):
     item_fields = {"name", "category", "remarks"}
     payment_fields = {"paymentDate", "amountPaid", "paymentMode"}
     if not isinstance(payload, dict) or set(payload) != item_fields | payment_fields:
@@ -312,7 +345,9 @@ def create_owner_scope_item(db, payload, item_id=None, payment_id=None):
             and existing_payment.get("expenseItemId") == item_id
             and existing_payment.get("remarks") == validated["remarks"]
         ):
-            return item_id
+            return (
+                item_id, False, owner_scope_version_for_item(existing_item.get("updatedAt"), item_id)
+            ) if return_created else item_id
         raise OwnerScopeConflictError("This Owner Scope request ID has already been used.")
     now = datetime.now(timezone.utc)
     batch = db.batch()
@@ -342,12 +377,14 @@ def create_owner_scope_item(db, payload, item_id=None, payment_id=None):
             and existing_payment.get("expenseItemId") == item_id
             and existing_payment.get("remarks") == validated["remarks"]
         ):
-            return item_id
+            return (
+                item_id, False, owner_scope_version_for_item(existing_item.get("updatedAt"), item_id)
+            ) if return_created else item_id
         raise OwnerScopeConflictError("This Owner Scope request ID has already been used.") from None
-    return item_ref.id
+    return (item_ref.id, True, owner_scope_version_for_item(now, item_ref.id)) if return_created else item_ref.id
 
 
-def update_owner_scope_item(db, item_id, payload):
+def update_owner_scope_item(db, item_id, payload, *, updated_at=None):
     if not _valid_document_id(item_id):
         raise ValueError("Invalid Owner Scope item ID.")
     item_fields = {"name", "category", "remarks"}
@@ -387,7 +424,7 @@ def update_owner_scope_item(db, item_id, payload):
         if payment is None and linked_payments:
             raise ValueError("Payment details are required to edit this paid item.")
 
-        now = datetime.now(timezone.utc)
+        now = updated_at or datetime.now(timezone.utc)
         if payment is not None:
             payment_ref = payments_collection.document(linked_payments[0].id)
             transaction.update(payment_ref, {**payment, "updatedAt": now})

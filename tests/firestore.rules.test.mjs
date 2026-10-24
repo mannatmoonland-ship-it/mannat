@@ -75,7 +75,9 @@ async function createUserContext({
       owner_scopes: { name: "Owner Scope" },
       "owner_scopes/owner-scope/payments": { amount: 5 },
       "owner_scopes/other-owner/payments": { amount: 9 },
-      "owner_scopes/owner-scope/items": { name: "Item" }
+      "owner_scopes/owner-scope/items": { name: "Item" },
+      sync_metadata: { revision: 1 },
+      red_book_items: { text: "Instruction", pinned: true }
     };
     for (const [path, data] of Object.entries(seedDocuments)) {
       await setDoc(doc(db, path, "seed"), data);
@@ -144,6 +146,16 @@ rulesTest("browser trade reads are denied while other module reads remain permis
         "owner_scopes/owner-scope/payments/seed"
       ],
       denied: ["trades/seed", "material_consumptions/seed"]
+    },
+    {
+      permission: "red_book.read",
+      allowed: ["sync_metadata/red-book-items", "sync_metadata/red-book-archive"],
+      denied: ["red_book_items/seed", "trades/seed"]
+    },
+    {
+      permission: "owner_scope.read",
+      allowed: ["sync_metadata/owner-scope"],
+      denied: ["trades/seed", "sync_metadata/trade-projection"]
     }
   ];
 
@@ -166,6 +178,7 @@ rulesTest("browser trade reads are denied while other module reads remain permis
   await assertFails(getDoc(doc(allPermissionsDb, "trades", "seed")));
   await assertFails(getDocs(collection(allPermissionsDb, "trades")));
   await assertSucceeds(getDocs(collection(allPermissionsDb, "daily_records")));
+  await assertSucceeds(getDoc(doc(allPermissionsDb, "sync_metadata/trade-projection")));
   const materialsDb = await createUserContext({ permissions: ["materials.read"] });
   await assertSucceeds(getDocs(collection(materialsDb, "material_categories")));
 });
@@ -236,6 +249,32 @@ rulesTest("Owner Scope access is fixed to its project document and summary permi
     permissions: ["owner_scope.read"]
   });
   await assertFails(getDoc(doc(ownerScopeDb, "owner_scopes/owner-scope/payments/seed")));
+  await assertFails(getDoc(doc(ownerScopeDb, "owner_scopes/owner-scope/items/seed")));
+  await assertFails(getDoc(doc(ownerScopeDb, "owner_scopes/other-owner/items/seed")));
+});
+
+rulesTest("trade projection revisions expose no trade data and require a relevant read permission", async () => {
+  const db = await createUserContext({ permissions: ["building_cost_summary.read"] });
+  await assertSucceeds(getDoc(doc(db, "sync_metadata/trade-projection")));
+  await assertFails(getDocs(collection(db, "sync_metadata")));
+  await assertFails(setDoc(doc(db, "sync_metadata/trade-projection"), { revision: 2 }));
+  await assertFails(getDoc(doc(db, "trades/seed")));
+
+  const unauthorizedDb = await createUserContext({ permissions: ["dashboard.read"] });
+  await assertFails(getDoc(doc(unauthorizedDb, "sync_metadata/trade-projection")));
+});
+
+rulesTest("Red Book live reads require permission and remain read-only", async () => {
+  const db = await createUserContext({ permissions: ["red_book.read"] });
+  await assertFails(getDoc(doc(db, "red_book_items/seed")));
+  await assertFails(getDocs(collection(db, "red_book_items")));
+  await assertSucceeds(getDoc(doc(db, "sync_metadata/red-book-archive")));
+  await assertSucceeds(getDoc(doc(db, "sync_metadata/red-book-items")));
+  await assertFails(setDoc(doc(db, "sync_metadata/red-book-items"), { revision: 2 }));
+
+  const unauthorizedDb = await createUserContext({ permissions: ["dashboard.read"] });
+  await assertFails(getDocs(collection(unauthorizedDb, "red_book_items")));
+  await assertFails(getDoc(doc(unauthorizedDb, "sync_metadata/red-book-archive")));
 });
 
 rulesTest("Materials clients can read permitted data but cannot create, edit, or delete it", async () => {

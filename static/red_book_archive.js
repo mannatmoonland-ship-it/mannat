@@ -1,3 +1,5 @@
+import { firebaseAuthReady, getFirebaseApp, getFirebaseFirestoreSdk } from "./firebase_auth.js";
+
 (() => {
   const list = document.getElementById("redBookArchiveItems");
   const status = document.getElementById("redBookArchiveStatus");
@@ -10,8 +12,15 @@
   const deleteDialogItem = document.getElementById("redBookArchiveDeleteItem");
   const restoreDialogItem = document.getElementById("redBookRestoreDialogItem");
   let archivedItems = [];
+  let archiveLoadInFlight = false;
+  let archiveReloadQueued = false;
 
   async function loadArchive() {
+    if (archiveLoadInFlight) {
+      archiveReloadQueued = true;
+      return;
+    }
+    archiveLoadInFlight = true;
     try {
       const response = await fetch("/api/red-book/archive", {
         headers: { "Accept": "application/json" },
@@ -67,6 +76,12 @@
     } catch (error) {
       status.dataset.kind = "error";
       status.textContent = error.message || "Unable to load archived entries.";
+    } finally {
+      archiveLoadInFlight = false;
+      if (archiveReloadQueued) {
+        archiveReloadQueued = false;
+        void loadArchive();
+      }
     }
   }
 
@@ -135,7 +150,6 @@
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || `Unable to ${restoring ? "restore" : "delete"} the item.`);
-        await loadArchive();
         status.dataset.kind = "success";
         status.textContent = restoring
           ? "Item restored to the Red Book."
@@ -148,5 +162,32 @@
     }
   });
 
-  loadArchive();
+  async function subscribeArchive() {
+    try {
+      await firebaseAuthReady;
+      const firestore = await getFirebaseFirestoreSdk();
+      const db = firestore.getFirestore(await getFirebaseApp());
+      const unsubscribe = firestore.onSnapshot(
+        firestore.doc(db, "sync_metadata", "red-book-archive"),
+        () => {
+          contextMenu.close();
+          void loadArchive();
+        },
+        error => {
+          console.error("Unable to subscribe to Red Book archive revisions:", error?.code || error?.name);
+          status.dataset.kind = "error";
+          status.textContent = "Archived entries could not receive live updates.";
+          void loadArchive();
+        }
+      );
+      window.addEventListener("pagehide", unsubscribe, { once: true });
+    } catch (error) {
+      console.error("Unable to initialize Red Book archive live updates:", error?.stage || error?.code || error?.name);
+      status.dataset.kind = "error";
+      status.textContent = "Archived entries could not receive live updates.";
+      await loadArchive();
+    }
+  }
+
+  void subscribeArchive();
 })();

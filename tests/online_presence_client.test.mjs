@@ -6,7 +6,7 @@ import { test } from "node:test";
 const script = await readFile(
   new URL("../static/online_presence.js", import.meta.url),
   "utf8"
-);
+).then(source => source.replace(/^import \{ renderAnimalAvatar \} from ".\/animal_avatars\.js";\r?\n/, ""));
 
 function createHarness(fetch) {
   const status = { textContent: "Loading..." };
@@ -38,16 +38,29 @@ function createHarness(fetch) {
   let nextTimerId = 1;
   const timers = new Map();
   const intervals = [];
+  const visibilityListeners = [];
+  const document = {
+    visibilityState: "visible",
+    querySelector: () => widget,
+    createElement: () => ({
+      textContent: "",
+      setAttribute() {},
+      append(...children) {
+        this.textContent = children.map(child => child.textContent || "").join("");
+      }
+    }),
+    addEventListener(type, listener) {
+      if (type === "visibilitychange") visibilityListeners.push(listener);
+    }
+  };
   const context = {
     AbortController,
     Date,
     Number,
     Promise,
-    document: {
-      querySelector: () => widget,
-      createElement: () => ({ textContent: "" })
-    },
+    document,
     fetch,
+    renderAnimalAvatar: () => "",
     window: {
       setTimeout(callback, delay) {
         const id = nextTimerId++;
@@ -67,7 +80,7 @@ function createHarness(fetch) {
   };
 
   vm.runInNewContext(script, context);
-  return { status, list, timers, intervals, widget, styleValues };
+  return { status, list, timers, intervals, widget, styleValues, document, visibilityListeners };
 }
 
 function response(body, status = 200, retryAfter = null) {
@@ -226,7 +239,9 @@ test("a pending roster times out, shows recoverable status and releases the guar
   assert.equal(harness.status.textContent, "Presence unavailable; retrying");
   assert.deepEqual(timerDelays(harness), [5_000]);
 
-  harness.intervals[0].callback();
+  const [retryId, retry] = [...harness.timers.entries()][0];
+  harness.timers.delete(retryId);
+  retry.callback();
   await settlePromises();
   assert.equal(requests.length, 4);
   assert.equal(harness.status.textContent, "No one online");
@@ -270,9 +285,52 @@ test("roster errors release request timers and allow a later interval refresh", 
   assert.equal(harness.status.textContent, "Presence unavailable; retrying");
   assert.deepEqual(timerDelays(harness), [5_000]);
 
-  harness.intervals[0].callback();
+  const [retryId, retry] = [...harness.timers.entries()][0];
+  harness.timers.delete(retryId);
+  retry.callback();
   await settlePromises();
   assert.equal(heartbeatCount, 2);
   assert.equal(harness.status.textContent, "No one online");
   assert.deepEqual(timerDelays(harness), []);
+});
+
+
+test("presence polling pauses in hidden tabs and resumes when visible", async () => {
+  let requestCount = 0;
+  const harness = createHarness(async (path) => {
+    requestCount += 1;
+    return path.endsWith("heartbeat")
+      ? response({ success: true })
+      : response({ staff: [] });
+  });
+  await settlePromises();
+  assert.equal(requestCount, 2);
+
+  harness.document.visibilityState = "hidden";
+  harness.intervals[0].callback();
+  await settlePromises();
+  assert.equal(requestCount, 2);
+
+  harness.document.visibilityState = "visible";
+  harness.visibilityListeners[0]();
+  await settlePromises();
+  assert.equal(requestCount, 4);
+});
+
+
+test("a failed heartbeat skips the duplicate roster read and backs off", async () => {
+  const requests = [];
+  const harness = createHarness(async (path) => {
+    requests.push(path);
+    return response({ error: "user store unavailable" }, 503);
+  });
+  await settlePromises();
+
+  assert.deepEqual(requests, ["/api/presence/heartbeat"]);
+  assert.equal(harness.status.textContent, "Presence unavailable; retrying");
+  assert.deepEqual(timerDelays(harness), [5_000]);
+
+  harness.intervals[0].callback();
+  await settlePromises();
+  assert.deepEqual(requests, ["/api/presence/heartbeat"]);
 });

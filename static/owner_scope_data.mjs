@@ -103,3 +103,37 @@ export async function loadOwnerScope(db, api, scopeId = OWNER_SCOPE_DOCUMENT_ID)
     payments
   };
 }
+
+export function applyOwnerScopeMutation(data, action, itemId, paymentId, payload, now = new Date().toISOString()) {
+  if (!data || !Array.isArray(data.items) || !Array.isArray(data.payments)) return false;
+  const name = String(payload.name || "").trim().replace(/\s+/g, " ");
+  const remarks = String(payload.remarks || "").trim();
+
+  if (action === "delete") {
+    data.items = data.items.filter(item => item.id !== itemId);
+    data.payments = data.payments.filter(payment => payment.expenseItemId !== itemId);
+    return true;
+  }
+  if (action === "create") {
+    data.items.push({ id: itemId, name, category: payload.category, remarks, createdAt: now, updatedAt: now });
+    data.payments.push({
+      id: paymentId, expenseItemId: itemId, date: payload.paymentDate,
+      amount: Number(payload.amountPaid), paymentMode: String(payload.paymentMode || "").trim(),
+      remarks, createdAt: now, updatedAt: now
+    });
+    return true;
+  }
+
+  const item = data.items.find(candidate => candidate.id === itemId);
+  if (!item) return false;
+  Object.assign(item, { name, category: payload.category, remarks, updatedAt: now });
+  if (Object.hasOwn(payload, "paymentDate")) {
+    const payment = data.payments.find(candidate => candidate.expenseItemId === itemId);
+    if (!payment) return false;
+    Object.assign(payment, {
+      date: payload.paymentDate, amount: Number(payload.amountPaid),
+      paymentMode: String(payload.paymentMode || "").trim(), updatedAt: now
+    });
+  }
+  return true;
+}

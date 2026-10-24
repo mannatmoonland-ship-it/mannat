@@ -140,7 +140,9 @@ def test_report_creator_and_editor_avatars_resolve_from_current_user_profiles(da
 
     set_logged_in_user(client, "user-2")
     update_response = client.patch(
-        f"/api/daily-records/{record_id}", json=payload, headers=headers
+        f"/api/daily-records/{record_id}",
+        json={**payload, "expectedUpdatedAt": records.records[record_id]["updatedAt"]},
+        headers=headers,
     )
     assert update_response.status_code == 200
     assert records.records[record_id]["last_edited_by_user_id"] == "user-2"
@@ -160,6 +162,35 @@ def test_report_creator_and_editor_avatars_resolve_from_current_user_profiles(da
         "/api/daily-records/author-avatars?user_id=user-1&user_id=user-2"
     )
     assert refreshed_avatars_response.get_json()["user_ids"]["user-2"] == "lion"
+
+
+def test_daily_report_update_rejects_a_stale_edit(daily_reports_client):
+    client, _store, records = daily_reports_client
+    set_logged_in_user(client, "user-1")
+    headers = {"X-CSRF-Token": "daily-reports-test-csrf"}
+    created = client.post(
+        "/api/daily-records",
+        json={"date": "2026-10-03", "activity": "Original work"},
+        headers=headers,
+    )
+    record_id = created.get_json()["id"]
+    expected_updated_at = records.records[record_id]["updatedAt"]
+    records.records[record_id]["activity"] = "Changed by another user"
+    records.records[record_id]["updatedAt"] = "2026-10-03T12:00:00+00:00"
+
+    response = client.patch(
+        f"/api/daily-records/{record_id}",
+        json={
+            "date": "2026-10-03",
+            "activity": "Stale edit",
+            "expectedUpdatedAt": expected_updated_at,
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert "changed after you opened it" in response.get_json()["error"]
+    assert records.records[record_id]["activity"] == "Changed by another user"
 
 
 def test_daily_report_save_persists_uploaded_photo_metadata_once(daily_reports_client):
@@ -211,6 +242,7 @@ def test_daily_report_save_persists_uploaded_photo_metadata_once(daily_reports_c
             "date": "2026-10-16",
             "activity": "Site progress updated",
             "evidence": evidence,
+            "expectedUpdatedAt": records.records[record_id]["updatedAt"],
         },
         headers=headers,
     )

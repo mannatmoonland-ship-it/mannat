@@ -58,7 +58,9 @@ from owner_scope import (
     create_owner_scope_item,
     delete_owner_scope_item,
     get_owner_scope_data,
+    get_owner_scope_version,
     update_owner_scope_item,
+    owner_scope_version_for_item,
 )
 from daily_reports_drive_tokens import (
     EncryptedFirestoreTokenStore,
@@ -1334,6 +1336,11 @@ class InMemoryFirestoreStore:
                 [{"id": item_id, **item} for item_id, item in self.red_book_items.items()]
             )
 
+    def get_red_book_item(self, item_id):
+        with self._red_book_mutation_lock:
+            item = self.red_book_items.get(item_id)
+            return {"id": item_id, **item} if isinstance(item, dict) else None
+
     def list_archived_red_book_items(self):
         with self._red_book_mutation_lock:
             return _sort_red_book_items(
@@ -1472,11 +1479,13 @@ class InMemoryFirestoreStore:
             }
             return {"id": item_id}
 
-    def update_red_book_item(self, item_id, text, actor_id, image_url=None, image_urls=None):
+    def update_red_book_item(self, item_id, text, actor_id, image_url=None, image_urls=None, expected_updated_at=None):
         with self._red_book_mutation_lock:
             item = self.red_book_items.get(item_id)
             if item is None:
                 return False
+            if expected_updated_at is not None and item.get("updated_at") != expected_updated_at:
+                raise RedBookMutationError("This Red Book item changed elsewhere. Review the latest version before saving.", 409)
             changes = {"text": text, "updated_at": iso_now(), "updated_by": actor_id}
             if image_urls is not None:
                 saved_image_urls = list(image_urls)
@@ -2651,6 +2660,10 @@ class FirebaseFirestoreStore:
             [{"id": snapshot.id, **(snapshot.to_dict() or {})} for snapshot in snapshots]
         )
 
+    def get_red_book_item(self, item_id):
+        snapshot = self._collection("red_book_items").document(item_id).get()
+        return {"id": snapshot.id, **(snapshot.to_dict() or {})} if snapshot.exists else None
+
     def list_archived_red_book_items(self):
         snapshots = self._collection("red_book_archive").stream()
         return _sort_red_book_items(
@@ -2852,7 +2865,7 @@ class FirebaseFirestoreStore:
 
         return create(firestore_transaction)
 
-    def update_red_book_item(self, item_id, text, actor_id, image_url=None, image_urls=None):
+    def update_red_book_item(self, item_id, text, actor_id, image_url=None, image_urls=None, expected_updated_at=None):
         reference = self._collection("red_book_items").document(item_id)
         firestore_transaction = self.db.transaction()
 
@@ -2861,6 +2874,11 @@ class FirebaseFirestoreStore:
             snapshot = _transaction_get_document_snapshot(transaction, reference)
             if not snapshot.exists:
                 return False
+            if (
+                expected_updated_at is not None
+                and (snapshot.to_dict() or {}).get("updated_at") != expected_updated_at
+            ):
+                raise RedBookMutationError("This Red Book item changed elsewhere. Review the latest version before saving.", 409)
             changes = {
                 "text": text,
                 "updated_at": iso_now(),
@@ -4368,9 +4386,16 @@ def get_current_user():
     ):
         session.clear()
         return None
+    cached_user = request.environ.get("_validated_current_user_cache")
+    if (
+        isinstance(cached_user, dict)
+        and cached_user.get("user_id") == user_id
+        and cached_user.get("session_id") == current_session_id
+    ):
+        return cached_user["user"]
     try:
         user = get_user_store().get_user(user_id)
-    except RuntimeError as error:
+    except (RuntimeError, GoogleAPICallError) as error:
         g.user_store_unavailable = True
         app.logger.error(
             "Unable to verify the current session because the user store is unavailable (%s).",
@@ -4396,6 +4421,11 @@ def get_current_user():
     if current_session_id not in set(user["active_sessions"]):
         session.clear()
         return None
+    request.environ["_validated_current_user_cache"] = {
+        "user_id": user_id,
+        "session_id": current_session_id,
+        "user": user,
+    }
     return user
 
 
@@ -5452,8 +5482,11 @@ def _safe_local_redirect_target(target):
 
 def _unauthenticated_response():
     if g.get("user_store_unavailable", False):
-        response = app.make_response(
-            "Unable to verify your sign-in right now. Please try again shortly."
+        message = "Unable to verify your sign-in right now. Please try again shortly."
+        response = (
+            jsonify(error=message)
+            if request.path.startswith("/api/")
+            else app.make_response(message)
         )
         response.status_code = 503
         response.headers["Cache-Control"] = "no-store"
@@ -8491,8 +8524,31 @@ def red_book_items_api():
     return _red_book_api_response({"id": result["id"]}, 201)
 
 
-@app.route("/api/red-book/items/<item_id>", methods=["PATCH", "DELETE"])
+@app.route("/api/red-book/items/<item_id>", methods=["GET", "PATCH", "DELETE"])
 def red_book_item_api(item_id):
+    if request.method == "GET":
+        _user, denied = _red_book_api_authorize("red_book.read")
+        if denied:
+            return denied
+        if not _valid_red_book_item_id(item_id):
+            return _red_book_api_response({"error": "Invalid Red Book item identifier."}, 400)
+        try:
+            item = get_user_store().get_red_book_item(item_id)
+        except Exception as error:
+            app.logger.error("Red Book item could not be loaded (%s).", type(error).__name__)
+            return _red_book_api_response({"error": "Red Book item is temporarily unavailable."}, 503)
+        if not item:
+            return _red_book_api_response({"error": "Red Book item not found."}, 404)
+        public_item = {
+            field: item.get(field)
+            for field in (
+                "id", "text", "image_url", "sort_order", "created_at",
+                "updated_at", "pinned", "pinned_at",
+            )
+        }
+        public_item["image_urls"] = _red_book_image_urls(item)
+        return _red_book_api_response({"item": public_item})
+
     permission = "red_book.delete" if request.method == "DELETE" else "red_book.edit"
     user, denied = _red_book_api_authorize(permission, require_csrf=True)
     if denied:
@@ -8506,8 +8562,13 @@ def red_book_item_api(item_id):
             if (
                 not isinstance(payload, dict)
                 or "text" not in payload
-                or not set(payload).issubset({"text", "image_url", "image_urls"})
+                or not set(payload).issubset({"text", "image_url", "image_urls", "expected_updated_at"})
                 or {"image_url", "image_urls"}.issubset(payload)
+                or (
+                    "expected_updated_at" in payload
+                    and payload["expected_updated_at"] is not None
+                    and not isinstance(payload["expected_updated_at"], str)
+                )
             ):
                 return _red_book_api_response(
                     {"error": "Provide the construction instruction and optional image link."},
@@ -8522,7 +8583,12 @@ def red_book_item_api(item_id):
                 image_url = _validate_red_book_image_urls([payload["image_url"]])
                 image_url = image_url[0] if image_url else ""
             updated = store.update_red_book_item(
-                item_id, text, user.get("id"), image_url, image_urls=image_urls
+                item_id,
+                text,
+                user.get("id"),
+                image_url,
+                image_urls=image_urls,
+                expected_updated_at=payload.get("expected_updated_at"),
             )
             if not updated:
                 return _red_book_api_response({"error": "Red Book item not found."}, 404)
@@ -8952,9 +9018,11 @@ def owner_scope_page():
     )
 
 
-def _owner_scope_api_authorize(permission):
+def _owner_scope_api_authorize(permission, *, require_csrf=True):
     user = get_current_user()
     if not user:
+        if g.get("user_store_unavailable", False):
+            return None, _unauthenticated_response(), 503
         return None, jsonify(error="Authentication required."), 401
     if user.get("must_change_password"):
         return None, jsonify(error="Change your password before continuing."), 403
@@ -8965,7 +9033,7 @@ def _owner_scope_api_authorize(permission):
         return None, jsonify(error="Unable to verify Owner Scope permissions."), 503
     if not permitted:
         return None, jsonify(error="You do not have permission to perform this Owner Scope action."), 403
-    if not _owner_scope_api_csrf_valid():
+    if require_csrf and not _owner_scope_api_csrf_valid():
         return None, jsonify(error="Your session expired. Reload the page and try again."), 403
     return user, None, None
 
@@ -9319,6 +9387,164 @@ def _trade_read_permissions(user):
         _custom_role_definition_for_user(user, store),
         get_non_admin_permissions(),
     )
+
+
+def _publish_trade_projection_revision(*, trade_ids=None, refresh_all=False, db=None):
+    if db is None:
+        store = get_user_store()
+        db = getattr(store, "db", None)
+    if db is None:
+        return
+    db.collection("sync_metadata").document("trade-projection").set({
+        "revision": uuid.uuid4().hex,
+        "updated_at": iso_now(),
+        "trade_ids": sorted(set(trade_ids or [])),
+        "refresh_all": bool(refresh_all),
+    })
+
+
+def _publish_red_book_archive_revision():
+    store = get_user_store()
+    db = getattr(store, "db", None)
+    if db is None:
+        return
+    db.collection("sync_metadata").document("red-book-archive").set({
+        "revision": uuid.uuid4().hex,
+        "updated_at": iso_now(),
+    })
+
+
+def _publish_red_book_items_revision(*, item_id=None, refresh_all=False, deleted=False):
+    store = get_user_store()
+    db = getattr(store, "db", None)
+    if db is None:
+        return
+    db.collection("sync_metadata").document("red-book-items").set({
+        "revision": uuid.uuid4().hex,
+        "updated_at": iso_now(),
+        "item_id": item_id,
+        "refresh_all": bool(refresh_all),
+        "deleted": bool(deleted),
+    })
+
+
+def _publish_owner_scope_revision():
+    store = get_user_store()
+    db = getattr(store, "db", None)
+    if db is None:
+        return
+    db.collection("sync_metadata").document("owner-scope").set({
+        "revision": uuid.uuid4().hex,
+        "updated_at": iso_now(),
+    })
+
+
+@app.after_request
+def notify_trade_projection_clients(response):
+    path = request.path
+    is_trade_projection_mutation = (
+        request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and response.status_code < 400
+        and (
+            path == "/api/trades"
+            or path.startswith("/api/trades/")
+            or path.startswith("/api/labour-payments/")
+        )
+    )
+    if is_trade_projection_mutation:
+        try:
+            view_args = request.view_args or {}
+            trade_id = view_args.get("trade_id")
+            refresh_all = path == "/api/trades/order"
+            if request.method == "POST" and path == "/api/trades":
+                payload = request.get_json(silent=True)
+                trade_id = payload.get("id") if isinstance(payload, dict) else None
+                refresh_all = True
+            elif request.method == "DELETE" and path.startswith("/api/trades/"):
+                refresh_all = True
+            _publish_trade_projection_revision(
+                trade_ids=[trade_id] if trade_id else [],
+                refresh_all=refresh_all or not trade_id,
+            )
+        except Exception as error:
+            app.logger.error(
+                "Trade projection revision could not be published (%s).",
+                type(error).__name__,
+            )
+            response.headers["X-Mannat-Sync-Status"] = "notification-unavailable"
+    return response
+
+
+@app.after_request
+def notify_owner_scope_clients(response):
+    if (
+        request.method in {"POST", "PUT", "DELETE"}
+        and response.status_code < 400
+        and request.path.startswith("/api/owner-scope/items")
+    ):
+        try:
+            _publish_owner_scope_revision()
+        except Exception as error:
+            app.logger.error(
+                "Owner Scope revision could not be published (%s).",
+                type(error).__name__,
+            )
+            response.headers["X-Mannat-Sync-Status"] = "notification-unavailable"
+    return response
+
+
+@app.after_request
+def notify_red_book_archive_clients(response):
+    path = request.path
+    is_archive_mutation = request.method in {"POST", "DELETE"} and response.status_code < 400 and (
+        path.startswith("/api/red-book/archive/")
+        or path.endswith("/archive")
+        or (request.method == "DELETE" and path.startswith("/api/red-book/items/"))
+    )
+    if is_archive_mutation:
+        try:
+            _publish_red_book_archive_revision()
+        except Exception as error:
+            app.logger.error(
+                "Red Book archive revision could not be published (%s).",
+                type(error).__name__,
+            )
+            response.headers["X-Mannat-Sync-Status"] = "notification-unavailable"
+    return response
+
+
+@app.after_request
+def notify_red_book_item_clients(response):
+    path = request.path
+    is_item_mutation = (
+        request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and response.status_code < 400
+        and (
+            path == "/api/red-book/items"
+            or path == "/api/red-book/order"
+            or path.startswith("/api/red-book/items/")
+            or path.endswith("/restore")
+        )
+    )
+    if is_item_mutation:
+        try:
+            item_id = (request.view_args or {}).get("item_id")
+            refresh_all = path in {"/api/red-book/items", "/api/red-book/order"}
+            deleted = (
+                request.method == "DELETE" and path.startswith("/api/red-book/items/")
+            ) or path.endswith("/archive")
+            _publish_red_book_items_revision(
+                item_id=item_id,
+                refresh_all=refresh_all or not item_id,
+                deleted=deleted,
+            )
+        except Exception as error:
+            app.logger.error(
+                "Red Book item revision could not be published (%s).",
+                type(error).__name__,
+            )
+            response.headers["X-Mannat-Sync-Status"] = "notification-unavailable"
+    return response
 
 
 @app.route("/api/trades", methods=["GET"])
@@ -9705,6 +9931,8 @@ def trade_contract_item_api(trade_id, contract_id):
 def owner_scope_data_api():
     user = get_current_user()
     if not user:
+        if g.get("user_store_unavailable", False):
+            return _unauthenticated_response()
         return jsonify(error="Authentication required."), 401
     if user.get("must_change_password"):
         return jsonify(error="Change your password before continuing."), 403
@@ -9742,18 +9970,12 @@ def owner_scope_item_create_api():
     payment_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"owner-scope-payment:{item_id}"))
     try:
         database = get_user_store().db
-        item_reference = (
-            database.collection("owner_scopes")
-            .document("owner-scope")
-            .collection("items")
-            .document(item_id)
-        )
-        already_exists = item_reference.get().exists
-        create_owner_scope_item(
+        _created_item_id, item_created, version = create_owner_scope_item(
             database,
             payload,
             item_id=item_id,
             payment_id=payment_id,
+            return_created=True,
         )
     except OwnerScopeConflictError as exc:
         return jsonify(error=str(exc)), exc.status
@@ -9762,9 +9984,9 @@ def owner_scope_item_create_api():
     except Exception as error:
         app.logger.error("Owner Scope item creation failed (%s).", type(error).__name__)
         return jsonify(error="Unable to save the Owner Scope item."), 503
-    response = jsonify(id=item_id)
+    response = jsonify(id=item_id, paymentId=payment_id, version=version)
     response.headers["Cache-Control"] = "no-store"
-    return response, 200 if already_exists else 201
+    return response, 201 if item_created else 200
 
 
 @app.route("/api/owner-scope/items/<item_id>", methods=["PUT", "DELETE"])
@@ -9779,11 +10001,18 @@ def owner_scope_item_api(item_id):
     try:
         if request.method == "PUT":
             payload = request.get_json(silent=True)
-            if not update_owner_scope_item(get_user_store().db, item_id, payload):
+            updated_at = datetime.now(timezone.utc)
+            if not update_owner_scope_item(
+                get_user_store().db, item_id, payload, updated_at=updated_at
+            ):
                 return jsonify(error="Owner Scope item not found."), 404
-            return jsonify(id=item_id)
+            return jsonify(
+                id=item_id,
+                version=owner_scope_version_for_item(updated_at, item_id),
+            )
 
-        result = delete_owner_scope_item(get_user_store().db, item_id)
+        database = get_user_store().db
+        result = delete_owner_scope_item(database, item_id)
     except OwnerScopeConflictError as exc:
         return jsonify(error=str(exc)), exc.status
     except ValueError as exc:
@@ -9794,7 +10023,7 @@ def owner_scope_item_api(item_id):
 
     if result == "not_found":
         return jsonify(error="Owner Scope item not found."), 404
-    return jsonify(deleted=True)
+    return jsonify(deleted=True, version=get_owner_scope_version(database))
 
 
 class PaymentMutationError(ValueError):
@@ -11510,8 +11739,13 @@ def get_daily_report_trade_options():
         return denied
 
     try:
+        store = get_user_store()
+        trade_id = request.args.get("trade_id")
+        if trade_id and not _valid_trade_id(trade_id):
+            return jsonify(error="A valid trade ID is required."), 400
+        source_trades = [store.get_trade(trade_id)] if trade_id else store.list_trades()
         trade_options = []
-        for trade in get_user_store().list_trades():
+        for trade in source_trades:
             if not isinstance(trade, dict):
                 continue
             categories = trade.get("workerCategories")
@@ -11534,7 +11768,12 @@ def get_daily_report_trade_options():
         app.logger.exception("Unable to load Daily Reports trade options.")
         return jsonify(error="Daily Reports trade options are temporarily unavailable."), 503
 
-    response = jsonify(trades=trade_options)
+    if trade_id:
+        if not trade_options:
+            return jsonify(error="Trade not found."), 404
+        response = jsonify(trade=trade_options[0])
+    else:
+        response = jsonify(trades=trade_options)
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -11566,6 +11805,21 @@ def get_daily_record_payload():
     return record_data
 
 
+def _daily_record_version(value):
+    if isinstance(value, datetime):
+        timestamp = value
+    elif isinstance(value, str):
+        try:
+            timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    else:
+        return None
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc).isoformat()
+
+
 def _daily_record_save_response(record_id, record_data):
     response_fields = DAILY_RECORD_EDITABLE_FIELDS | {
         "createdByName",
@@ -11581,6 +11835,8 @@ def _daily_record_save_response(record_id, record_data):
         for key, value in record_data.items()
         if key in response_fields
     }
+    if "updatedAt" in response_record:
+        response_record["updatedAt"] = _daily_record_version(response_record["updatedAt"])
     return jsonify(
         id=record_id,
         evidence=response_record.get("evidence", []),
@@ -11628,16 +11884,27 @@ def update_daily_record(record_id):
     if not _daily_record_api_csrf_valid():
         return jsonify(error="Your session expired. Reload the page and try again."), 403
 
+    request_payload = request.get_json(silent=True)
+    if (
+        not isinstance(request_payload, dict)
+        or "expectedUpdatedAt" not in request_payload
+        or (
+            request_payload["expectedUpdatedAt"] is not None
+            and (
+                not isinstance(request_payload["expectedUpdatedAt"], str)
+                or len(request_payload["expectedUpdatedAt"]) > 128
+            )
+        )
+    ):
+        return jsonify(error="Reload this Daily Report before saving your changes."), 428
+    expected_updated_at = _daily_record_version(request_payload["expectedUpdatedAt"])
+
     record_data = get_daily_record_payload()
     if not record_data:
         return jsonify(error="Daily report data is required."), 400
 
     try:
         record_ref = get_daily_records_collection().document(record_id)
-        existing_snapshot = record_ref.get()
-        if not existing_snapshot.exists:
-            return jsonify(error="Daily report not found."), 404
-        existing_record = existing_snapshot.to_dict() or {}
         edited_at = iso_now()
         record_data["updatedAt"] = edited_at
         record_data["last_edited_by_name"] = (
@@ -11648,12 +11915,43 @@ def update_daily_record(record_id):
         record_data["last_edited_by_username"] = str(current_user.get("username") or "").strip()
         record_data["last_edited_by_user_id"] = current_user["id"]
         record_data["last_edited_at"] = edited_at
-        record_ref.update(record_data)
-        saved_record = {**existing_record, **record_data}
+        database = getattr(get_user_store(), "db", None)
+        if firestore is not None and callable(getattr(database, "transaction", None)):
+            transaction = database.transaction()
+
+            @firestore.transactional
+            def update_record_in_transaction(active_transaction):
+                existing_snapshot = record_ref.get(transaction=active_transaction)
+                if not existing_snapshot.exists:
+                    return None
+                existing_record = existing_snapshot.to_dict() or {}
+                if _daily_record_version(existing_record.get("updatedAt")) != expected_updated_at:
+                    return "conflict"
+                active_transaction.update(record_ref, record_data)
+                return {**existing_record, **record_data}
+
+            saved_record = update_record_in_transaction(transaction)
+        else:
+            existing_snapshot = record_ref.get()
+            if not existing_snapshot.exists:
+                return jsonify(error="Daily report not found."), 404
+            existing_record = existing_snapshot.to_dict() or {}
+            if _daily_record_version(existing_record.get("updatedAt")) != expected_updated_at:
+                return jsonify(
+                    error="This Daily Report changed after you opened it. Copy your edits, close it, and reopen the latest record before saving."
+                ), 409
+            record_ref.update(record_data)
+            saved_record = {**existing_record, **record_data}
     except RuntimeError:
         app.logger.exception("Unable to update a Daily Report")
         return jsonify(error="Unable to update the daily report. Please try again."), 503
 
+    if saved_record is None:
+        return jsonify(error="Daily report not found."), 404
+    if saved_record == "conflict":
+        return jsonify(
+            error="This Daily Report changed after you opened it. Copy your edits, close it, and reopen the latest record before saving."
+        ), 409
     return _daily_record_save_response(record_id, saved_record), 200
 
 

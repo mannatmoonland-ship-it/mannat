@@ -1,3 +1,5 @@
+import { firebaseAuthReady, getFirebaseApp, getFirebaseFirestoreSdk } from "./firebase_auth.js";
+
 (() => {
   const body = document.body;
   const csrfToken = body.dataset.redBookCsrf || "";
@@ -24,7 +26,9 @@
   let draggedItemId = null;
   let touchDragState = null;
   let orderIsSaving = false;
-  let isRefreshingPinStates = false;
+  let editingItemId = null;
+  let pendingItemRevision = null;
+  let itemRefreshInFlight = false;
 
   function showStatus(message, kind = "success") {
     status.textContent = message;
@@ -58,12 +62,14 @@
       throw new Error("The Red Book service returned an invalid response.");
     }
     if (!response.ok) {
-      throw new Error(payload.error || "Unable to complete the Red Book request.");
+      const error = new Error(payload.error || "Unable to complete the Red Book request.");
+      error.status = response.status;
+      throw error;
     }
     return payload;
   }
 
-  async function saveOrder() {
+  async function saveOrder(previousOrder) {
     if (orderIsSaving) return;
     orderIsSaving = true;
     renderItems();
@@ -78,11 +84,13 @@
       });
       showStatus("Red Book order saved.");
     } catch (error) {
+      items = previousOrder;
       showStatus(error.message, "error");
-      await loadItems();
+      renderItems();
     } finally {
       orderIsSaving = false;
       renderItems();
+      if (pendingItemRevision) void refreshItems(pendingItemRevision);
     }
   }
 
@@ -91,10 +99,11 @@
     const index = items.findIndex(item => item.id === itemId);
     const destination = index + offset;
     if (index < 0 || destination < 0 || destination >= items.length) return;
+    const previousOrder = [...items];
     const [item] = items.splice(index, 1);
     items.splice(destination, 0, item);
     renderItems();
-    await saveOrder();
+    await saveOrder(previousOrder);
   }
 
   function actionButton(label, action, disabled = false, accessibleLabel = label) {
@@ -204,10 +213,11 @@
         const sourceIndex = items.findIndex(candidate => candidate.id === sourceId);
         const targetIndex = items.findIndex(candidate => candidate.id === item.id);
         if (sourceIndex < 0 || targetIndex < 0) return;
+        const previousOrder = [...items];
         const [moving] = items.splice(sourceIndex, 1);
         items.splice(targetIndex, 0, moving);
         renderItems();
-        saveOrder();
+        saveOrder(previousOrder);
       });
 
       const number = document.createElement("span");
@@ -246,6 +256,8 @@
   }
 
   async function editItem(item, contentNode) {
+    editingItemId = item.id;
+    const expectedUpdatedAt = item.updated_at || null;
     const fields = document.createElement("div");
     fields.className = "red-book-edit-fields";
     const input = document.createElement("textarea");
@@ -280,18 +292,32 @@
             .map(field => field.value);
           await apiRequest(`/api/red-book/items/${encodeURIComponent(item.id)}`, {
             method: "PATCH",
-            body: JSON.stringify({ text: input.value, image_urls: imageUrls })
+            body: JSON.stringify({ text: input.value, image_urls: imageUrls, expected_updated_at: expectedUpdatedAt })
           });
-          item.text = input.value.trim();
-          item.image_urls = imageUrls.map(url => url.trim()).filter(Boolean);
-          item.image_url = item.image_urls[0] || "";
+          const currentItem = items.find(candidate => candidate.id === item.id);
+          if (currentItem) {
+            currentItem.text = input.value.trim();
+            currentItem.image_urls = imageUrls.map(url => url.trim()).filter(Boolean);
+            currentItem.image_url = currentItem.image_urls[0] || "";
+          }
+          editingItemId = null;
           renderItems();
           showStatus("Red Book item updated.");
+          if (pendingItemRevision) void refreshItems(pendingItemRevision);
         } catch (error) {
+          if (error.status === 409) {
+            editingItemId = null;
+            renderItems();
+            if (pendingItemRevision) void refreshItems(pendingItemRevision);
+          }
           showStatus(error.message, "error");
         }
       }),
-      actionButton("Cancel", renderItems)
+      actionButton("Cancel", () => {
+        editingItemId = null;
+        renderItems();
+        if (pendingItemRevision) void refreshItems(pendingItemRevision);
+      })
     );
   }
 
@@ -379,7 +405,6 @@
         });
         input.value = "";
         setImageUrlFields(newImageUrls);
-        await loadItems();
         showStatus("Red Book item added.");
       } catch (error) {
         showStatus(error.message, "error");
@@ -388,14 +413,98 @@
     });
   }
 
-  async function loadItems() {
+  async function refreshItems(revision) {
+    if (pendingItemRevision) {
+      const refreshAll = pendingItemRevision.refresh_all || revision.refresh_all;
+      pendingItemRevision = {
+        refresh_all: refreshAll,
+        item_ids: refreshAll
+          ? []
+          : [...new Set([...(pendingItemRevision.item_ids || []), ...(revision.item_ids || [])])],
+        deleted_ids: [...new Set([...(pendingItemRevision.deleted_ids || []), ...(revision.deleted_ids || [])])]
+      };
+    } else {
+      pendingItemRevision = revision;
+    }
+    if (itemRefreshInFlight || editingItemId || orderIsSaving) return;
+    itemRefreshInFlight = true;
+    try {
+      while (pendingItemRevision && !editingItemId && !orderIsSaving) {
+        const next = pendingItemRevision;
+        pendingItemRevision = null;
+        if (next.refresh_all || !next.item_ids?.length && !next.deleted_ids?.length) {
+          await loadItemsOnce();
+          continue;
+        }
+        for (const id of next.deleted_ids || []) {
+          items = items.filter(item => item.id !== id);
+        }
+        for (const id of next.item_ids || []) {
+          try {
+            const payload = await apiRequest(`/api/red-book/items/${encodeURIComponent(id)}`);
+            items = [...items.filter(item => item.id !== id), payload.item];
+          } catch (error) {
+            if (error.status === 404) items = items.filter(item => item.id !== id);
+            else throw error;
+          }
+        }
+        items.sort((a, b) =>
+          Number(a.sort_order ?? Number.MAX_SAFE_INTEGER) - Number(b.sort_order ?? Number.MAX_SAFE_INTEGER)
+          || String(a.id).localeCompare(String(b.id))
+        );
+        renderItems();
+      }
+    } catch (error) {
+      showStatus(error.message, "error");
+    } finally {
+      itemRefreshInFlight = false;
+      if (pendingItemRevision && !editingItemId && !orderIsSaving) void refreshItems(pendingItemRevision);
+    }
+  }
+
+  async function subscribeItems() {
+    try {
+      await firebaseAuthReady;
+      const firestore = await getFirebaseFirestoreSdk();
+      const db = firestore.getFirestore(await getFirebaseApp());
+      let isInitialSnapshot = true;
+      const unsubscribe = firestore.onSnapshot(
+        firestore.doc(db, "sync_metadata", "red-book-items"),
+        snapshot => {
+          const revision = isInitialSnapshot
+            ? { refresh_all: true, item_ids: [], deleted_ids: [] }
+            : snapshot.exists()
+              ? {
+                  refresh_all: snapshot.data().refresh_all === true,
+                  item_ids: snapshot.data().item_id && !snapshot.data().deleted ? [snapshot.data().item_id] : [],
+                  deleted_ids: snapshot.data().item_id && snapshot.data().deleted ? [snapshot.data().item_id] : []
+                }
+              : { refresh_all: true, item_ids: [], deleted_ids: [] };
+          isInitialSnapshot = false;
+          void refreshItems(revision);
+          if (window.location.hash.startsWith("#red-book-item-")) {
+            document.getElementById(window.location.hash.slice(1))?.scrollIntoView();
+          }
+        },
+        error => {
+          console.error("Unable to subscribe to Red Book items:", error?.code || error?.name);
+          showStatus("Red Book items could not receive live updates.", "error");
+          void loadItemsOnce();
+        }
+      );
+      window.addEventListener("pagehide", unsubscribe, { once: true });
+    } catch (error) {
+      console.error("Unable to initialize Red Book live updates:", error?.stage || error?.code || error?.name);
+      showStatus("Red Book items could not receive live updates.", "error");
+      await loadItemsOnce();
+    }
+  }
+
+  async function loadItemsOnce() {
     try {
       const payload = await apiRequest("/api/red-book/items");
       items = payload.items;
       renderItems();
-      if (window.location.hash.startsWith("#red-book-item-")) {
-        document.getElementById(window.location.hash.slice(1))?.scrollIntoView();
-      }
     } catch (error) {
       showStatus(error.message, "error");
     }
@@ -449,7 +558,6 @@
             method: "POST",
             body: JSON.stringify({ text: item.text, image_urls: getImageUrls(item) })
           });
-          await loadItems();
           showStatus("Red Book item duplicated.");
         } catch (error) {
           showStatus(error.message, "error");
@@ -479,22 +587,5 @@
     }
   });
 
-  loadItems();
-  window.setInterval(async () => {
-    if (document.hidden || orderIsSaving || isRefreshingPinStates) return;
-    isRefreshingPinStates = true;
-    try {
-      const payload = await apiRequest("/api/red-book/items");
-      const pinStates = new Map(payload.items.map(item => [item.id, item.pinned === true]));
-      items.forEach(item => {
-        item.pinned = pinStates.get(item.id) === true;
-        document.getElementById(`red-book-item-${item.id}`)
-          ?.classList.toggle("red-book-item-pinned", item.pinned);
-      });
-    } catch (error) {
-      showStatus(error.message, "error");
-    } finally {
-      isRefreshingPinStates = false;
-    }
-  }, 10000);
+  void subscribeItems();
 })();

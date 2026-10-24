@@ -313,6 +313,9 @@ def restore_snapshot(snapshot_path, destination_db, allow_skip_conflicts=False, 
                 restored[collection_path] += count - batch_overwritten[collection_path]
             overwritten.update(batch_overwritten)
             written_documents.extend(batch_documents)
+            if progress:
+                for collection_path in batch_counts:
+                    progress(collection_path, restored[collection_path])
             batch = destination_db.batch()
             batch_size = 0
             batch_counts = Counter()
@@ -339,8 +342,6 @@ def restore_snapshot(snapshot_path, destination_db, allow_skip_conflicts=False, 
             batch_documents.append((collection_path, document_id, data))
             if batch_size >= MAX_BATCH_WRITES:
                 commit_batch()
-                if progress:
-                    progress(collection_path, restored[collection_path])
         commit_batch()
         for collection_path, document_id, expected_data in written_documents:
             actual = destination_db.document(f"{collection_path}/{document_id}").get().to_dict()

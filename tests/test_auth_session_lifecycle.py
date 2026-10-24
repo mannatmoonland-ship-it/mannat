@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from google.api_core.exceptions import ResourceExhausted
 from werkzeug.security import generate_password_hash
 
 import app as app_module
@@ -335,3 +336,42 @@ def test_password_reset_invalidates_sessions_and_advances_authorization_version(
     assert consumed is True
     assert updated["active_sessions"] == []
     assert updated["authorization_version"] == 4
+
+
+def test_current_user_is_loaded_once_per_request(auth_clients, monkeypatch):
+    store, admin_client, _staff_client = auth_clients
+    original_get_user = store.get_user
+    reads = []
+
+    def counted_get_user(user_id):
+        reads.append(user_id)
+        return original_get_user(user_id)
+
+    monkeypatch.setattr(store, "get_user", counted_get_user)
+    with app.test_request_context("/"):
+        app_module.session["user_id"] = "admin-user"
+        app_module.session["session_id"] = "admin-session"
+        first = app_module.get_current_user()
+        second = app_module.get_current_user()
+        assert first is second
+        assert reads == ["admin-user"]
+
+    with app.test_request_context("/"):
+        app_module.session["user_id"] = "admin-user"
+        app_module.session["session_id"] = "admin-session"
+        app_module.get_current_user()
+        assert reads == ["admin-user", "admin-user"]
+
+
+def test_presence_returns_json_service_unavailable_on_firestore_quota(auth_clients, monkeypatch):
+    store, _admin_client, staff_client = auth_clients
+
+    def quota_exceeded(_user_id):
+        raise ResourceExhausted("quota exceeded")
+
+    monkeypatch.setattr(store, "get_user", quota_exceeded)
+    response = staff_client.get("/api/presence/roster")
+
+    assert response.status_code == 503
+    assert response.is_json
+    assert "try again shortly" in response.get_json()["error"].lower()

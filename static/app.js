@@ -30,6 +30,11 @@ import {
 import {
     formatDateWithDay
 } from "./date_format.js";
+import {
+    firebaseAuthReady,
+    getFirebaseApp,
+    getFirebaseFirestoreSdk
+} from "./firebase_auth.js";
 
 
 function generateUuid() {
@@ -69,6 +74,9 @@ function generateUuid() {
 let editingTradeId = null;
 let pendingTradeCreateRequest = null;
 let tradeOrderSaving = false;
+let pendingTradeSync = null;
+let tradeSyncInFlight = false;
+let tradeSyncUnsubscribe = null;
 
 async function sendTradeMutation(url, method, payload = null) {
     const csrfToken = document.body.dataset.tradeBuilderCsrf
@@ -111,6 +119,7 @@ async function readTradeApi(url) {
     if (!response.ok) {
         const error = new Error(result.error || "Unable to load trade data.");
         error.safeApiMessage = true;
+        error.status = response.status;
         throw error;
     }
     return result;
@@ -685,21 +694,37 @@ function resetForm() {
    LOAD TRADES
 ========================================================= */
 
-async function loadTrades() {
+async function loadTrades(tradeIds = null) {
 
     const list = document.getElementById("tradeList");
 
     try {
         const view = financialOnly ? "labour_payments" : "trade_builder";
-        const result = await readTradeApi(`/api/trades?view=${view}`);
-        if (!Array.isArray(result.trades)) {
-            throw new Error("The server returned invalid trade data.");
+        let trades;
+        if (Array.isArray(tradeIds)) {
+            const changes = await Promise.all(tradeIds.map(async tradeId => {
+                try {
+                    const trade = await readTradeForView(tradeId, view);
+                    return { tradeId, trade };
+                } catch (error) {
+                    if (error.status === 404) return { tradeId, trade: null };
+                    throw error;
+                }
+            }));
+            changes.forEach(({ tradeId, trade }) => {
+                if (trade) tradesById.set(tradeId, trade);
+                else tradesById.delete(tradeId);
+            });
+            trades = [...tradesById.values()];
+        } else {
+            const result = await readTradeApi(`/api/trades?view=${view}`);
+            if (!Array.isArray(result.trades)) {
+                throw new Error("The server returned invalid trade data.");
+            }
+            trades = result.trades;
+            tradesById.clear();
+            trades.forEach(trade => tradesById.set(trade.id, trade));
         }
-        tradesById.clear();
-        const trades = result.trades;
-
-
-        trades.forEach(trade => tradesById.set(trade.id, trade));
 
         trades.sort((a, b) => {
             const aHasOrder = Number.isInteger(a.sortOrder) && a.sortOrder >= 0;
@@ -785,6 +810,88 @@ function updateTradeSortButtons() {
     });
 }
 
+function tradeFormHasUnsavedInput() {
+    return Boolean(
+        editingTradeId
+        || editingPaymentId
+        || paymentSaveInProgress
+        || paymentDeleteInProgress
+        || tradeOrderSaving
+        || (
+            document.activeElement?.matches("input, textarea, select")
+            && String(document.activeElement.value || "").trim() !== ""
+        )
+    );
+}
+
+async function flushPendingTradeSync() {
+    if (!pendingTradeSync || tradeSyncInFlight || tradeFormHasUnsavedInput()) return;
+    const change = pendingTradeSync;
+    pendingTradeSync = null;
+    tradeSyncInFlight = true;
+    try {
+        await loadTrades(change.refresh_all || !change.trade_ids?.length ? null : change.trade_ids);
+    } finally {
+        tradeSyncInFlight = false;
+        if (pendingTradeSync && !tradeFormHasUnsavedInput()) void flushPendingTradeSync();
+    }
+}
+
+function queueTradeSync(change) {
+    if (pendingTradeSync) {
+        const refreshAll = pendingTradeSync.refresh_all || change.refresh_all;
+        pendingTradeSync = {
+            refresh_all: refreshAll,
+            trade_ids: refreshAll
+                ? []
+                : [...new Set([...(pendingTradeSync.trade_ids || []), ...(change.trade_ids || [])])]
+        };
+    } else {
+        pendingTradeSync = change;
+    }
+    void flushPendingTradeSync();
+}
+
+async function subscribeToTradeRevisions() {
+    try {
+        await firebaseAuthReady;
+        const firestore = await getFirebaseFirestoreSdk();
+        const db = firestore.getFirestore(await getFirebaseApp());
+        let isInitialSnapshot = true;
+        tradeSyncUnsubscribe = firestore.onSnapshot(
+            firestore.doc(db, "sync_metadata", "trade-projection"),
+            snapshot => {
+                if (isInitialSnapshot) {
+                    isInitialSnapshot = false;
+                    queueTradeSync({ refresh_all: true, trade_ids: [] });
+                    return;
+                }
+                const change = snapshot.exists()
+                    ? snapshot.data()
+                    : { refresh_all: true, trade_ids: [] };
+                queueTradeSync(change);
+            },
+            error => {
+                console.error("Unable to subscribe to trade projection revisions:", error?.code || error?.name);
+                showStatus("Trade data could not receive live updates.", true);
+                if (isInitialSnapshot) {
+                    isInitialSnapshot = false;
+                    void loadTrades();
+                }
+            }
+        );
+        window.addEventListener("pagehide", () => {
+            tradeSyncUnsubscribe?.();
+            tradeSyncUnsubscribe = null;
+        }, { once: true });
+        document.addEventListener("focusout", () => window.setTimeout(() => void flushPendingTradeSync(), 0));
+    } catch (error) {
+        console.error("Unable to initialize trade projection updates:", error?.stage || error?.code || error?.name);
+        showStatus("Trade data could not receive live updates.", true);
+        await loadTrades();
+    }
+}
+
 async function moveTrade(tradeId, offset) {
     if (tradeOrderSaving || financialOnly) return;
     const list = document.getElementById("tradeList");
@@ -812,6 +919,7 @@ async function moveTrade(tradeId, offset) {
     } finally {
         tradeOrderSaving = false;
         updateTradeSortButtons();
+        void flushPendingTradeSync();
     }
 }
 
@@ -2626,9 +2734,7 @@ async function saveTrade() {
 
 
         resetForm();
-
-
-        await loadTrades();
+        void flushPendingTradeSync();
 
     }
 
@@ -2742,9 +2848,6 @@ async function removeTrade(
         showStatus(
             "Trade deleted."
         );
-
-
-        await loadTrades();
 
     }
 
@@ -4544,16 +4647,13 @@ async function deletePayment(
             currentPaymentTrade
         );
 
-
-        await loadTrades();
-
-
         showStatus(
             "Payment transaction deleted."
         );
 
         paymentDeleteInProgress =
             false;
+        void flushPendingTradeSync();
 
     }
 
@@ -4565,6 +4665,7 @@ async function deletePayment(
 
         paymentDeleteInProgress =
             false;
+        void flushPendingTradeSync();
 
         showStatus(
             "Unable to delete the payment. Please try again.",
@@ -5086,12 +5187,9 @@ async function savePayment() {
         settlementAmountUserEdited = false;
         updatePaymentForm();
 
-
-        await loadTrades();
-
-
         paymentSaveInProgress =
             false;
+        void flushPendingTradeSync();
 
 
         showStatus(
@@ -5119,6 +5217,7 @@ async function savePayment() {
 
         paymentSaveInProgress =
             false;
+        void flushPendingTradeSync();
 
 
         showStatus(
@@ -6247,7 +6346,7 @@ async function initializeApplication() {
         addWorkerCategory();
     }
 
-    await loadTrades();
+    await subscribeToTradeRevisions();
 }
 
 if (document.readyState === "loading") {

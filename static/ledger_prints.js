@@ -11,6 +11,7 @@ import {
   calculateOutstandingLabourBalance
 } from "./settlement_logic.mjs";
 import { registerEscClose, unregisterEscClose } from "./dialogs.js";
+import { firebaseAuthReady, getFirebaseApp, getFirebaseFirestoreSdk } from "./firebase_auth.js";
 
 const tradeList = document.getElementById("tradeList");
 const status = document.getElementById("ledgerStatus");
@@ -21,6 +22,9 @@ const preview = document.getElementById("ledgerPreview");
 let trades = [];
 let selectedTrade = null;
 let modalOpener = null;
+let tradeRevisionUnsubscribe = null;
+let pendingTradeRevision = null;
+let tradeRevisionRefreshInFlight = false;
 const canEditLedger = document.body.dataset.canEditLedger === "true";
 
 function escapeHtml(value) {
@@ -263,18 +267,39 @@ async function saveLedgerEdits(event) {
   }
 }
 
-async function loadTrades() {
+async function loadTrades(tradeIds = null) {
   try {
-    showStatus("Loading trades...");
-    const response = await fetch("/api/trades?view=ledger", {
-      credentials: "same-origin",
-      cache: "no-store"
-    });
-    const payload = await response.json();
-    if (!response.ok || !Array.isArray(payload.trades)) {
-      throw new Error(payload.error || "Unable to load trade ledger data.");
+    let nextTrades;
+    if (Array.isArray(tradeIds)) {
+      const changes = await Promise.all(tradeIds.map(async tradeId => {
+        const response = await fetch(`/api/trades/${encodeURIComponent(tradeId)}?view=ledger`, {
+          credentials: "same-origin",
+          cache: "no-store"
+        });
+        const payload = await response.json();
+        if (response.status === 404) return { tradeId, trade: null };
+        if (!response.ok || !payload.trade) throw new Error(payload.error || "Unable to load trade ledger data.");
+        return { tradeId, trade: payload.trade };
+      }));
+      const tradesById = new Map(trades.map(trade => [trade.id, trade]));
+      changes.forEach(({ tradeId, trade }) => {
+        if (trade) tradesById.set(tradeId, trade);
+        else tradesById.delete(tradeId);
+      });
+      nextTrades = [...tradesById.values()];
+    } else {
+      showStatus("Loading trades...");
+      const response = await fetch("/api/trades?view=ledger", {
+        credentials: "same-origin",
+        cache: "no-store"
+      });
+      const payload = await response.json();
+      if (!response.ok || !Array.isArray(payload.trades)) {
+        throw new Error(payload.error || "Unable to load trade ledger data.");
+      }
+      nextTrades = payload.trades;
     }
-    trades = payload.trades
+    trades = nextTrades
       .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
     showStatus(`${trades.length} trade${trades.length === 1 ? "" : "s"} available.`);
     renderTrades();
@@ -284,6 +309,67 @@ async function loadTrades() {
     tradeList.innerHTML = "";
   }
 }
+
+async function subscribeToTradeRevisions() {
+  try {
+    await firebaseAuthReady;
+    const firestore = await getFirebaseFirestoreSdk();
+    const db = firestore.getFirestore(await getFirebaseApp());
+    let isInitialSnapshot = true;
+    tradeRevisionUnsubscribe = firestore.onSnapshot(
+      firestore.doc(db, "sync_metadata", "trade-projection"),
+      snapshot => {
+        if (isInitialSnapshot) {
+          isInitialSnapshot = false;
+          pendingTradeRevision = { refresh_all: true, trade_ids: [] };
+          if (!modal.open) void applyPendingTradeRevision();
+          return;
+        }
+        const revision = snapshot.exists()
+          ? snapshot.data()
+          : { refresh_all: true, trade_ids: [] };
+        if (pendingTradeRevision) {
+          const refreshAll = pendingTradeRevision.refresh_all || revision.refresh_all;
+          pendingTradeRevision = {
+            refresh_all: refreshAll,
+            trade_ids: refreshAll
+              ? []
+              : [...new Set([...(pendingTradeRevision.trade_ids || []), ...(revision.trade_ids || [])])]
+          };
+        } else {
+          pendingTradeRevision = revision;
+        }
+        if (!modal.open) void applyPendingTradeRevision();
+      },
+      error => {
+        console.error("Unable to subscribe to Trade Ledger revisions:", error?.code || error?.name);
+        showStatus("Trade Ledger could not receive live updates.", "error");
+        if (isInitialSnapshot) void loadTrades();
+      }
+    );
+    window.addEventListener("pagehide", () => tradeRevisionUnsubscribe?.(), { once: true });
+  } catch (error) {
+    console.error("Unable to initialize Trade Ledger live updates:", error?.stage || error?.code || error?.name);
+    showStatus("Trade Ledger could not receive live updates.", "error");
+    await loadTrades();
+  }
+}
+
+async function applyPendingTradeRevision() {
+  if (!pendingTradeRevision || modal.open || tradeRevisionRefreshInFlight) return;
+  const revision = pendingTradeRevision;
+  pendingTradeRevision = null;
+  tradeRevisionRefreshInFlight = true;
+  try {
+    await loadTrades(revision.refresh_all ? null : revision.trade_ids);
+  } finally {
+    tradeRevisionRefreshInFlight = false;
+    if (pendingTradeRevision && !modal.open) void applyPendingTradeRevision();
+  }
+}
+
+modal.addEventListener("close", () => void applyPendingTradeRevision());
+modal.addEventListener("cancel", () => void applyPendingTradeRevision());
 
 tradeList.addEventListener("click", async event => {
   const button = event.target.closest("button[data-action]");
@@ -332,4 +418,4 @@ document.getElementById("downloadModalPdf").addEventListener("click", async even
 });
 document.getElementById("closeLedger").addEventListener("click", closeLedgerModal);
 modal.addEventListener("click", event => { if (event.target === modal) closeLedgerModal(); });
-loadTrades();
+void subscribeToTradeRevisions();

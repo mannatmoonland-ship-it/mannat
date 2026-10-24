@@ -33,7 +33,7 @@ const firestoreMethod = name => (...args) => {
   return method(...args);
 };
 const collection = firestoreMethod("collection");
-const getDocs = firestoreMethod("getDocs");
+const onSnapshot = firestoreMethod("onSnapshot");
 const categoryList = document.getElementById("categoryList");
 const status = document.getElementById("drawingsStatus");
 const search = document.getElementById("drawingSearch");
@@ -43,6 +43,7 @@ const canWriteDrawings = document.body.dataset.canWrite === "true";
 const canDeleteDrawings = document.body.dataset.canDelete === "true";
 let categories = [];
 let drawings = [];
+let drawingsUnsubscribers = [];
 let savingDrawing = false;
 let savingOrder = false;
 let pendingCategoryCreate = null;
@@ -222,6 +223,7 @@ function renderDrawing(drawing, orderIndex, orderCount) {
 }
 
 async function loadData() {
+  if (drawingsUnsubscribers.length) return;
   if (firebaseBootstrapError) {
     setStatus(describeFirebaseError(firebaseBootstrapError), true);
     categoryList.innerHTML = "";
@@ -229,21 +231,41 @@ async function loadData() {
   }
   try {
     setStatus("Loading drawings...");
-    const [categorySnapshot, drawingSnapshot] = await Promise.all([
-      getDocs(collection(db, "drawings_categories")),
-      getDocs(collection(db, "drawings"))
-    ]);
-    categories = sortCategoriesByOrder(sortCategoriesByCreationOrder(categorySnapshot.docs.map(item => ({ id: item.id, ...item.data() }))));
-    drawings = sortDrawingsByCreationOrder(drawingSnapshot.docs.map(item => ({ id: item.id, ...item.data() })));
-    const categoryOrder = new Map();
-    drawings.forEach(drawing => {
-      const nextOrder = categoryOrder.get(drawing.categoryId) || 0;
-      if (!Number.isFinite(Number(drawing.sortOrder))) drawing.sortOrder = nextOrder;
-      categoryOrder.set(drawing.categoryId, Math.max(nextOrder + 1, Number(drawing.sortOrder) + 1));
+    const categoriesById = new Map();
+    const drawingsById = new Map();
+    const updateView = () => {
+      categories = sortCategoriesByOrder(sortCategoriesByCreationOrder([...categoriesById.values()]));
+      drawings = sortDrawingsByCreationOrder([...drawingsById.values()]);
+      const categoryOrder = new Map();
+      drawings.forEach(drawing => {
+        const nextOrder = categoryOrder.get(drawing.categoryId) || 0;
+        if (!Number.isFinite(Number(drawing.sortOrder))) drawing.sortOrder = nextOrder;
+        categoryOrder.set(drawing.categoryId, Math.max(nextOrder + 1, Number(drawing.sortOrder) + 1));
+      });
+      const selectedCategoryId = categoryFilter.value;
+      categoryFilter.innerHTML = '<option value="">All categories</option>' + categories.map(category => `<option value="${escapeHtml(category.id)}">${escapeHtml(category.name)}</option>`).join("");
+      categoryFilter.value = categories.some(category => category.id === selectedCategoryId) ? selectedCategoryId : "";
+      setStatus(`${categories.length} categor${categories.length === 1 ? "y" : "ies"} · ${drawings.length} drawing${drawings.length === 1 ? "" : "s"} available.`);
+      renderCategories();
+    };
+    const watchCollection = (name, documents) => onSnapshot(collection(db, name), snapshot => {
+      snapshot.docChanges().forEach(change => {
+        if (change.type === "removed") documents.delete(change.doc.id);
+        else documents.set(change.doc.id, { id: change.doc.id, ...change.doc.data() });
+      });
+      updateView();
+    }, error => {
+      console.error(`Unable to subscribe to ${name}:`, error?.code || error?.name);
+      setStatus(describeFirebaseError(error), true);
     });
-    categoryFilter.innerHTML = '<option value="">All categories</option>' + categories.map(category => `<option value="${escapeHtml(category.id)}">${escapeHtml(category.name)}</option>`).join("");
-    setStatus(`${categories.length} categor${categories.length === 1 ? "y" : "ies"} · ${drawings.length} drawing${drawings.length === 1 ? "" : "s"} available.`);
-    renderCategories();
+    drawingsUnsubscribers = [
+      watchCollection("drawings_categories", categoriesById),
+      watchCollection("drawings", drawingsById)
+    ];
+    window.addEventListener("pagehide", () => {
+      drawingsUnsubscribers.forEach(unsubscribe => unsubscribe());
+      drawingsUnsubscribers = [];
+    }, { once: true });
   } catch (error) {
     console.error(error);
     setStatus(describeFirebaseError(error), true);
@@ -266,7 +288,6 @@ async function createCategory() {
     await sendDrawingsMutation("/api/drawings/categories", "POST", pendingCategoryCreate);
     pendingCategoryCreate = null;
     await showSuccess("Category created successfully.", "Drawings Library");
-    await loadData();
   } catch (error) {
     console.error(error);
     setStatus("Unable to create the category. Please try again.", true);
@@ -288,7 +309,6 @@ async function editCategory(category) {
       { name }
     );
     await showSuccess("Category updated successfully.", "Drawings Library");
-    await loadData();
   } catch (error) {
     console.error(error);
     setStatus("Unable to update the category. Please try again.", true);
@@ -309,7 +329,6 @@ async function deleteCategory(category) {
       "DELETE"
     );
     await showSuccess("Category deleted successfully.", "Drawings Library");
-    await loadData();
   } catch (error) {
     console.error(error);
     setStatus("Unable to delete the category. Please try again.", true);
@@ -380,7 +399,6 @@ async function saveDrawing(event) {
       await showSuccess("Drawing saved.", "Drawings Library");
     }
     closeDrawingForm();
-    await loadData();
   } catch (error) {
     console.error(error);
     setStatus(error?.safeApiMessage ? error.message : "Unable to save the drawing. Please check your connection and try again.", true);
@@ -398,7 +416,6 @@ async function deleteDrawing(drawing) {
       "DELETE"
     );
     await showSuccess("Drawing deleted.", "Drawings Library");
-    await loadData();
   } catch (error) {
     console.error(error);
     setStatus("Unable to delete the drawing. Please try again.", true);

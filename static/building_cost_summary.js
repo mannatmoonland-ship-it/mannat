@@ -30,6 +30,7 @@ const firestoreMethod = name => (...args) => {
   return method(...args);
 };
 const collection = firestoreMethod("collection");
+const doc = firestoreMethod("doc");
 const onSnapshot = firestoreMethod("onSnapshot");
 
 function escapeHtml(value) {
@@ -86,7 +87,7 @@ function render() {
     status.textContent = `Some cost data failed to load (${[...loadErrors].join(", ")}); totals may be incomplete.`;
   } else {
     status.className = "summary-status";
-    status.textContent = loaded.size === 4 ? "Trade costs refresh automatically while this page is open." : "Loading recorded costs...";
+    status.textContent = loaded.size === 4 ? "Live cost updates are active." : "Loading recorded costs...";
   }
 }
 
@@ -116,32 +117,93 @@ async function initialize() {
     await firebaseAuthReady;
     firestoreSdk = await getFirebaseFirestoreSdk();
     db = firestoreSdk.getFirestore(await getFirebaseApp());
-    subscribe("material_categories", value => { categories = value; });
-    subscribe("material_purchases", value => { purchases = value; });
-    const refreshTrades = async () => {
-      try {
-        const response = await fetch("/api/trades?view=building_cost_summary", {
-          credentials: "same-origin",
-          cache: "no-store"
-        });
-        const payload = await response.json();
-        if (!response.ok || !Array.isArray(payload.trades)) {
-          throw new Error(payload.error || "Trade costs could not be loaded.");
-        }
-        trades = payload.trades;
-        loaded.add("trades");
-        loadErrors.delete("trades");
-        render();
-      } catch (error) {
-        loadErrors.add("trades");
-        console.error("Unable to load trade costs:", error?.status || error?.name);
-        status.textContent = "Trade cost data could not be loaded.";
-        status.className = "summary-status error";
+    const unsubscribeListeners = [];
+    unsubscribeListeners.push(subscribe("material_categories", value => { categories = value; }));
+    unsubscribeListeners.push(subscribe("material_purchases", value => { purchases = value; }));
+    let tradesRefreshInFlight = false;
+    let pendingTradeChange = { refresh_all: true, trade_ids: [] };
+    const refreshTrades = async change => {
+      if (change && pendingTradeChange) {
+        const refreshAll = pendingTradeChange.refresh_all || change.refresh_all;
+        pendingTradeChange = {
+          refresh_all: refreshAll,
+          trade_ids: refreshAll
+            ? []
+            : [...new Set([...(pendingTradeChange.trade_ids || []), ...(change.trade_ids || [])])]
+        };
+      } else if (change) {
+        pendingTradeChange = change;
       }
+      if (tradesRefreshInFlight) return;
+      tradesRefreshInFlight = true;
+      while (pendingTradeChange) {
+        const currentChange = pendingTradeChange;
+        pendingTradeChange = null;
+        try {
+          if (currentChange.refresh_all || !currentChange.trade_ids?.length) {
+            const response = await fetch("/api/trades?view=building_cost_summary", {
+              credentials: "same-origin",
+              cache: "no-store"
+            });
+            const payload = await response.json();
+            if (!response.ok || !Array.isArray(payload.trades)) {
+              throw new Error(payload.error || "Trade costs could not be loaded.");
+            }
+            trades = payload.trades;
+          } else {
+            const changes = await Promise.all(currentChange.trade_ids.map(async tradeId => {
+              const response = await fetch(`/api/trades/${encodeURIComponent(tradeId)}?view=building_cost_summary`, {
+                credentials: "same-origin",
+                cache: "no-store"
+              });
+              const payload = await response.json();
+              if (response.status === 404) return { tradeId, trade: null };
+              if (!response.ok || !payload.trade) throw new Error(payload.error || "Trade costs could not be loaded.");
+              return { tradeId, trade: payload.trade };
+            }));
+            const tradesById = new Map(trades.map(trade => [trade.id, trade]));
+            changes.forEach(({ tradeId, trade }) => {
+              if (trade) tradesById.set(tradeId, trade);
+              else tradesById.delete(tradeId);
+            });
+            trades = [...tradesById.values()];
+          }
+          loaded.add("trades");
+          loadErrors.delete("trades");
+          render();
+        } catch (error) {
+          loadErrors.add("trades");
+          console.error("Unable to load trade costs:", error?.status || error?.name);
+          status.textContent = "Trade cost data could not be loaded.";
+          status.className = "summary-status error";
+        }
+      }
+      tradesRefreshInFlight = false;
     };
-    await refreshTrades();
-    window.setInterval(refreshTrades, 30000);
-    onSnapshot(
+    let firstTradeRevisionSnapshot = true;
+    unsubscribeListeners.push(onSnapshot(
+      doc(db, "sync_metadata", "trade-projection"),
+      snapshot => {
+        if (firstTradeRevisionSnapshot) {
+          firstTradeRevisionSnapshot = false;
+          void refreshTrades({ refresh_all: true, trade_ids: [] });
+          return;
+        }
+        const revision = snapshot.exists() ? snapshot.data() : null;
+        void refreshTrades(revision || { refresh_all: true, trade_ids: [] });
+      },
+      error => {
+        loadErrors.add("trades");
+        console.error("Unable to subscribe to trade projection revisions:", error?.code || error?.name);
+        status.textContent = `${describeFirebaseError(error)} (trade projection revisions)`;
+        status.className = "summary-status error";
+        if (firstTradeRevisionSnapshot) {
+          firstTradeRevisionSnapshot = false;
+          void refreshTrades({ refresh_all: true, trade_ids: [] });
+        }
+      }
+    ));
+    unsubscribeListeners.push(onSnapshot(
       collection(db, OWNER_SCOPE_COLLECTION, OWNER_SCOPE_DOCUMENT_ID, "payments"),
       snapshot => {
         ownerScopePayments = snapshot.docs.map(document => ({
@@ -157,7 +219,10 @@ async function initialize() {
         status.textContent = `${describeFirebaseError(error)} (Owner Scope payments)`;
         status.className = "summary-status error";
       }
-    );
+    ));
+    window.addEventListener("pagehide", () => {
+      unsubscribeListeners.forEach(unsubscribe => unsubscribe?.());
+    }, { once: true });
   } catch (error) {
     firebaseBootstrapError = error;
     console.error("Unable to initialize Building Cost Summary:", error?.stage || error?.code || error?.name);

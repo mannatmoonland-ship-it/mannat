@@ -3,9 +3,9 @@ import { renderAnimalAvatar } from "./animal_avatars.js";
 const HEARTBEAT_INTERVAL_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MIN_RETRY_DELAY_SECONDS = 2;
-const MAX_RETRY_DELAY_SECONDS = 60;
+const MAX_RETRY_DELAY_SECONDS = 300;
 const INITIAL_RETRY_DELAY_SECONDS = 5;
-const MAX_BACKOFF_DELAY_SECONDS = 30;
+const MAX_BACKOFF_DELAY_SECONDS = 300;
 
 const widget = document.querySelector("[data-presence-widget]");
 if (widget) {
@@ -32,6 +32,7 @@ if (widget) {
   let stopped = false;
   let inFlight = false;
   let retryTimer = null;
+  let retryNotBefore = 0;
   let retryBackoffSeconds = INITIAL_RETRY_DELAY_SECONDS;
   let hasSuccessfulRoster = false;
 
@@ -60,8 +61,10 @@ if (widget) {
       MAX_RETRY_DELAY_SECONDS,
       Math.max(MIN_RETRY_DELAY_SECONDS, delaySeconds)
     );
+    retryNotBefore = Date.now() + boundedDelay * 1000;
     retryTimer = window.setTimeout(() => {
       retryTimer = null;
+      retryNotBefore = 0;
       void refreshPresence();
     }, boundedDelay * 1000);
   }
@@ -129,9 +132,15 @@ if (widget) {
   }
 
   async function refreshPresence() {
-    if (stopped || inFlight) return;
+    if (
+      stopped
+      || inFlight
+      || document.visibilityState === "hidden"
+      || Date.now() < retryNotBefore
+    ) return;
     inFlight = true;
     let retryDelay = null;
+    let heartbeatUnavailable = false;
 
     try {
       try {
@@ -146,9 +155,16 @@ if (widget) {
           clearRetry();
           return;
         }
+        heartbeatUnavailable = Number(error.status) >= 500;
         retryDelay = error.status === 429
           ? error.retryAfter
           : nextBackoffDelay();
+      }
+
+      if (heartbeatUnavailable) {
+        showRecoverableMessage();
+        if (retryDelay !== null) scheduleRetry(retryDelay);
+        return;
       }
 
       try {
@@ -205,6 +221,13 @@ if (widget) {
     }
   }
 
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      clearRetry();
+      return;
+    }
+    void refreshPresence();
+  });
   void refreshPresence();
   window.setInterval(refreshPresence, HEARTBEAT_INTERVAL_MS);
 }

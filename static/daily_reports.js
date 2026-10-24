@@ -27,7 +27,8 @@ const firestoreMethod = name => (...args) => {
   return method(...args);
 };
 const collection = firestoreMethod("collection");
-const getDocs = firestoreMethod("getDocs");
+const doc = firestoreMethod("doc");
+const onSnapshot = firestoreMethod("onSnapshot");
 const query = firestoreMethod("query");
 const where = firestoreMethod("where");
 
@@ -48,13 +49,20 @@ const DailyReports = (function() {
 
   // State variables
   let editingId = null;
+  let editingRecordUpdatedAt = null;
   let deletingId = null;
   let trades = [];
   let selectedDate = getInitialSelectedDate();
   let calendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12);
   let calendarReportDates = new Set();
   let calendarLoadId = 0;
-  let recordsLoadId = 0;
+  let recordsUnsubscribe = null;
+  let tradeRevisionUnsubscribe = null;
+  let pendingTradeRevision = null;
+  let tradeRevisionRefreshInFlight = false;
+  let recordsSubscriptionDate = null;
+  let recordsListenerId = 0;
+  let recordsRenderId = 0;
   const recordCache = new Map();
   const authorAvatarByUserId = new Map();
   const authorAvatarByUsername = new Map();
@@ -129,6 +137,14 @@ const DailyReports = (function() {
     return new URL(window.location.href).searchParams.get("date");
   }
 
+  function normalizeRecordVersion(value) {
+    if (value && typeof value.toDate === "function") value = value.toDate();
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+    if (typeof value !== "string" || !value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+  }
+
   function getInitialSelectedDate() {
     const dateFromUrl = getDateFromUrl();
     return isValidDateValue(dateFromUrl) ? dateFromUrl : getDateInputValue(new Date());
@@ -166,7 +182,7 @@ const DailyReports = (function() {
     if (previousMonth !== `${calendarMonth.getFullYear()}-${calendarMonth.getMonth()}`) {
       loadCalendarReportDates();
     }
-    loadRecords();
+    subscribeToRecords();
   }
 
   function setCalendarOpen(isOpen) {
@@ -413,15 +429,24 @@ const DailyReports = (function() {
   }
 
   async function loadAuthorAvatars(records) {
-    const userAvatars = new Map();
-    const usernameAvatars = new Map();
     const userIds = new Set();
     const usernames = new Set();
     records.forEach(record => {
-      if (record.createdByUserId) userIds.add(String(record.createdByUserId));
-      else if (record.createdByUsername) usernames.add(String(record.createdByUsername).trim());
-      if (record.last_edited_by_user_id) userIds.add(String(record.last_edited_by_user_id));
-      else if (record.last_edited_by_username) usernames.add(String(record.last_edited_by_username).trim());
+      if (record.createdByUserId && !authorAvatarByUserId.has(String(record.createdByUserId))) {
+        userIds.add(String(record.createdByUserId));
+      } else if (record.createdByUsername) {
+        const username = String(record.createdByUsername).trim();
+        if (!authorAvatarByUsername.has(username.toLowerCase())) usernames.add(username);
+      }
+      if (
+        record.last_edited_by_user_id
+        && !authorAvatarByUserId.has(String(record.last_edited_by_user_id))
+      ) {
+        userIds.add(String(record.last_edited_by_user_id));
+      } else if (record.last_edited_by_username) {
+        const username = String(record.last_edited_by_username).trim();
+        if (!authorAvatarByUsername.has(username.toLowerCase())) usernames.add(username);
+      }
     });
     const identities = [
       ...[...userIds].map(value => ["user_id", value]),
@@ -434,13 +459,17 @@ const DailyReports = (function() {
         const response = await fetch(`/api/daily-records/author-avatars?${params}`, { credentials: "same-origin" });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "Unable to load Daily Reports author avatars.");
-        Object.entries(result.user_ids || {}).forEach(([userId, avatarId]) => userAvatars.set(userId, avatarId));
-        Object.entries(result.usernames || {}).forEach(([username, avatarId]) => usernameAvatars.set(username, avatarId));
+        Object.entries(result.user_ids || {}).forEach(([userId, avatarId]) => {
+          authorAvatarByUserId.set(userId, avatarId);
+        });
+        Object.entries(result.usernames || {}).forEach(([username, avatarId]) => {
+          const normalizedUsername = username.trim().toLowerCase();
+          authorAvatarByUsername.set(normalizedUsername, avatarId);
+        });
       } catch (error) {
         console.error("Unable to load Daily Reports author avatars:", error);
       }
     }
-    return { userAvatars, usernameAvatars };
   }
 
   function getWeatherDataFromForm() {
@@ -520,31 +549,110 @@ const DailyReports = (function() {
 
   function populateTrades() {
     const select = $("dr-tradeSelect");
+    const previousSelection = select.value;
     select.innerHTML = '<option value="">Select a trade</option>' + trades
       .filter(trade => getTradeCategories(trade).length)
       .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
       .map(trade => `<option value="${escapeHtml(trade.id)}">${escapeHtml(trade.name || "Unnamed trade")}</option>`)
       .join("");
+    select.value = trades.some(trade => trade.id === previousSelection) ? previousSelection : "";
   }
 
-  async function loadTrades() {
+  async function loadTrades(tradeIds = null) {
     if (!db) return;
-    const response = await fetch("/api/daily-records/trades", {
-      credentials: "same-origin",
-      cache: "no-store"
-    });
-    let payload = {};
-    try {
-      payload = await response.json();
-    } catch (error) {
-      throw new Error("Daily Reports trade options could not be loaded.");
+    if (Array.isArray(tradeIds)) {
+      await Promise.all(tradeIds.map(async tradeId => {
+        const response = await fetch(`/api/daily-records/trades?trade_id=${encodeURIComponent(tradeId)}`, {
+          credentials: "same-origin",
+          cache: "no-store"
+        });
+        const payload = await response.json();
+        if (response.status === 404) {
+          trades = trades.filter(trade => trade.id !== tradeId);
+          return;
+        }
+        if (!response.ok || !payload.trade) {
+          throw new Error(payload.error || "Daily Reports trade options could not be loaded.");
+        }
+        trades = [...trades.filter(trade => trade.id !== tradeId), payload.trade];
+      }));
+    } else {
+      const response = await fetch("/api/daily-records/trades", {
+        credentials: "same-origin",
+        cache: "no-store"
+      });
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch (error) {
+        throw new Error("Daily Reports trade options could not be loaded.");
+      }
+      if (!response.ok || !Array.isArray(payload.trades)) {
+        throw new Error(payload.error || "Daily Reports trade options could not be loaded.");
+      }
+      trades = payload.trades;
     }
-    if (!response.ok || !Array.isArray(payload.trades)) {
-      throw new Error(payload.error || "Daily Reports trade options could not be loaded.");
-    }
-    trades = payload.trades;
     populateTrades();
     renderWorkerCategories(getTradeCategories(getSelectedTrade()));
+  }
+
+  function applyPendingTradeRevision() {
+    if (
+      !pendingTradeRevision
+      || tradeRevisionRefreshInFlight
+      || !$("dr-modal").classList.contains("dr-hidden")
+    ) return;
+    const revision = pendingTradeRevision;
+    pendingTradeRevision = null;
+    tradeRevisionRefreshInFlight = true;
+    loadTrades(revision.refresh_all ? null : revision.trade_ids).catch(error => {
+      console.error("Daily Reports trade options refresh failed:", error?.status || error?.name);
+      $("dr-tradeStatus").textContent = "Trade options could not receive live updates.";
+    }).finally(() => {
+      tradeRevisionRefreshInFlight = false;
+      if (pendingTradeRevision) applyPendingTradeRevision();
+    });
+  }
+
+  async function subscribeToTradeRevisions() {
+    const firestore = firestoreSdk;
+    if (!db || !firestore) return;
+    let isInitialSnapshot = true;
+    tradeRevisionUnsubscribe = onSnapshot(
+      doc(db, "sync_metadata", "trade-projection"),
+      snapshot => {
+        if (isInitialSnapshot) {
+          isInitialSnapshot = false;
+          pendingTradeRevision = { refresh_all: true, trade_ids: [] };
+          applyPendingTradeRevision();
+          return;
+        }
+        const revision = snapshot.exists()
+          ? snapshot.data()
+          : { refresh_all: true, trade_ids: [] };
+        if (pendingTradeRevision) {
+          const refreshAll = pendingTradeRevision.refresh_all || revision.refresh_all;
+          pendingTradeRevision = {
+            refresh_all: refreshAll,
+            trade_ids: refreshAll
+              ? []
+              : [...new Set([...(pendingTradeRevision.trade_ids || []), ...(revision.trade_ids || [])])]
+          };
+        } else {
+          pendingTradeRevision = revision;
+        }
+        applyPendingTradeRevision();
+      },
+      error => {
+        console.error("Unable to subscribe to Daily Reports trade revisions:", error?.code || error?.name);
+        $("dr-tradeStatus").textContent = "Trade options could not receive live updates.";
+      }
+    );
+    const modal = $("dr-modal");
+    new MutationObserver(applyPendingTradeRevision).observe(modal, {
+      attributes: true,
+      attributeFilter: ["class"]
+    });
   }
 
   function setWorkerFieldsForRecord(record) {
@@ -1258,6 +1366,7 @@ const DailyReports = (function() {
 
   function openAddModal() {
     editingId = null;
+    editingRecordUpdatedAt = null;
     $("dr-recordForm").reset();
     updateFloorCustomField();
     $("dr-tradeSelect").disabled = false;
@@ -1350,7 +1459,6 @@ const DailyReports = (function() {
         deleteModal.classList.add("dr-hidden");
       }
       showToast("Record deleted successfully.", "success", 3000);
-      await loadRecords();
       loadCalendarReportDates();
     } catch (error) {
       console.error(error);
@@ -1379,6 +1487,7 @@ const DailyReports = (function() {
     }
 
     editingId = id;
+    editingRecordUpdatedAt = normalizeRecordVersion(record.updatedAt);
     $("dr-date").value = record.date || "";
     setFloorForEditing(record.floor);
     $("dr-activity").value = record.activity || "";
@@ -1470,6 +1579,9 @@ const DailyReports = (function() {
         evidence: evidence,
         updatedAt: new Date().toISOString()
       };
+      if (isEditing) {
+        recordData.expectedUpdatedAt = editingRecordUpdatedAt;
+      }
 
       const response = await fetch(
         isEditing ? `/api/daily-records/${encodeURIComponent(editingId)}` : "/api/daily-records",
@@ -1496,6 +1608,10 @@ const DailyReports = (function() {
       return;
     }
 
+    if (isEditing && responseData.record?.updatedAt) {
+      editingRecordUpdatedAt = normalizeRecordVersion(responseData.record.updatedAt);
+    }
+
     try {
       if (
         typeof responseData.id !== "string" ||
@@ -1517,6 +1633,7 @@ const DailyReports = (function() {
     }
 
     editingId = null;
+    editingRecordUpdatedAt = null;
     const modal = $("dr-modal");
     if (modal) {
       unregisterEscClose(modal);
@@ -2204,70 +2321,120 @@ const DailyReports = (function() {
     });
   }
 
-  async function loadRecords(){
-    if(!db){
+  function stopRecordsSubscription() {
+    recordsListenerId += 1;
+    recordsRenderId += 1;
+    recordsUnsubscribe?.();
+    recordsUnsubscribe = null;
+    recordsSubscriptionDate = null;
+  }
+
+  function subscribeToRecords() {
+    if (!db) {
+      stopRecordsSubscription();
       $("dr-recordCount").textContent = "—";
       $("dr-evidenceCount").textContent = "—";
       setDataStatus(describeFirebaseError(firebaseBootstrapError), true);
-      $("dr-records").innerHTML=`<div class="dr-card"><b>Daily Reports are unavailable.</b><p>Please contact your administrator for help.</p></div>`;
-      return false;
+      $("dr-records").innerHTML = '<div class="dr-card"><b>Daily Reports are unavailable.</b><p>Please contact your administrator for help.</p></div>';
+      return;
     }
 
+    if (recordsSubscriptionDate === selectedDate && recordsUnsubscribe) return;
+    stopRecordsSubscription();
     const requestedDate = selectedDate;
-    const requestId = ++recordsLoadId;
-    let snap;
-    try {
-      snap = await getDocs(query(collection(db, "daily_records"), where("date", "==", requestedDate)));
-    } catch (error) {
-      if (requestId !== recordsLoadId) return false;
-      recordCache.clear();
-      $("dr-recordCount").textContent = "—";
-      $("dr-evidenceCount").textContent = "—";
-      setDataStatus(describeFirebaseError(error), true);
-      $("dr-records").innerHTML = '<div class="dr-card dr-empty-day"><h2>Unable to load Daily Reports</h2><p>Check the connection and try again.</p></div>';
-      console.error("Daily Reports Firestore read failed", {
-        operation: "daily_records query by selected date",
-        code: error?.code || "unknown",
-        message: error?.message || String(error),
-        httpStatus: error?.customData?.httpStatus ?? error?.status ?? "unavailable"
-      });
-      showToast("Unable to load Daily Reports. Check the connection and try again.", "error", 5000);
-      return false;
-    }
-    if (requestId !== recordsLoadId) {
-      return false;
-    }
+    const listenerId = recordsListenerId;
+    recordsSubscriptionDate = requestedDate;
+    let hasReceivedSnapshot = false;
+    let renderPending = false;
+    setDataStatus("Loading Daily Reports...");
 
-    const dailyRecords = snap.docs
-      .map(recordDoc => ({ recordDoc, record: recordDoc.data() }))
-      .filter(({ record }) => belongsToSelectedDate(record, requestedDate));
-    const avatarMaps = await loadAuthorAvatars(dailyRecords.map(({ record }) => record));
-    if (requestId !== recordsLoadId) {
-      return false;
-    }
-    authorAvatarByUserId.clear();
-    authorAvatarByUsername.clear();
-    avatarMaps.userAvatars.forEach((avatarId, userId) => authorAvatarByUserId.set(userId, avatarId));
-    avatarMaps.usernameAvatars.forEach((avatarId, username) => authorAvatarByUsername.set(username, avatarId));
+    recordsUnsubscribe = onSnapshot(
+      query(collection(db, "daily_records"), where("date", "==", requestedDate)),
+      { includeMetadataChanges: true },
+      async snapshot => {
+        if (listenerId !== recordsListenerId || selectedDate !== requestedDate) return;
+        const changes = snapshot.docChanges({ includeMetadataChanges: false });
+        if (hasReceivedSnapshot && changes.length === 0) {
+          setDataStatus(snapshot.metadata.fromCache
+            ? "Showing cached Daily Reports while reconnecting..."
+            : "Daily Reports are up to date.");
+          return;
+        }
 
-    recordCache.clear();
-    let html="", evidenceCount=0, recordCount=0;
+        const renderFullSnapshot = !hasReceivedSnapshot || renderPending;
+        hasReceivedSnapshot = true;
+        const renderId = ++recordsRenderId;
+        const dailyRecords = snapshot.docs
+          .map(recordDoc => ({ recordDoc, record: recordDoc.data() }))
+          .filter(({ record }) => belongsToSelectedDate(record, requestedDate));
+        const avatarRecords = renderFullSnapshot
+          ? dailyRecords.map(({ record }) => record)
+          : changes
+            .filter(change => change.type !== "removed")
+            .map(change => change.doc.data());
+        renderPending = true;
+        await loadAuthorAvatars(avatarRecords);
+        if (
+          listenerId !== recordsListenerId
+          || renderId !== recordsRenderId
+          || selectedDate !== requestedDate
+        ) return;
 
-    dailyRecords.forEach(({ recordDoc, record: r }) => {
-      const ev = getUniqueDailyReportEvidence(r);
-      recordCache.set(recordDoc.id, r);
-      recordCount += 1;
-      evidenceCount += ev.length;
-      html += renderDailyRecordCard(recordDoc.id, r);
-    });
-
-    $("dr-records").innerHTML=html||`<div class="dr-card dr-empty-day"><h2>No Daily Reports for this date</h2></div>`;
-    $("dr-recordCount").textContent=recordCount;
-    $("dr-evidenceCount").textContent=evidenceCount;
-    setDataStatus(recordCount ? `Loaded ${recordCount} Daily Report${recordCount === 1 ? "" : "s"} for this date.` : "Data loaded successfully. No Daily Reports exist for this date.");
-
-    observeGooglePhotosPreviews($("dr-records"));
-    return true;
+        if (renderFullSnapshot) {
+          recordCache.clear();
+          const html = dailyRecords.map(({ recordDoc, record }) => {
+            recordCache.set(recordDoc.id, record);
+            return renderDailyRecordCard(recordDoc.id, record);
+          }).join("");
+          $("dr-records").innerHTML = html
+            || '<div class="dr-card dr-empty-day"><h2>No Daily Reports for this date</h2></div>';
+        } else {
+          changes.forEach(change => {
+            if (change.type === "removed") {
+              recordCache.delete(change.doc.id);
+              [...$("dr-records").querySelectorAll(".dr-card[data-record-id]")]
+                .find(card => card.dataset.recordId === change.doc.id)
+                ?.remove();
+            } else {
+              updateDisplayedDailyRecord(change.doc.id, change.doc.data());
+            }
+          });
+          const visibleRecords = [...recordCache.values()]
+            .filter(record => belongsToSelectedDate(record, requestedDate));
+          if (!visibleRecords.length) {
+            $("dr-records").innerHTML = '<div class="dr-card dr-empty-day"><h2>No Daily Reports for this date</h2></div>';
+          }
+          $("dr-recordCount").textContent = String(visibleRecords.length);
+          $("dr-evidenceCount").textContent = String(visibleRecords.reduce(
+            (count, record) => count + getUniqueDailyReportEvidence(record).length,
+            0
+          ));
+        }
+        renderPending = false;
+        setDataStatus(snapshot.metadata.fromCache
+          ? `Showing ${dailyRecords.length} cached Daily Report${dailyRecords.length === 1 ? "" : "s"} while reconnecting...`
+          : dailyRecords.length
+            ? `Loaded ${dailyRecords.length} Daily Report${dailyRecords.length === 1 ? "" : "s"} for this date.`
+            : "Data loaded successfully. No Daily Reports exist for this date.");
+        observeGooglePhotosPreviews($("dr-records"));
+      },
+      error => {
+        if (listenerId !== recordsListenerId || selectedDate !== requestedDate) return;
+        recordsRenderId += 1;
+        recordCache.clear();
+        $("dr-recordCount").textContent = "—";
+        $("dr-evidenceCount").textContent = "—";
+        setDataStatus(describeFirebaseError(error), true);
+        $("dr-records").innerHTML = '<div class="dr-card dr-empty-day"><h2>Unable to load Daily Reports</h2><p>Check the connection and try again.</p></div>';
+        console.error("Daily Reports Firestore listener failed", {
+          operation: "daily_records query by selected date",
+          code: error?.code || "unknown",
+          message: error?.message || String(error),
+          httpStatus: error?.customData?.httpStatus ?? error?.status ?? "unavailable"
+        });
+        showToast("Unable to load Daily Reports. Check the connection and try again.", "error", 5000);
+      }
+    );
   }
 
   // Initialize event listeners
@@ -2311,9 +2478,6 @@ const DailyReports = (function() {
     document.addEventListener("keydown", event => {
       if (event.key === "Escape") closeCalendar();
     });
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") loadRecords();
-    });
     $("dr-printDayBtn").onclick = printSelectedDate;
     $("dr-exportPdfBtn").onclick = printSelectedDate;
     $("dr-closeBtn").onclick = closeModal;
@@ -2344,11 +2508,14 @@ const DailyReports = (function() {
     // Load Firebase trade definitions before records so category fields are dynamic.
     renderCalendar();
     if (firebaseBootstrapError) {
-      loadRecords();
+      subscribeToRecords();
       return;
     }
     loadCalendarReportDates();
-    loadTrades().then(loadRecords).catch(error => {
+    loadTrades().then(async () => {
+      await subscribeToTradeRevisions();
+      subscribeToRecords();
+    }).catch(error => {
       console.error("Daily Reports trades Firestore read failed", {
         operation: "trades collection query",
         code: error?.code || "unknown",
@@ -2360,8 +2527,13 @@ const DailyReports = (function() {
       tradeSelect.disabled = true;
       $("dr-tradeStatus").textContent = `Trade options could not be loaded: ${error?.message || "Flask API request failed."}`;
       showToast("Unable to load trades. Please check your connection and try again.", "error", 5000);
-      loadRecords();
+      subscribeToRecords();
     });
+    window.addEventListener("pagehide", () => {
+      stopRecordsSubscription();
+      tradeRevisionUnsubscribe?.();
+      tradeRevisionUnsubscribe = null;
+    }, { once: true });
   }
 
   // Public API

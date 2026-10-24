@@ -546,11 +546,27 @@ def restore_snapshot_route(filename):
     result = None
     status = "failed"
     try:
+        from app import _publish_trade_projection_revision
+
+        def publish_trade_restore_revision(collection_path, _restored_count):
+            if collection_path == "trades":
+                try:
+                    _publish_trade_projection_revision(
+                        refresh_all=True,
+                        db=pending["store"].db,
+                    )
+                except Exception as error:
+                    current_app.logger.error(
+                        "Trade projection revision after snapshot restore failed (%s).",
+                        type(error).__name__,
+                    )
+
         result = restore_snapshot(
             snapshot_path,
             pending["store"].db,
             allow_skip_conflicts=payload.get("skip_conflicts") is True,
             overwrite_conflicts=payload.get("overwrite_conflicts") is True,
+            progress=publish_trade_restore_revision,
         )
         status = "success" if result["documents_skipped"] == 0 else "partial"
         log_entry = {

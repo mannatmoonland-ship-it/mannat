@@ -34,6 +34,9 @@ class FakeFirestoreStore:
     def list_users(self):
         return list(self.users.values())
 
+    def list_red_book_items(self):
+        return []
+
     def save_user(self, user):
         self.users[user["id"]] = user
         return self.users[user["id"]]
@@ -63,6 +66,106 @@ class FakeFirestoreStore:
 
     def delete_sms_otp_challenge(self, challenge_id):
         self.sms_otp_challenges.pop(challenge_id, None)
+
+
+def test_permission_reference_reads_are_cached_only_for_the_current_request(monkeypatch):
+    store = FakeFirestoreStore()
+    definition = {
+        "id": "custom-role",
+        "name": "Site Lead",
+        "permissions": ["daily_reports.read"],
+    }
+    store.custom_staff_types[definition["id"]] = definition
+    custom_type_reads = 0
+    permission_reads = 0
+    original_list_custom_types = store.list_custom_staff_types
+    original_get_permissions = store.get_non_admin_permissions
+
+    def list_custom_types():
+        nonlocal custom_type_reads
+        custom_type_reads += 1
+        return original_list_custom_types()
+
+    def get_permissions():
+        nonlocal permission_reads
+        permission_reads += 1
+        return original_get_permissions()
+
+    monkeypatch.setattr(store, "list_custom_staff_types", list_custom_types)
+    monkeypatch.setattr(store, "get_non_admin_permissions", get_permissions)
+    monkeypatch.setitem(app.config, "FIRESTORE_STORE", store)
+    user = {"id": "site-lead", "role": "Site Lead", "is_active": True}
+
+    with app.test_request_context("/first"):
+        assert app_module._custom_role_definition_for_user(user, store)["id"] == "custom-role"
+        assert app_module._custom_role_definition_for_user(user, store)["id"] == "custom-role"
+        assert app_module.get_non_admin_permissions()
+        assert app_module.get_non_admin_permissions()
+
+    assert custom_type_reads == 1
+    assert permission_reads == 1
+
+    with app.test_request_context("/second"):
+        app_module._custom_role_definition_for_user(user, store)
+        app_module.get_non_admin_permissions()
+
+    assert custom_type_reads == 2
+    assert permission_reads == 2
+
+
+def test_custom_role_definition_query_uses_exact_names_before_legacy_fallback():
+    store = FirebaseFirestoreStore.__new__(FirebaseFirestoreStore)
+    matching_snapshot = SimpleNamespace(
+        id="site-lead",
+        to_dict=lambda: {"name": "Site Lead", "permissions": ["daily_reports.read"]},
+    )
+    calls = []
+
+    class Query:
+        def where(self, *, filter):
+            calls.append(("where", filter))
+            return self
+
+        def stream(self):
+            calls.append(("stream", None))
+            return [matching_snapshot]
+
+    store._collection = lambda name: (calls.append(("collection", name)), Query())[1]
+    store.list_custom_staff_types = lambda: (_ for _ in ()).throw(
+        AssertionError("An exact role match must not scan the full collection.")
+    )
+
+    result = store.get_custom_staff_type_by_names(["Site Lead"])
+
+    assert result == {
+        "id": "site-lead",
+        "name": "Site Lead",
+        "permissions": ["daily_reports.read"],
+    }
+    assert [name for name, _ in calls] == ["collection", "where", "stream"]
+
+
+def test_active_super_admin_count_uses_a_role_filtered_query():
+    store = FirebaseFirestoreStore.__new__(FirebaseFirestoreStore)
+    calls = []
+
+    class Query:
+        def where(self, *, filter):
+            calls.append(("where", filter))
+            return self
+
+        def stream(self):
+            calls.append(("stream", None))
+            return [
+                SimpleNamespace(to_dict=lambda: {"is_active": True}),
+                SimpleNamespace(to_dict=lambda: {"is_active": False}),
+                SimpleNamespace(to_dict=lambda: {}),
+            ]
+
+    store._collection = lambda name: (calls.append(("collection", name)), Query())[1]
+
+    assert store.count_active_super_admins() == 2
+    assert [name for name, _ in calls] == ["collection", "where", "stream"]
 
 
 @pytest.fixture

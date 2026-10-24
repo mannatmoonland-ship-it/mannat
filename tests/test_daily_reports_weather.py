@@ -68,7 +68,8 @@ assert 'Choose Date' not in html_content and 'dr-datePicker' not in html_content
 assert 'document.querySelector(".dr-calendar-control")' in js_content and 'calendarControl && !calendarControl.contains(event.target)' in js_content, 'Outside-click handling must find the wrapper class and guard missing markup'
 assert 'Daily Reports Firestore listener failed' in js_content and 'Unable to load Daily Reports' in js_content, 'Firestore listener failures must be diagnosed and shown in the page'
 assert 'onSnapshot(' in js_content and 'query(collection(db, "daily_records"), where("date", "==", requestedDate))' in js_content, 'Daily Reports must listen only to the selected date'
-assert 'recordsUnsubscribe?.()' in js_content and 'window.addEventListener("pagehide", stopRecordsSubscription' in js_content, 'Daily Reports listener must be cleaned up when the page closes'
+pagehide_handler = js_content.split('window.addEventListener("pagehide", () => {', 1)[1].split('}, { once: true });', 1)[0]
+assert 'stopRecordsSubscription();' in pagehide_handler and 'tradeRevisionUnsubscribe?.();' in pagehide_handler, 'Daily Reports listeners must be cleaned up when the page closes'
 assert 'document.addEventListener("visibilitychange"' not in js_content, 'Daily Reports must not force a refresh when the tab becomes visible'
 assert 'url_for(\'favicon\')' in html_content and '@app.route("/favicon.ico")' in app_content, 'Daily Reports favicon must be served by the application'
 assert 'if (event.key === "Escape") closeCalendar();' in js_content, 'Calendar must close on Escape'

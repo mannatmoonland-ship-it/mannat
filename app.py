@@ -1577,6 +1577,13 @@ class InMemoryFirestoreStore:
     def list_users(self):
         return [self._normalize_user(user) for user in self.users.values()]
 
+    def count_active_super_admins(self):
+        return sum(
+            str(user.get("role", "")).lower() == "super_admin"
+            and bool(user.get("is_active", True))
+            for user in self.users.values()
+        )
+
     def list_user_todos(self, user_id):
         return sorted(
             self.user_todos.get(user_id, {}).values(),
@@ -1915,13 +1922,31 @@ class InMemoryFirestoreStore:
         if not staff_type.get("id"):
             raise ValueError("Staff type id is required")
         self.custom_staff_types[staff_type["id"]] = dict(staff_type)
+        _invalidate_request_permission_read_cache("custom_staff_types")
         return dict(staff_type)
 
     def delete_custom_staff_type(self, staff_type_id):
         self.custom_staff_types.pop(staff_type_id, None)
+        _invalidate_request_permission_read_cache("custom_staff_types")
 
     def list_custom_staff_types(self):
         return [dict(item) for item in self.custom_staff_types.values()]
+
+    def get_custom_staff_type_by_names(self, names):
+        normalized_names = {
+            normalize_staff_type_name(name).casefold()
+            for name in names
+            if normalize_staff_type_name(name)
+        }
+        return next(
+            (
+                dict(item)
+                for item in self.custom_staff_types.values()
+                if normalize_staff_type_name(item.get("name", "")).casefold()
+                in normalized_names
+            ),
+            None,
+        )
 
     def get_non_admin_permissions(self):
         return sorted(self.non_admin_permissions)
@@ -1931,6 +1956,7 @@ class InMemoryFirestoreStore:
         if validated - CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS:
             raise ValueError("One or more non-admin permissions are not supported.")
         self.non_admin_permissions = validated
+        _invalidate_request_permission_read_cache("non_admin_permissions")
 
     def append_audit(self, entry):
         self.audit_log.append({
@@ -2199,6 +2225,15 @@ class FirebaseFirestoreStore:
             {**(snapshot.to_dict() or {}), "id": snapshot.id}
             for snapshot in self._collection("trades").stream()
         ]
+
+    def count_active_super_admins(self):
+        users = self._collection("users").where(
+            filter=FieldFilter("role", "==", "super_admin")
+        ).stream()
+        return sum(
+            bool((user.to_dict() or {}).get("is_active", True))
+            for user in users
+        )
 
     def set_trade_order(self, trade_ids):
         collection = self._collection('trades')
@@ -3379,6 +3414,7 @@ class FirebaseFirestoreStore:
         if not staff_type_id:
             raise ValueError("Staff type id is required")
         self._collection("custom_staff_types").document(staff_type_id).set(staff_type, merge=True)
+        _invalidate_request_permission_read_cache("custom_staff_types")
         return dict(staff_type)
 
     def get_non_admin_permissions(self):
@@ -3409,10 +3445,12 @@ class FirebaseFirestoreStore:
             "permissions": validated,
             "updated_at": iso_now(),
         })
+        _invalidate_request_permission_read_cache("non_admin_permissions")
         return validated
 
     def delete_custom_staff_type(self, staff_type_id):
         self._collection("custom_staff_types").document(staff_type_id).delete()
+        _invalidate_request_permission_read_cache("custom_staff_types")
 
     def list_custom_staff_types(self):
         items = []
@@ -3421,6 +3459,41 @@ class FirebaseFirestoreStore:
             item["id"] = doc.id
             items.append(item)
         return items
+
+    def get_custom_staff_type_by_names(self, names):
+        candidate_names = list(dict.fromkeys(
+            normalize_staff_type_name(name)
+            for name in names
+            if normalize_staff_type_name(name)
+        ))
+        if not candidate_names:
+            return None
+
+        snapshots = list(
+            self._collection("custom_staff_types")
+            .where(filter=FieldFilter("name", "in", candidate_names))
+            .stream()
+        )
+        for snapshot in snapshots:
+            item = snapshot.to_dict() or {}
+            item["id"] = snapshot.id
+            if any(
+                staff_type_names_match(item.get("name", ""), name)
+                for name in candidate_names
+            ):
+                return item
+
+        return next(
+            (
+                item
+                for item in self.list_custom_staff_types()
+                if any(
+                    staff_type_names_match(item.get("name", ""), name)
+                    for name in candidate_names
+                )
+            ),
+            None,
+        )
 
     def append_audit(self, entry):
         payload = {
@@ -3473,6 +3546,24 @@ class FirebaseFirestoreStore:
 
 def iso_now():
     return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _request_permission_read_cache():
+    if not has_request_context():
+        return None
+    cache = getattr(g, "_permission_read_cache", None)
+    if cache is None:
+        cache = {}
+        g._permission_read_cache = cache
+    return cache
+
+
+def _invalidate_request_permission_read_cache(*keys):
+    cache = _request_permission_read_cache()
+    if cache is None:
+        return
+    for key in keys:
+        cache.pop(key, None)
 
 
 class MaterialTransactionError(ValueError):
@@ -5107,18 +5198,39 @@ def _custom_role_definition_for_user(user, store):
     if str(user.get("role") or "").strip().casefold() in builtin_role_names:
         return None
 
-    assigned_names = {
-        " ".join(str(user.get(field) or "").split()).casefold()
+    candidate_names = list(dict.fromkeys(
+        normalize_staff_type_name(user.get(field))
         for field in ("role", "custom_staff_type")
-    }
-    assigned_names.discard("")
-    for definition in store.list_custom_staff_types():
-        if not isinstance(definition, dict):
-            continue
-        name = " ".join(str(definition.get("name") or "").split()).casefold()
-        if name and name in assigned_names:
-            return definition
-    return None
+        if normalize_staff_type_name(user.get(field))
+    ))
+    cache = _request_permission_read_cache()
+    cache_key = ("custom_role_definition", tuple(sorted(name.casefold() for name in candidate_names)))
+    if cache is not None and cache_key in cache:
+        cached = cache[cache_key]
+        return dict(cached) if isinstance(cached, dict) else None
+
+    role_definition = None
+    targeted_lookup = getattr(store, "get_custom_staff_type_by_names", None)
+    if not candidate_names:
+        role_definition = None
+    elif callable(targeted_lookup):
+        role_definition = targeted_lookup(candidate_names)
+    else:
+        assigned_names = {name.casefold() for name in candidate_names}
+        role_definition = next(
+            (
+                definition
+                for definition in store.list_custom_staff_types()
+                if isinstance(definition, dict)
+                and normalize_staff_type_name(definition.get("name")).casefold()
+                in assigned_names
+            ),
+            None,
+        )
+
+    if cache is not None:
+        cache[cache_key] = dict(role_definition) if isinstance(role_definition, dict) else None
+    return dict(role_definition) if isinstance(role_definition, dict) else None
 
 
 @app.route("/api/firebase-custom-token", methods=["GET", "POST"])
@@ -5323,13 +5435,26 @@ def is_protected_staff_type_name(value):
     return normalized in {role.lower() for role in BUILT_IN_STAFF_TYPES}
 
 
-def list_available_roles():
+def list_available_roles(custom_types=None):
     roles = ["super_admin", "office_staff", "supervisor"]
-    for item in get_user_store().list_custom_staff_types():
+    if custom_types is None:
+        custom_types = get_user_store().list_custom_staff_types()
+    for item in custom_types:
         role_name = normalize_staff_type_name(item.get("name"))
         if role_name and role_name not in roles:
             roles.append(role_name)
     return roles
+
+
+def _active_super_admin_count(store):
+    counter = getattr(store, "count_active_super_admins", None)
+    if callable(counter):
+        return counter()
+    return sum(
+        str(user.get("role", "")).lower() == "super_admin"
+        and bool(user.get("is_active", True))
+        for user in store.list_users()
+    )
 
 
 def is_super_admin(user):
@@ -5344,19 +5469,27 @@ def _is_admin_or_super_admin_user(user):
 
 
 def get_non_admin_permissions():
+    cache = _request_permission_read_cache()
+    if cache is not None and "non_admin_permissions" in cache:
+        return set(cache["non_admin_permissions"])
+
     store = get_user_store()
     permission_loader = getattr(store, "get_non_admin_permissions", None)
     if not callable(permission_loader):
-        return set(DEFAULT_NON_ADMIN_PERMISSIONS)
-    permissions = permission_loader()
-    if not isinstance(permissions, (list, tuple, set, frozenset)):
-        raise ValueError("Saved non-admin permissions are invalid.")
-    return {
-        permission
-        for permission in permissions
-        if isinstance(permission, str)
-        and permission in CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS
-    }
+        normalized = frozenset(DEFAULT_NON_ADMIN_PERMISSIONS)
+    else:
+        permissions = permission_loader()
+        if not isinstance(permissions, (list, tuple, set, frozenset)):
+            raise ValueError("Saved non-admin permissions are invalid.")
+        normalized = frozenset(
+            permission
+            for permission in permissions
+            if isinstance(permission, str)
+            and permission in CUSTOM_STAFF_TYPE_PERMISSION_IDENTIFIERS
+        )
+    if cache is not None:
+        cache["non_admin_permissions"] = normalized
+    return set(normalized)
 
 
 def update_shared_non_admin_permissions(store, permissions, actor_id):
@@ -5370,6 +5503,7 @@ def update_shared_non_admin_permissions(store, permissions, actor_id):
         return False
 
     store.save_non_admin_permissions(validated_permissions)
+    _invalidate_request_permission_read_cache("non_admin_permissions")
     for staff_type in store.list_custom_staff_types():
         if is_admin_or_super_admin_role(staff_type.get("name")):
             continue
@@ -6863,7 +6997,8 @@ def custom_staff_type_create():
 @require_role("super_admin")
 def custom_staff_type_edit(staff_type_id):
     store = get_user_store()
-    target = next((item for item in store.list_custom_staff_types() if str(item.get("id")) == str(staff_type_id)), None)
+    custom_types = store.list_custom_staff_types()
+    target = next((item for item in custom_types if str(item.get("id")) == str(staff_type_id)), None)
     if not target:
         message = "Staff type not found."
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
@@ -6886,7 +7021,7 @@ def custom_staff_type_edit(staff_type_id):
         flash(message, "error")
         return redirect(url_for("user_management_page"))
 
-    duplicate = next((item for item in store.list_custom_staff_types() if str(item.get("id")) != str(staff_type_id) and staff_type_names_match(item.get("name", ""), new_name)), None)
+    duplicate = next((item for item in custom_types if str(item.get("id")) != str(staff_type_id) and staff_type_names_match(item.get("name", ""), new_name)), None)
     if duplicate:
         message = "That staff type already exists."
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
@@ -7055,7 +7190,8 @@ def user_management_edit(user_id):
         flash(message, "error")
         return redirect(url_for("user_management_details", user_id=user_id))
 
-    supported_roles = {str(role).lower() for role in list_available_roles()}
+    custom_types = store.list_custom_staff_types()
+    supported_roles = {str(role).lower() for role in list_available_roles(custom_types)}
     if new_role.lower() not in supported_roles:
         message = "Please select a valid role for this user."
         if request.headers.get("X-Requested-With") == "XMLHttpRequest":
@@ -7084,7 +7220,6 @@ def user_management_edit(user_id):
         non_admin_permissions_update = sorted(set(requested_permissions))
 
     if new_custom_staff_type:
-        custom_types = store.list_custom_staff_types()
         if not any(staff_type_names_match(item.get("name", ""), new_custom_staff_type) for item in custom_types):
             message = "The selected custom staff type does not exist."
             if request.headers.get("X-Requested-With") == "XMLHttpRequest":
@@ -7107,14 +7242,11 @@ def user_management_edit(user_id):
         return redirect(url_for("user_management_details", user_id=user_id))
 
     if str(target.get("role", "")).lower() == "super_admin":
-        remaining_super_admins = [
-            user for user in store.list_users()
-            if str(user.get("id")) != str(user_id)
-            and str(user.get("role", "")).lower() == "super_admin"
-            and bool(user.get("is_active", True))
-        ]
         if new_role.lower() != "super_admin" or not new_is_active:
-            if not remaining_super_admins:
+            remaining_count = _active_super_admin_count(store) - int(
+                bool(target.get("is_active", True))
+            )
+            if remaining_count <= 0:
                 message = "At least one active Super Admin account must remain in the system."
                 if request.headers.get("X-Requested-With") == "XMLHttpRequest":
                     return jsonify({"success": False, "message": message}), 400
@@ -7245,7 +7377,11 @@ def user_management_toggle_status(user_id):
         flash("User not found.", "error")
         return redirect(url_for("user_management_page"))
 
-    if str(target.get("role", "")).lower() == "super_admin" and target.get("is_active") and len([u for u in get_user_store().list_users() if u.get("role") == "super_admin" and u.get("is_active")]) <= 1:
+    if (
+        str(target.get("role", "")).lower() == "super_admin"
+        and target.get("is_active")
+        and _active_super_admin_count(get_user_store()) <= 1
+    ):
         flash("The last active Super Admin account cannot be deactivated.", "error")
         return redirect(url_for("user_management_page"))
 
@@ -7320,24 +7456,11 @@ def user_management_delete_user(user_id):
         return redirect(url_for("user_management_page"))
 
     if str(target.get("role", "")).lower() == "super_admin":
-        remaining_super_admins = [
-            user for user in store.list_users()
-            if str(user.get("id")) != target_id
-            and str(user.get("role", "")).lower() == "super_admin"
-            and bool(user.get("is_active", True))
-        ]
-        if not remaining_super_admins:
+        remaining_count = _active_super_admin_count(store) - int(
+            bool(target.get("is_active", True))
+        )
+        if remaining_count <= 0:
             flash("At least one active Super Admin account must remain in the system.", "error")
-            return redirect(url_for("user_management_page"))
-
-    if target.get("is_active") and str(target.get("role", "")).lower() == "super_admin":
-        active_super_admins = [
-            user for user in store.list_users()
-            if str(user.get("role", "")).lower() == "super_admin"
-            and bool(user.get("is_active", True))
-        ]
-        if len(active_super_admins) <= 1:
-            flash("The last active Super Admin account cannot be deleted.", "error")
             return redirect(url_for("user_management_page"))
 
     destroyed_user = dict(target)
@@ -7371,8 +7494,9 @@ def user_management_details(user_id):
         return redirect(url_for("user_management_page"))
 
     custom_types = store.list_custom_staff_types()
+    roles = list_available_roles(custom_types)
     role_permissions = {}
-    for role_name in list_available_roles():
+    for role_name in roles:
         role_user = {
             "role": role_name,
             "custom_staff_type": "",
@@ -7399,7 +7523,7 @@ def user_management_details(user_id):
         "user_details.html",
         user=user,
         current_user=get_current_user(),
-        roles=list_available_roles(),
+        roles=roles,
         custom_types=custom_types,
         permission_groups=STAFF_PERMISSION_GROUPS,
         default_non_admin_permissions=get_non_admin_permissions(),

@@ -8,6 +8,7 @@ import { firebaseAuthReady, getFirebaseApp, getFirebaseFirestoreSdk } from "./fi
   const empty = document.getElementById("pinnedInstructionsEmpty");
   const status = document.getElementById("pinnedInstructionsStatus");
   const csrfToken = section.dataset.redBookCsrf || "";
+  const initialRevision = section.dataset.redBookRevision || null;
   let items;
   let pendingRevision = null;
   let revisionRefreshInFlight = false;
@@ -184,24 +185,32 @@ import { firebaseAuthReady, getFirebaseApp, getFirebaseFirestoreSdk } from "./fi
       let isInitialSnapshot = true;
       const unsubscribe = firestore.onSnapshot(
         firestore.doc(db, "sync_metadata", "red-book-items"),
+        { includeMetadataChanges: true },
         snapshot => {
-          const revision = isInitialSnapshot
-            ? { refresh_all: true, item_ids: [], deleted_ids: [] }
-            : snapshot.exists()
-              ? {
-                  refresh_all: snapshot.data().refresh_all === true,
-                  item_ids: snapshot.data().item_id && !snapshot.data().deleted ? [snapshot.data().item_id] : [],
-                  deleted_ids: snapshot.data().item_id && snapshot.data().deleted ? [snapshot.data().item_id] : []
-                }
-              : { refresh_all: true, item_ids: [], deleted_ids: [] };
-          isInitialSnapshot = false;
+          if (isInitialSnapshot) {
+            if (snapshot.metadata.fromCache) return;
+            isInitialSnapshot = false;
+            const currentRevision = snapshot.exists() ? snapshot.data().revision || null : null;
+            if (currentRevision !== initialRevision) {
+              void refreshPinnedItems({ refresh_all: true, item_ids: [], deleted_ids: [] });
+            }
+            return;
+          }
+          const revision = snapshot.exists()
+            ? {
+                refresh_all: snapshot.data().refresh_all === true,
+                item_ids: snapshot.data().item_id && !snapshot.data().deleted ? [snapshot.data().item_id] : [],
+                deleted_ids: snapshot.data().item_id && snapshot.data().deleted ? [snapshot.data().item_id] : []
+              }
+            : { refresh_all: true, item_ids: [], deleted_ids: [] };
           void refreshPinnedItems(revision);
         },
         error => {
-        console.error("Unable to subscribe to pinned Red Book instructions:", error?.code || error?.name);
-        showStatus("Pinned site instructions could not receive live updates.", "error");
-        void refreshPinnedItems({ refresh_all: true, item_ids: [], deleted_ids: [] });
-      });
+          console.error("Unable to subscribe to pinned Red Book instructions:", error?.code || error?.name);
+          showStatus("Pinned site instructions could not receive live updates.", "error");
+          void refreshPinnedItems({ refresh_all: true, item_ids: [], deleted_ids: [] });
+        }
+      );
       window.addEventListener("pagehide", unsubscribe, { once: true });
     } catch (error) {
       console.error("Unable to initialize pinned-instruction updates:", error?.stage || error?.code || error?.name);

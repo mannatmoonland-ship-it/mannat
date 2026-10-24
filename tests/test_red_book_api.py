@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from werkzeug.security import generate_password_hash
 
-from app import InMemoryFirestoreStore, app
+from app import FirebaseFirestoreStore, InMemoryFirestoreStore, app
 
 
 CSRF = "red-book-csrf-test-token"
@@ -325,6 +325,98 @@ def test_red_book_allows_multiple_pins_and_unpins_only_the_selected_item(red_boo
     assert {item["id"] for item in remaining} == set(item_ids) - {item_ids[1]}
 
 
+def test_pinned_endpoint_filters_and_preserves_order_and_dashboard_fields(red_book_client):
+    store, client = red_book_client
+    store.red_book_items.update({
+        "pinned-later": {
+            "text": "Later instruction.",
+            "sort_order": 4,
+            "pinned": True,
+            "pinned_at": "2026-10-24T12:00:00+00:00",
+            "image_url": "https://example.test/later.jpg",
+            "image_urls": ["https://example.test/later.jpg"],
+        },
+        "not-pinned": {
+            "text": "Unpinned instruction.",
+            "sort_order": 1,
+            "pinned": False,
+        },
+        "pinned-first": {
+            "text": "First instruction.",
+            "sort_order": 2,
+            "pinned": True,
+            "pinned_at": "2026-10-24T11:00:00+00:00",
+            "image_url": "",
+            "image_urls": [],
+        },
+    })
+
+    response = client.get("/api/red-book/pinned")
+
+    assert response.status_code == 200
+    items = response.get_json()["items"]
+    assert [item["id"] for item in items] == ["pinned-first", "pinned-later"]
+    assert items[0] == {
+        "id": "pinned-first",
+        "text": "First instruction.",
+        "image_url": "",
+        "image_urls": [],
+        "sort_order": 2,
+        "pinned_at": "2026-10-24T11:00:00+00:00",
+    }
+    assert items[1]["image_urls"] == ["https://example.test/later.jpg"]
+
+
+def test_firebase_pinned_items_query_filters_on_existing_boolean_field():
+    class Snapshot:
+        def __init__(self, item_id, data):
+            self.id = item_id
+            self.data = data
+
+        def to_dict(self):
+            return self.data
+
+    class Query:
+        def __init__(self, snapshots):
+            self.snapshots = snapshots
+            self.filter = None
+
+        def where(self, *, filter):
+            self.filter = filter
+            return self
+
+        def stream(self):
+            assert self.filter.field_path == "pinned"
+            assert self.filter.op_string == "=="
+            assert self.filter.value is True
+            return [
+                snapshot for snapshot in self.snapshots
+                if snapshot.data.get("pinned") is True
+            ]
+
+    class Collection:
+        def __init__(self, snapshots):
+            self.query = Query(snapshots)
+
+        def where(self, *, filter):
+            return self.query.where(filter=filter)
+
+    class Client:
+        def __init__(self):
+            self.collection_ref = Collection([
+                Snapshot("unpinned", {"text": "Unpinned", "sort_order": 0, "pinned": False}),
+                Snapshot("pinned", {"text": "Pinned", "sort_order": 1, "pinned": True}),
+            ])
+
+        def collection(self, name):
+            assert name == "red_book_items"
+            return self.collection_ref
+
+    store = FirebaseFirestoreStore(client=Client())
+
+    assert [item["id"] for item in store.list_pinned_red_book_items()] == ["pinned"]
+
+
 def test_red_book_read_only_user_can_pin_but_invalid_requests_are_rejected(red_book_client):
     store, client = red_book_client
     item_id = add_item(client, "A read-authorised user may pin this instruction.")
@@ -479,8 +571,8 @@ def test_red_book_order_is_saved_and_read_in_priority_order(red_book_client):
     assert [item["sort_order"] for item in items] == [0, 1, 2]
 
 
-def test_red_book_delete_renumbers_remaining_items(red_book_client):
-    _store, client = red_book_client
+def test_red_book_delete_archives_item_without_renumbering_remaining_items(red_book_client):
+    store, client = red_book_client
     first_id = add_item(client, "First instruction.")
     second_id = add_item(client, "Second instruction.")
     third_id = add_item(client, "Third instruction.")
@@ -490,7 +582,9 @@ def test_red_book_delete_renumbers_remaining_items(red_book_client):
     assert response.status_code == 200
     items = client.get("/api/red-book/items").get_json()["items"]
     assert [item["id"] for item in items] == [first_id, third_id]
-    assert [item["sort_order"] for item in items] == [0, 1]
+    assert [item["sort_order"] for item in items] == [0, 2]
+    assert second_id not in store.red_book_items
+    assert second_id in store.red_book_archive
 
 
 @pytest.mark.parametrize("text", ["", "   ", "one\tinstruction", "x" * 501, None, 12])
@@ -531,7 +625,7 @@ def test_red_book_requires_authentication_and_csrf(red_book_client):
     assert response.status_code == 403
 
 
-def test_operational_roles_can_manage_but_cannot_delete(red_book_client):
+def test_operational_roles_cannot_edit_or_delete_red_book_items(red_book_client):
     store, client = red_book_client
     set_role(store, client, "office_staff")
     page = client.get("/red-book")
@@ -544,10 +638,10 @@ def test_operational_roles_can_manage_but_cannot_delete(red_book_client):
     )
     deleted = client.delete(f"/api/red-book/items/{item_id}", headers=headers())
 
-    assert edited.status_code == 200
+    assert edited.status_code == 403
     assert deleted.status_code == 403
-    assert item_id in store.red_book_items
-    assert b'data-can-edit="true"' in page.data
+    assert store.red_book_items[item_id]["text"] == "Check reinforcement spacing before concreting."
+    assert b'data-can-edit="false"' in page.data
     assert b'data-can-delete="false"' in page.data
 
 
@@ -668,6 +762,12 @@ def test_context_menu_and_pinned_dashboard_assets_are_connected():
     assert "setInterval" not in red_book_js
     assert 'firestore.doc(db, "sync_metadata", "red-book-items")' in dashboard_js
     assert 'firestore.onSnapshot(' in dashboard_js
+    assert 'data-red-book-revision="{{ red_book_items_revision or \'\' }}"' in dashboard_template
+    assert "const initialRevision = section.dataset.redBookRevision || null;" in dashboard_js
+    assert "{ includeMetadataChanges: true }" in dashboard_js
+    assert "if (snapshot.metadata.fromCache) return;" in dashboard_js
+    assert "if (currentRevision !== initialRevision)" in dashboard_js
+    assert "const currentRevision = snapshot.exists() ? snapshot.data().revision || null : null;" in dashboard_js
     assert "setInterval" not in dashboard_js
     assert "Open Red Book" not in pinned_section
     assert "View in Red Book" not in dashboard_js

@@ -1336,6 +1336,16 @@ class InMemoryFirestoreStore:
                 [{"id": item_id, **item} for item_id, item in self.red_book_items.items()]
             )
 
+    def list_pinned_red_book_items(self):
+        with self._red_book_mutation_lock:
+            return _sort_red_book_items(
+                [
+                    {"id": item_id, **item}
+                    for item_id, item in self.red_book_items.items()
+                    if item.get("pinned") is True
+                ]
+            )
+
     def get_red_book_item(self, item_id):
         with self._red_book_mutation_lock:
             item = self.red_book_items.get(item_id)
@@ -2691,6 +2701,14 @@ class FirebaseFirestoreStore:
 
     def list_red_book_items(self):
         snapshots = self._collection("red_book_items").stream()
+        return _sort_red_book_items(
+            [{"id": snapshot.id, **(snapshot.to_dict() or {})} for snapshot in snapshots]
+        )
+
+    def list_pinned_red_book_items(self):
+        snapshots = self._collection("red_book_items").where(
+            filter=FieldFilter("pinned", "==", True)
+        ).stream()
         return _sort_red_book_items(
             [{"id": snapshot.id, **(snapshot.to_dict() or {})} for snapshot in snapshots]
         )
@@ -5890,9 +5908,11 @@ def dashboard():
         app.logger.error("Dashboard permissions failed (%s).", type(error).__name__)
         return "Unable to verify dashboard permissions.", 503
     pinned_site_instructions = []
+    red_book_items_revision = None
     red_book_csrf = ""
     if can_read_red_book:
         try:
+            red_book_items_revision = _red_book_items_revision()
             pinned_site_instructions = _pinned_red_book_items()
         except Exception as error:
             app.logger.error(
@@ -5909,6 +5929,7 @@ def dashboard():
         current_user=user,
         can_read_red_book=can_read_red_book,
         pinned_site_instructions=pinned_site_instructions,
+        red_book_items_revision=red_book_items_revision,
         red_book_csrf=red_book_csrf,
     ))
     response.headers["Cache-Control"] = "private, no-store"
@@ -8043,6 +8064,16 @@ def _sort_red_book_items(items):
 
 
 def _pinned_red_book_items():
+    store = get_user_store()
+    list_pinned_items = getattr(store, "list_pinned_red_book_items", None)
+    items = (
+        list_pinned_items()
+        if callable(list_pinned_items)
+        else [
+            item for item in store.list_red_book_items()
+            if item.get("pinned") is True
+        ]
+    )
     return [
         {
             "id": item.get("id"),
@@ -8052,9 +8083,19 @@ def _pinned_red_book_items():
             "sort_order": item.get("sort_order"),
             "pinned_at": item.get("pinned_at"),
         }
-        for item in get_user_store().list_red_book_items()
-        if item.get("pinned") is True
+        for item in items
     ]
+
+
+def _red_book_items_revision():
+    db = getattr(get_user_store(), "db", None)
+    if db is None:
+        return None
+    snapshot = db.collection("sync_metadata").document("red-book-items").get()
+    if not snapshot.exists:
+        return None
+    revision = (snapshot.to_dict() or {}).get("revision")
+    return revision if isinstance(revision, str) else None
 
 
 def _sort_red_book_snapshots(snapshots):
